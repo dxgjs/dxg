@@ -20,3 +20,16 @@ DECISIONS
 ✓ Domain-local types
 ✓ Minimal @dxgjs/core
 ✓ No god packages
+
+OPEN QUESTIONS
+→ Final package boundaries
+→ Dependency graph
+→ pnpm workspace strategy
+→ Turborepo vs alternatives
+→ Public vs internal packages
+→ Plugin architecture
+→ AI architecture
+→ Terminal architecture
+
+BLOCKERS
+None
