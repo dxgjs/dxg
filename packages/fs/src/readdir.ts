@@ -1,13 +1,14 @@
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 
-type ReaddirOptions = { encoding?: BufferEncoding | null };
+type SupportedEncoding = BufferEncoding | null;
+type ReaddirOptions = { encoding?: SupportedEncoding };
 
 export async function readdir(
   filePath: string,
   options?: ReaddirOptions
 ): Promise<string[]> {
-  const result = await fs.readdir(filePath, options as any);
+  const result = await fs.readdir(filePath, options);
   // We are returning string[] for simplicity, assuming withFileTypes is false.
   // If options.encoding === 'buffer', result will be Buffer[]; we need to convert to string[]?
   // For simplicity, we only support utf8 or null encoding returning string.
@@ -25,7 +26,7 @@ export function readdirSync(
   filePath: string,
   options?: ReaddirOptions
 ): string[] {
-  const result = fsSync.readdirSync(filePath, options as any);
+  const result = fsSync.readdirSync(filePath, options);
   if (typeof result[0] === 'string') {
     return result as string[];
   }

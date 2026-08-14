@@ -9,8 +9,8 @@ export const reactComponentGenerator: Generator = {
       type: 'input',
       name: 'componentName',
       message: 'What should the component be called?',
-      validate: (input: string) => {
-        if (!input || input.trim() === '') {
+      validate: (input: unknown) => {
+        if (typeof input !== 'string' || !input || input.trim() === '') {
           return 'Component name is required';
         }
         return true;

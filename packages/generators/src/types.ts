@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Logger } from "@dxgjs/logger";
 import { readFile, stat, writeFile, readdir } from "@dxgjs/fs";
 
@@ -18,12 +17,12 @@ export interface GeneratorPrompt {
   message: string;
   default?: string | (() => string);
   choices?: Array<{ name: string; value: string }>;
-  validate?: (input: any) => boolean | string;
+  validate?: (input: unknown) => boolean | string;
 }
 
 export interface Generator {
   name: string;
   description: string;
   prompts: GeneratorPrompt[];
-  run(answers: Record<string, any>, context: GeneratorContext): Promise<void>;
+  run(answers: Record<string, unknown>, context: GeneratorContext): Promise<void>;
 }

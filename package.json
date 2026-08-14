@@ -4,6 +4,7 @@
   "private": true,
   "description": "DXG monorepo",
   "packageManager": "pnpm@11.18.0",
+  "type": "module",
   "scripts": {
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",

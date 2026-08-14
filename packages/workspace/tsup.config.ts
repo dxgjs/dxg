@@ -4,6 +4,6 @@ export default {
   sourcemap: true,
   clean: true,
   dts: true,
-  format: ["esm", "cjs"],
-  tsBuildInfoFile: ".tsbuildinfo"
+  format: ["esm"],
+  tsBuildInfoFile: ".tsbuildinfo",
 };
