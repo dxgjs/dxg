@@ -1,5 +1,6 @@
-import { Logger } from '@dxgjs/logger';
-import { readFile, stat, writeFile, readdir } from '@dxgjs/fs';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { Logger } from "@dxgjs/logger";
+import { readFile, stat, writeFile, readdir } from "@dxgjs/fs";
 
 export interface GeneratorContext {
   logger: Logger;
@@ -12,7 +13,7 @@ export interface GeneratorContext {
 }
 
 export interface GeneratorPrompt {
-  type: 'input' | 'confirm' | 'select';
+  type: "input" | "confirm" | "select";
   name: string;
   message: string;
   default?: string | (() => string);
