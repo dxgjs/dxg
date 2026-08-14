@@ -9,3 +9,21 @@ export { writeFile, writeFileSync };
 export { readdir, readdirSync };
 export { stat, statSync };
 export { sep, join, dirname, relative, resolve };
+
+export async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await stat(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function pathExistsSync(filePath: string): boolean {
+  try {
+    statSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}

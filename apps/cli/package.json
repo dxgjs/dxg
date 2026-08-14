@@ -21,7 +21,8 @@
     "@dxgjs/prompts": "workspace:*",
     "@dxgjs/templates": "workspace:*",
     "@dxgjs/terminal": "workspace:*",
-    "@dxgjs/workspace": "workspace:*"
+    "@dxgjs/workspace": "workspace:*",
+    "commander": "^15.0.0"
   },
   "devDependencies": {
     "@dxgjs/eslint-config": "workspace:*",

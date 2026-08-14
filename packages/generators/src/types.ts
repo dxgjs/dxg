@@ -8,6 +8,10 @@ export interface GeneratorContext {
     writeFile: typeof writeFile;
     stat: typeof stat;
     readdir: typeof readdir;
+    pathExists: (filePath: string) => Promise<boolean>;
+  };
+  templates: {
+    render: (template: string, data: Record<string, unknown>) => string;
   };
 }
 

@@ -1,20 +1,63 @@
-import { Logger } from '@dxgjs/logger';
+import { Command } from "commander";
+import { detectWorkspace } from "@dxgjs/workspace";
+import { loadConfig } from "@dxgjs/config";
+import { prompt } from "@dxgjs/prompts";
+import { initGenerator } from "@dxgjs/generators";
+import { Logger } from "@dxgjs/logger";
+import { join } from "path";
+import { readFile, writeFile, pathExists } from "@dxgjs/fs";
 
-// Initialize logger
-const logger = new Logger({ minLevel: 'info' });
+const program = new Command();
 
-// Simple CLI entry point
-async function main() {
-  logger.info('Welcome to DXG CLI!');
-  logger.info('Version: 0.0.0');
-  logger.info('Run `dxg --help` for available commands.');
-}
+program
+  .name("dxg")
+  .description("DXG CLI – Phase 2")
+  .version("0.0.0", "-v, --version")
+  .argument(
+    "[directory]",
+    "répertoire cible (défaut : répertoire courant)",
+    ".",
+  )
+  .action(async (targetDirRaw) => {
+    try {
+      const targetDir = join(process.cwd(), targetDirRaw);
 
-// Execute main and handle errors
-main().catch((error) => {
-  logger.error(`CLI error: ${error instanceof Error ? error.message : String(error)}`);
-  process.exit(1);
-});
+      // 1��️��⃣ Détection de l'espace de travail (peut échouer ; on continue)
+      try {
+        await detectWorkspace(targetDir);
+      } catch (_) {
+        // Aucun espace de travail trouvé, on continue quand même
+      }
 
-// Export empty object to satisfy esbuild if needed
-export {};
+      // 2��️��⃣ Chargement de la configuration (peut retourner des valeurs par défaut)
+      const config = await loadConfig(targetDir);
+
+      // 3��️��⃣ Collecte des réponses via l'abstraction de prompts
+      const answers = await prompt(initGenerator.prompts);
+      // Fusion éventuelle avec les valeurs de config (ex. nom du projet)
+      const finalAnswers = {
+        name: answers.name || config.name,
+        description: answers.description,
+      };
+
+      // 4��️��⃣ Préparer le contexte pour le générateur
+      const logger = new Logger({ minLevel: "info" });
+      // Provide stat and readdir functions (not used by init generator but required by type)
+      const { stat, readdir } = await import("@dxgjs/fs");
+      const context = {
+        logger,
+        fs: { readFile, writeFile, pathExists, stat, readdir },
+        templates: { render: (await import("@dxgjs/templates")).render },
+      };
+
+      // 5��️��⃣ Exécuter le générateur (qui executera validate → plan → execute → verify → summarize)
+      await initGenerator.run(finalAnswers, context as any);
+
+      // Sortie naturelle (code 0)
+    } catch (err) {
+      console.error(`��❌ ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
+  });
+
+program.parse();

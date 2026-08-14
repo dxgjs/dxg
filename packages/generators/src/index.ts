@@ -1,7 +1,7 @@
-// Example generator: creates a basic React component
-import { Generator } from './types';
+import type { GeneratorContext } from "./types";
 
-export const reactComponentGenerator: Generator = {
+// Re-define the example generator here (copy from memory)
+const reactComponentGenerator = {
   name: 'react-component',
   description: 'Generate a basic React component',
   prompts: [
@@ -23,7 +23,7 @@ export const reactComponentGenerator: Generator = {
       default: 'components'
     }
   ],
-  async run(answers, context) {
+  async run(answers: Record<string, unknown>, context: GeneratorContext) {
     const { componentName, componentPath } = answers;
     const { logger, fs } = context;
 
@@ -32,7 +32,6 @@ export const reactComponentGenerator: Generator = {
     const componentFilePath = `${componentDir}/${componentFileName}`;
     const indexFilePath = `${componentDir}/index.ts`;
 
-    // Generate component content
     const componentContent = `import React from 'react';
 
 interface ${componentName}Props {
@@ -50,15 +49,12 @@ const ${componentName}: React.FC<${componentName}Props> = ({}) => {
 export default ${componentName};
 `;
 
-    const indexContent = `export { default } from './${componentName}';
-`;
+    const indexContent = `export { default } from './${componentName}';`;
 
     try {
-      // Write component file
       await fs.writeFile(componentFilePath, componentContent, { encoding: 'utf8' });
       logger.info(`Created ${componentFilePath}`);
 
-      // Write index file
       await fs.writeFile(indexFilePath, indexContent, { encoding: 'utf8' });
       logger.info(`Created ${indexFilePath}`);
 
@@ -70,8 +66,10 @@ export default ${componentName};
   }
 };
 
-// Export types
-export type { Generator, GeneratorContext, GeneratorPrompt } from './types';
+// Import the init generator we just created
+import initGenerator from './generators/init';
 
-// Default export for convenience
+export { initGenerator, reactComponentGenerator };
+
+// Default export for convenience (keep existing behavior)
 export default reactComponentGenerator;

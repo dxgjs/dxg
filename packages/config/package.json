@@ -21,7 +21,8 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@dxgjs/fs": "workspace:*"
+    "@dxgjs/fs": "workspace:*",
+    "@dxgjs/logger": "workspace:*"
   },
   "devDependencies": {
     "@dxgjs/eslint-config": "workspace:*",

@@ -21,7 +21,9 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@dxgjs/terminal": "workspace:*"
+    "@clack/prompts": "^1.7.0",
+    "@dxgjs/terminal": "workspace:*",
+    "@dxgjs/logger": "workspace:*"
   },
   "devDependencies": {
     "@dxgjs/eslint-config": "workspace:*",
