@@ -8,25 +8,25 @@ DXG/
 │   ├── studio/           # Interface graphique légère (optionnelle, futur)
 │   └── playground/       # Bac à sable pour tester les générateurs/plugins
 ├── packages/
-│   ├── @dxg/terminal     # Framework de rendu terminal premium
-│   ├── @dxg/logger       # Système de logging structuré & configurable
-│   ├── @dxg/workspace    # Détection & manipulation de workspace
-│   ├── @dxg/git          # Abstraction Git (commands, parsing)
-│   ├── @dxg/fs           # Couche d’abstraction système de fichiers
-│   ├── @dxg/config       # Chargement, validation, merge de configurations
-│   ├── @dxg/validation   # Schémas de validation (Zod‑like) et helpers
-│   ├── @dxg/package-manager  # Interface unifiée npm/yarn/pnpm/bun
-│   ├── @dxg/node         # Utilitaires spécifiques à Node (versionning, engines)
-│   ├── @dxg/json         # Manipulation avancée de JSON
-│   ├── @dxg/env          # Gestion des variables d’environnement
-│   ├── @dxg/core         # Kernel léger : DI container, event bus
-│   ├── @dxg/ai           # Orchestration IA (providers, agents, planner, cache)
-│   ├── @dxg/templates    # Moteur de templates (ejs/liquid‑like)
-│   ├── @dxg/generators   # Scaffolding basé sur les templates + prompts
-│   ├── @dxg/updater      # Vérification de mise à jour, téléchargement de binaires
-│   ├── @dxg/plugins      # Système de plugins (découverte, chargement, hooks)
-│   ├── @dxg/prompts      # Bibliothèque de prompts interactifs
-│   └── @dxg/telemetry    # Collecte de données d’usage (opt‑in)
+│   ├── @dxgjs/terminal     # Framework de rendu terminal premium
+│   ├── @dxgjs/logger       # Système de logging structuré & configurable
+│   ├── @dxgjs/workspace    # Détection & manipulation de workspace
+│   ├── @dxgjs/git          # Abstraction Git (commands, parsing)
+│   ├── @dxgjs/fs           # Couche d’abstraction système de fichiers
+│   ├── @dxgjs/config       # Chargement, validation, merge de configurations
+│   ├── @dxgjs/validation   # Schémas de validation (Zod‑like) et helpers
+│   ├── @dxgjs/package-manager  # Interface unifiée npm/yarn/pnpm/bun
+│   ├── @dxgjs/node         # Utilitaires spécifiques à Node (versionning, engines)
+│   ├── @dxgjs/json         # Manipulation avancée de JSON
+│   ├── @dxgjs/env          # Gestion des variables d’environnement
+│   ├── @dxgjs/core         # Kernel léger : DI container, event bus
+│   ├── @dxgjs/ai           # Orchestration IA (providers, agents, planner, cache)
+│   ├── @dxgjs/templates    # Moteur de templates (ejs/liquid‑like)
+│   ├── @dxgjs/generators   # Scaffolding basé sur les templates + prompts
+│   ├── @dxgjs/updater      # Vérification de mise à jour, téléchargement de binaires
+│   ├── @dxgjs/plugins      # Système de plugins (découverte, chargement, hooks)
+│   ├── @dxgjs/prompts      # Bibliothèque de prompts interactifs
+│   └── @dxgjs/telemetry    # Collecte de données d’usage (opt‑in)
 ├── tooling/
 │   ├── scripts/          # Scripts d’automatisation (release, changelog)
 │   ├── configs/          # Configurations partagées (eslint, prettier, tsconfig, jest)
@@ -40,7 +40,7 @@ DXG/
 ├── .github/              # Workflows CI/CD, modèles d’issue/PR
 ├── README.md
 ├── pnpm-workspace.yaml   # Définition du workspace
-�└── package.json          # Racine du monorepo (scripts globaux, version)
+└── package.json          # Racine du monorepo (scripts globaux, version)
 ```
 
 ## Explication des dossiers

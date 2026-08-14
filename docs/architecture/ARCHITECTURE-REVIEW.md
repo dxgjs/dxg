@@ -40,7 +40,7 @@ A deeper review considered whether each package was truly required for a usable 
 
 ## 3. Final Phase 1 Decision
 
-### �� 📦 PUBLIC PACKAGES (to be published under `@dxgjs`)
+###  📦 PUBLIC PACKAGES (to be published under `@dxgjs`)
 
 | Package | Reason for Inclusion (Phase 1) |
 |---------|--------------------------------|
@@ -53,7 +53,7 @@ A deeper review considered whether each package was truly required for a usable 
 | **@dxgjs/generators** | Core scaffotting feature: orchestrates prompts, template rendering, and file writing. Commands like `dxg generate component` rely on this package. |
 | **@dxgjs/prompts** | Interactive prompt library (input, confirm, select, autocomplete, password) used by generators to collect user data. Provides DXG‑specific theming, validation hooks, and masking; not just a thin wrapper over existing libraries. |
 
-### �� 📦 INTERNAL MODULES (NOT published as npm packages)
+###  📦 INTERNAL MODULES (NOT published as npm packages)
 
 | Module | Reason |
 |--------|--------|
@@ -62,7 +62,7 @@ A deeper review considered whether each package was truly required for a usable 
 | **env** | Loading `.env` files with masking is handled directly within `@dxgjs/config` (as one configuration source) or via a direct dotenv call; no separate package needed. |
 | **core** | For Phase 1 a DI container or event bus is not required. Packages collaborate via explicit function arguments or direct imports (e.g., `import { logger } from '@dxgjs/logger'`). Core will be introduced only if a concrete decoupling or plugin‑service need arises. |
 
-### �� 📦 FUTURE PACKAGES (valid boundaries, deferred to later phases)
+###  📦 FUTURE PACKAGES (valid boundaries, deferred to later phases)
 
 | Package | Deferral Reason |
 |---------|-----------------|

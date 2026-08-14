@@ -1,0 +1,19 @@
+{
+  "name": "@dxgjs/eslint-config",
+  "version": "0.0.0",
+  "private": true,
+  "main": "index.mjs",
+  "export": {
+    ".": "./index.mjs"
+  },
+  "dependencies": {
+    "@eslint/js": "^10.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.67.0",
+    "@typescript-eslint/parser": "^8.67.0",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-only-warn": "^1.0.0",
+    "eslint-plugin-turbo": "^2.0.0",
+    "typescript-eslint": "^8.67.0"
+  }
+}

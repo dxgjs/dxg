@@ -1,0 +1,9 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+  - "tooling/*"
+allowBuilds:
+  esbuild: true
+
+# allowBuilds:
+#   esbuild: set this to true or false

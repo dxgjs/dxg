@@ -1,0 +1,30 @@
+{
+  "name": "@dxgjs/generators",
+  "version": "0.0.0",
+  "description": "Generator system for DXG",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@dxgjs/fs": "workspace:*",
+    "@dxgjs/logger": "workspace:*",
+    "@dxgjs/prompts": "workspace:*",
+    "@dxgjs/templates": "workspace:*"
+  },
+  "devDependencies": {
+    "@dxgjs/eslint-config": "workspace:*",
+    "@dxgjs/typescript-config": "workspace:*"
+  }
+}

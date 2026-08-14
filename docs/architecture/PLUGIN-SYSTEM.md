@@ -145,7 +145,7 @@ my-dxg-plugin/
 │   └── index.ts          // point d’entrée qui enregistre les extensions
 ├── templates/            // fichiers de template utilisés par les generators du plugin
 │   └── component.hbs
-�└── README.md
+└── README.md
 ```
 
 `src/index.ts` pourrait contenir :

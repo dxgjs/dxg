@@ -1,0 +1,30 @@
+{
+  "name": "@dxgjs/cli",
+  "version": "0.0.0",
+  "description": "DXG command-line interface",
+  "bin": {
+    "dxg": "./dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@dxgjs/terminal": "workspace:*",
+    "@dxgjs/logger": "workspace:*",
+    "@dxgjs/workspace": "workspace:*",
+    "@dxgjs/fs": "workspace:*",
+    "@dxgjs/config": "workspace:*",
+    "@dxgjs/templates": "workspace:*",
+    "@dxgjs/generators": "workspace:*",
+    "@dxgjs/prompts": "workspace:*"
+  },
+  "devDependencies": {
+    "@dxgjs/eslint-config": "workspace:*",
+    "@dxgjs/typescript-config": "workspace:*"
+  }
+}
