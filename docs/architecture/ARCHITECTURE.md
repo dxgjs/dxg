@@ -1,53 +1,52 @@
-# Architecture DXG
+# DXG Architecture
 
 ## Vision
-DXG est un écosystème complet d'outils pour développeurs, conçu pour être modulaire, extensible et adapté aux besoins des équipes modernes. Il s'inspire de projets telles que Angular CLI, Nx, Turborepo, Biome, Bun, Tailwind CSS, Prisma, Vite et Expo, en offrant une expérience cohérente depuis l'initialisation du projet jusqu'au déploiement, en passant par la génération de code, la gestion de la configuration, l'intégration d'IA et bien plus encore.
+DXG is a complete ecosystem of developer tools, designed to be modular, extensible, and adapted to the needs of modern teams. It draws inspiration from projects such as Angular CLI, Nx, Turborepo, Biome, Bun, Tailwind CSS, Prisma, Vite, and Expo, offering a consistent experience from project initialization to deployment, including code generation, configuration management, AI integration, and much more.
 
-## Principes architecturaux
-1. **Responsabilité unique** : Chaque package possède une seule raison d'être.
-2. **Pas de "god packages"** : Éviter les paquets fourre-tout qui deviennent difficiles à maintenir.
-3. **Frontières claires** : Les dépendances suivent une direction hiérarchique (de haut niveau vers bas niveau) sans cycles.
-4. **Extensibilité par plugin** : Un système de plugin permet d'ajouter des fonctionnalités sans toucher au core.
-5. **Orchestration IA** : L'intelligence artificielle est traitée comme une couche d'orchestration supportant plusieurs fournisseurs.
-6. **Terminal premium** : Le rendu terminal est séparé de la logique métier pour offrir une expérience riche et testable.
-7. **Versionnage indépendant** : Chaque package est versionné séparément selon SemVer.
-8. **Open‑source friendly** : Conçu pour accueillir des contributions externes facilement.
+## Architectural Principles
+1. **Single Responsibility**: Each package has only one reason to exist.
+2. **No "God Packages"**: Avoid monolithic packages that become difficult to maintain.
+3. **Clear Boundaries**: Dependencies follow a hierarchical direction (high-level to low-level) without cycles.
+4. **Extensibility via Plugins**: A plugin system allows adding functionality without touching the core.
+5. **AI Orchestration**: Artificial intelligence is treated as an orchestration layer supporting multiple providers.
+6. **Premium Terminal**: Terminal rendering is separated from business logic to provide a rich, testable experience.
+7. **Independent Versioning**: Each package is versioned separately according to SemVer.
+8. **Open‑source Friendly**: Designed to easily accept external contributions.
 
-## Limites du système
-- **DXG Ecosystem** : L'ensemble constitué de tous les packages, du CLI, des outils, de la documentation et des exemples.
-- **DXG CLI** : Une application spécifique au sein de l'écosystème, fournissant l'interface en ligne de commande principale.
-Les frontières sont définies de telle sorte que le CLI dépend des packages de l'écosystème, mais l'inverse n'est pas vrai.
+## System Limits
+- **DXG Ecosystem**: The entirety consisting of all packages, the CLI, tools, documentation, and examples.
+- **DXG CLI**: A specific application within the ecosystem, providing the main command-line interface.
+The boundaries are defined such that the CLI depends on the ecosystem packages, but the reverse is not true.
 
-## Couches principales
-1. **Couche d'orchestration** : CLI, générateurs, intelligence artificielle.
-2. **Couche d'infrastructure** : Système de fichiers, travail sur les dépôts (git), gestion des gestionnaires de paquets, variables d'environnement, configuration.
-3. **Couche de traitement** : Validation, journalisation, types.
-4. **Couche de présentation** : Terminal, prompts interactifs.
-5. **Couche d'extension** : Système de plugins, registre de templates.
+## Main Layers
+1. **Orchestration Layer**: CLI, generators, artificial intelligence.
+2. **Infrastructure Layer**: File system, repository work (git), package manager management, environment variables, configuration.
+3. **Processing Layer**: Validation, logging, types.
+4. **Presentation Layer**: Terminal, interactive prompts.
+5. **Extension Layer**: Plugin system, template registry.
 
-## Philosophie des paquets
-Chaque paquet résout un problème bien défini. Par exemple :
-- `@dxgjs/terminal` ne fait que le rendu et la gestion de l'interface terminale.
-- `@dxgjs/logger` ne fait que la journalisation structurée.
-- `@dxgjs/core` fournit uniquement un conteneur d'injection de dépendances et un bus d'événements minimal.
-Cette approche évite la création de paquets à responsabilités multiples et facilite le remplacement ou la mise à jour de composants individuels.
+## Package Philosophy
+Each package solves a well-defined problem. For example:
+- `@dxgjs/terminal` only handles terminal rendering and interface management.
+- `@dxgjs/logger` only handles structured logging.
+- `@dxgjs/core` provides only a dependency injection container and a minimal event bus.
+This approach avoids creating multi-responsibility packages and facilitates replacement or updating of individual components.
 
-## Philosophie des dépendances
-- Les dépendances vont du spécifique vers le générique (ex. CLI → workspace → fs).
-- Aucun paquet de bas niveau ne dépend d'un paquet de haut niveau (ex. fs ne dépend pas de CLI).
-- Le paquet core reste minimal : il ne dépend que du logger (pour ses propres traces) et du validation (pour valider les options d'injection).
-- Les cycles sont interdits et seront détectés lors de l'intégration continue.
+## Dependencies Philosophy
+- Dependencies flow from specific to generic (e.g., CLI → workspace → fs).
+- No low-level package depends on a high-level package (e.g., fs does not depend on CLI).
+- The core package remains minimal: it depends only on the logger (for its own traces) and on validation (for validating injection options).
+- Cycles are forbidden and will be detected during continuous integration.
 
-## Stratégie d'extensibilité
-L'extensibilité se fait principalement par le système de plugins. Les plugins peuvent enregistrer :
-- De nouvelles commandes CLI
-- De nouveaux générateurs
-- Des modèles de templates
-- Des hooks de cycle de vie
-- Des fournisseurs d'IA
-- Des extensions du terminal (panels, composants)
-Les plugins sont chargés dans un environnement sandboxé pour garantir la sécurité.
+## Extensibility Strategy
+Extensibility is primarily achieved through the plugin system. Plugins can register:
+- New CLI commands
+- New generators
+- Template models
+- Lifecycle hooks
+- AI providers
+- Terminal extensions (panels, components)
+Plugins are loaded in a sandboxed environment to ensure security.
 
-## Évolution à long terme
-L'écosystème est conçu pour accueillir de nouvelles catégories de fonctionnalités (ex. services cloud, outils de test intégrés, pipelines CI/CD) sans modifier les fondations. Chaque nouveau domaine peut être introduit sous la forme d'un ou plusieurs paquets, éventuellement accompagné d'un plugin d'exemple. Le versionnage indépendant permet de corriger des bogues ou d'ajouter des fonctionnalités dans un paquet sans forcer la mise à jour de l'ensemble.
-
+## Long‑Term Evolution
+The ecosystem is designed to accommodate new feature categories (e.g., cloud services, integrated testing tools, CI/CD pipelines) without altering the foundations. Each new domain can be introduced as one or more packages, possibly accompanied by an example plugin. Independent versioning allows fixing bugs or adding features in a package without forcing an update of the entire ecosystem.

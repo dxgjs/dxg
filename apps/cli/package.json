@@ -2,16 +2,16 @@
   "name": "@dxgjs/cli",
   "version": "0.0.0",
   "description": "DXG command-line interface",
+  "type": "module",
   "bin": {
     "dxg": "./dist/index.js"
   },
-  "type": "module",
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint ."
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@dxgjs/config": "workspace:*",

@@ -1,88 +1,88 @@
-# Graphe de dépendances DXG
+# DXG Dependency Graph
 
-## Vue d'ensemble
-Le graphe de dépendances du monorepo DXG est conçu pour être **acyclique** et **stratifié** : les dépendances vont des paquets de haut niveau (qui orchestrent ou présentent) vers les paquets de bas niveau (qui fournissent des primitives faibles couplage). Aucun paquet de bas niveau ne dépend d'un paquet de haut niveau, évitant ainsi les dépendances circulaires et les couplages indésirables.
+## Overview
+The DXG monorepo dependency graph is designed to be **acyclic** and **layered**: dependencies flow from high-level packages (which orchestrate or present) to low-level packages (which provide low-coupling primitives). No low-level package depends on a high-level package, thus avoiding circular dependencies and unwanted coupling.
 
-## Couches (du bas vers le haut)
+## Layers (from bottom to top)
 
-### Couche 1 – Fondamentaux (aucune dépendance interne ou seulement vers le logging/validation pour leurs propres opérations)
-- `@dxgjs/fs` – Système de fichiers portable
-- `@dxgjs/json` – Manipulation avancée de JSON
-- `@dxgjs/env` – Chargement des variables d’environnement
-- `@dxgjs/validation` – Schémas de validation
-- `@dxgjs/logger` – Journalisation structurée (peut dépendre de `@dxgjs/validation` pour valider ses options, mais généralement pas de dépendance interne)
-> Remarque : ces paquets sont fondamentalement indépendants ; ils peuvent s’appuyer les uns sur les autres si le besoin est justifié (ex. `@dxgjs/env` utilise `@dxgjs/fs` pour lire les fichiers `.env`), mais aucune dépendance ne crée de cycle.
+### Layer 1 – Fundamentals (no internal dependency or only towards logging/validation for their own operations)
+- `@dxgjs/fs` – Portable file system
+- `@dxgjs/json` – Advanced JSON manipulation
+- `@dxgjs/env` – Loading environment variables
+- `@dxgjs/validation` – Validation schemas
+- `@dxgjs/logger` – Structured logging (may depend on `@dxgjs/validation` to validate its options, but generally no internal dependency)
+> Note: these packages are fundamentally independent; they may depend on each other if the need is justified (e.g., `@dxgjs/env` uses `@dxgjs/fs` to read `.env` files), but no dependency creates a cycle.
 
-### Couche 2 – Infrastructures (s’appuie sur la couche 1)
-- `@dxgjs/package-manager` – Interface unifiée npm/Yarn/pnpm/Bun → dépend de `@dxgjs/fs`, `@dxgjs/env`, `@dxgjs/validation`, `@dxgjs/logger`
-- `@dxgjs/node` – Utilitaires Node/Bun/Deno → dépend de `@dxgjs/fs`, `@dxgjs/env`, `@dxgjs/validation`, `@dxgjs/logger`
-- `@dxgjs/git` – Abstraction Git → dépend de `@dxgjs/fs`, `@dxgjs/validation`, `@dxgjs/logger`
-- `@dxgjs/config` – Chargement/merge/validation de configuration → dépend de `@dxgjs/fs`, `@dxgjs/env`, `@dxgjs/validation`, `@dxgjs/json`, `@dxgjs/logger`
-- `@dxgjs/workspace` – Détection de workspace → dépend de `@dxgjs/fs`, `@dxgjs/json`, `@dxgjs/validation`, `@dxgjs/logger`
+### Layer 2 – Infrastructures (relies on Layer 1)
+- `@dxgjs/package-manager` – Unified npm/Yarn/pnpm/Bun interface → depends on `@dxgjs/fs`, `@dxgjs/env`, `@dxgjs/validation`, `@dxgjs/logger`
+- `@dxgjs/node` – Node/Bun/Deno utilities → depends on `@dxgjs/fs`, `@dxgjs/env`, `@dxgjs/validation`, `@dxgjs/logger`
+- `@dxgjs/git` – Git abstraction → depends on `@dxgjs/fs`, `@dxgjs/validation`, `@dxgjs/logger`
+- `@dxgjs/config` – Configuration loading/merging/validation → depends on `@dxgjs/fs`, `@dxgjs/env`, `@dxgjs/validation`, `@dxgjs/json`, `@dxgjs/logger`
+- `@dxgjs/workspace` – Workspace detection → depends on `@dxgjs/fs`, `@dxgjs/json`, `@dxgjs/validation`, `@dxgjs/logger`
 
-### Couche 3 – Core et services partagés
-- `@dxgjs/core` – DI container + event bus → dépend de `@dxgjs/logger` (pour ses propres traces) et `@dxgjs/validation` (pour valider les enregistrements DI et les schémas d’événement)
-> Le core ne dépend **pas** des paquets d’infrastructure ou de haut niveau ; il reste une fondation neutre.
+### Layer 3 – Core and shared services
+- `@dxgjs/core` – DI container + event bus → depends on `@dxgjs/logger` (for its own traces) and `@dxgjs/validation` (to validate DI registrations and event schemas)
+> The core does **not** depend on infrastructure or high-level packages; it remains a neutral foundation.
 
-### Couche 4 – Présentation et interaction
-- `@dxgjs/terminal` – Rendu terminal premium → dépend de `@dxgjs/logger` (pour logger les événements de rendu) et `@dxgjs/core` (optionnel, pour accéder à des services via DI si nécessaire)
-- `@dxgjs/prompts` – Prompts interactifs → dépend de `@dxgjs/terminal` (pour l’affichage et la capture d’entrée), `@dxgjs/validation` (pour valider les réponses si un schéma est fourni), `@dxgjs/logger` (optionnel)
-> Remarque : `@dxgjs/prompts` dépend de `@dxgjs/terminal` mais **pas** l’inverse – le terminal ne connaît pas les prompts, préservant la séparation des préoccupations.
+### Layer 4 – Presentation and interaction
+- `@dxgjs/terminal` – Premium terminal rendering → depends on `@dxgjs/logger` (to log rendering events) and `@dxgjs/core` (optional, to access services via DI if needed)
+- `@dxgjs/prompts` – Interactive prompts → depends on `@dxgjs/terminal` (for display and input capture), `@dxgjs/validation` (to validate responses if a schema is provided), `@dxgjs/logger` (optional)
+> Note: `@dxgjs/prompts` depends on `@dxgjs/terminal` but **not** the reverse – the terminal does not know about prompts, preserving separation of concerns.
 
-### Couche 5 – Orchestration et génération
-- `@dxgjs/templates` – Moteur de templates → dépend de `@dxgjs/fs` (chargement de fichiers de template), `@dxgjs/validation` (validation des données si schéma), `@dxgjs/logger` (optionnel)
-- `@dxgjs/generators` – Scaffolding guidé → dépend de `@dxgjs/prompts` (collecte réponses), `@dxgjs/templates` (rendu), `@dxgjs/fs` (écriture fichiers), `@dxgjs/logger`, `@dxgjs/validation`, **optionnellement** `@dxgjs/ai` (pour génération assistée ou révision)
-- `@dxgjs/ai` – Orchestration IA → dépend de `@dxgjs/core` (DI/event bus), `@dxgjs/config` (clés API, modèles), `@dxgjs/validation` (schémas de prompts/variables), `@dxgjs/logger`, `@dxgjs/fs` (lecture contexte), `@dxgjs/json` (manipulation JSON de contexte)
-- `@dxgjs/updater` – Vérification de mises à jour → dépend de `@dxgjs/fs`, `@dxgjs/logger`, `@dxgjs/validation`, `@dxgjs/json`
+### Layer 5 – Orchestration and generation
+- `@dxgjs/templates` – Template engine → depends on `@dxgjs/fs` (loading template files), `@dxgjs/validation` (data validation if schema), `@dxgjs/logger` (optional)
+- `@dxgjs/generators` – Guided scaffolding → depends on `@dxgjs/prompts` (collecting responses), `@dxgjs/templates` (rendering), `@dxgjs/fs` (writing files), `@dxgjs/logger`, `@dxgjs/validation`, **optionally** `@dxgjs/ai` (for AI-assisted generation or revision)
+- `@dxgjs/ai` – AI orchestration → depends on `@dxgjs/core` (DI/event bus), `@dxgjs/config` (API keys, models), `@dxgjs/validation` (prompt/variable schemas), `@dxgjs/logger`, `@dxgjs/fs` (reading context), `@dxgjs/json` (JSON manipulation of context)
+- `@dxgjs/updater` – Update checking → depends on `@dxgjs/fs`, `@dxgjs/logger`, `@dxgjs/validation`, `@dxgjs/json`
 
-### Couche 6 – Extensibilité
-- `@dxgjs/plugins` – Système de plugins → dépend de `@dxgjs/core` (DI/event bus pour fournir des services aux plugins), `@dxgjs/logger`, `@dxgjs/validation` (validation du manifeste), `@dxgjs/fs` (chargement du paquet plugin depuis le disque si nécessaire)
-> Les plugins eux‑mêmes peuvent déclarer des dépendances vers n’importe quel paquet DXG (ex. un plugin qui ajoute un generator dépendra de `@dxgjs/generators`), mais cela reste dans leurs propres `package.json` et n’affecte pas le graphe du monorepo de base.
+### Layer 6 – Extensibility
+- `@dxgjs/plugins` – Plugin system → depends on `@dxgjs/core` (DI/event bus to provide services to plugins), `@dxgjs/logger`, `@dxgjs/validation` (manifest validation), `@dxgjs/fs` (loading plugin package from disk if necessary)
+> Plugins themselves may declare dependencies towards any DXG package (e.g., a plugin adding a generator depends on `@dxgjs/generators`), but this remains in their own `package.json` and does not affect the base monorepo dependency graph.
 
-### Couche 7 – Applications finales
-- `apps/cli` – Interface en ligne de commande principale → dépend de pratiquement tous les packages ci‑dessus selon les commandes implémentées (ex. `dxg generate` dépend de `@dxgjs/generators`, `dxg ai` dépend de `@dxgjs/ai`, `dxg update` dépend de `@dxgjs/updater`, etc.)
-- `apps/studio` et `apps/playground` (futur) – similaires, dépendent des packages nécessaires à leurs fonctionnalités.
+### Layer 7 – Final applications
+- `apps/cli` – Main command-line interface → depends on practically all the packages above according to the implemented commands (e.g., `dxg generate` depends on `@dxgjs/generators`, `dxg ai` depends on `@dxgjs/ai`, `dxg update` depends on `@dxgjs/updater`, etc.)
+- `apps/studio` and `apps/playground` (future) – similar, depend on the packages necessary for their functionality.
 
-## Vérification des principes
+## Principle Verification
 
-1. **Aucune dépendance circulaire** : En suivant la stratification ci‑dessus, aucune dépendance ne pointe vers une couche égale ou inférieure (en termes d’abstraction) ; toutes vont de haut vers bas ou restent dans la même couche lorsqu’il s’agit de dépendances utilitaires (ex. `@dxgjs/config` → `@dxgjs/fs` est autorisé car fs est plus fondamental).
+1. **No circular dependencies**: By following the stratification above, no dependency points to an equal or lower layer (in terms of abstraction); all go from high to low or stay within the same layer when dealing with utility dependencies (e.g., `@dxgjs/config` → `@dxgjs/fs` is allowed because fs is more fundamental).
 
-2. **Les paquets de bas niveau ne dépendent jamais du CLI** : Le CLI n’apparaît nulle part dans les dépendances des packages (ni dans `packages/` ni dans `tooling/`), seulement dans `apps/cli`. Ainsi, `@dxgjs/fs`, `@dxgjs/logger`, `@dxgjs/core`, etc. restent indépendants du CLI.
+2. **Low-level packages never depend on the CLI**: The CLI does not appear anywhere in the dependencies of packages (neither in `packages/` nor in `tooling/`), only in `apps/cli`. Thus, `@dxgjs/fs`, `@dxgjs/logger`, `@dxgjs/core`, etc. remain independent of the CLI.
 
-3. **Le terminal ne dépend pas de la logique métier du CLI** : `@dxgjs/terminal` ne dépend que de `@dxgjs/logger` et éventuellement `@dxgjs/core`. Il n’a aucune dépendance envers `@dxgjs/generators`, `@dxgjs/ai`, `@dxgjs/workspace`, etc. – la logique de ce qu’afficher reste dans l’appelant (CLI, plugin, etc.).
+3. **The terminal does not depend on CLI business logic**: `@dxgjs/terminal` depends only on `@dxgjs/logger` and possibly `@dxgjs/core`. It has no dependency towards `@dxgjs/generators`, `@dxgjs/ai`, `@dxgjs/workspace`, etc. – the logic of what to display remains in the caller (CLI, plugin, etc.).
 
-4. **Le logger ne dépend pas du terminal rendering** : `@dxgjs/logger` dépend au maximum de `@dxgjs/validation` (pour valider ses options) et possiblement `@dxgjs/fs` (si un transport fichier est utilisé). Il ne connaît pas `@dxgjs/terminal`.
+4. **The logger does not depend on terminal rendering**: `@dxgjs/logger` depends at most on `@dxgjs/validation` (to validate its options) and possibly `@dxgjs/fs` (if a file transport is used). It does not know `@dxgjs/terminal`.
 
-5. **Le core reste minimal** : Comme mentionné, `@dxgjs/core` ne dépend que de `@dxgjs/logger` (pour ses propres traces) et `@dxgjs/validation` (pour valider les enregistrements DI et les schémas d’événement). Il n’importe aucun paquet de haut niveau.
+5. **The core remains minimal**: As mentioned, `@dxgjs/core` depends only on `@dxgjs/logger` (for its own traces) and `@dxgjs/validation` (to validate DI registrations and event schemas). It imports no high-level package.
 
-6. **Les paquets de haut niveau peuvent dépendre de bas niveau, mais pas l’inverse** : Vérifié dans la stratification – ex. `@dxgjs/generators` (haut) dépend de `@dxgjs/fs` (bas) ; l’inverse n’existe pas.
+6. **High-level packages may depend on low-level packages, but not the reverse**: Verified in the stratification – e.g., `@dxgjs/generators` (high) depends on `@dxgjs/fs` (low); the reverse does not exist.
 
-## Représentation simplifiée (flèches de dépendance)
+## Simplified Representation (dependency arrows)
 
 ```
-[Couche 7 – Apps]
+[Layer 7 – Apps]
       ↑
-[Couche 6 – Plugins]
+[Layer 6 – Plugins]
       ↑
-[Couche 5 – Orchestration]
+[Layer 5 – Orchestration]
       ↑
-[Couche 4 – Présentation]
+[Layer 4 – Presentation]
       ↑
-[Couche 3 – Core]
+[Layer 3 – Core]
       ↑
-[Couche 2 – Infra]
+[Layer 2 – Infra]
       ↑
-[Couche 1 – Fondamentaux]
+[Layer 1 – Fundamentals]
 ```
 
-Chaque flèche « depends on » pointe vers une couche inférieure ou égale (dans le cas de dépendances au sein de la même couche, ex. `@dxgjs/config` → `@dxgjs/fs` reste fondamental).
+Each "depends on" arrow points to a lower or equal layer (in the case of dependencies within the same layer, e.g., `@dxgjs/config` → `@dxgjs/fs` remains fundamental).
 
-## Conséquences pour le développement
-- Toute introduction d’une nouvelle dépendance doit respecter cette stratification ; sinon, le CI devrait détecter un cycle via `madge` ou `depcruft` et bloquer la merge.
-- Les paquets de bas niveau sont largement réutilisables et peuvent être publiés indépendamment avec une surface minimale.
-- Les paquets de haut niveau (comme `@dxgjs/ai` ou `@dxgjs/generators`) sont plus spécifiques et peuvent évoluer rapidement sans impacter les fondations.
+## Development Implications
+- Any new dependency introduction must respect this stratification; otherwise, CI should detect a cycle via `madge` or `depcruft` and block the merge.
+- Low-level packages are widely reusable and can be published independently with a minimal surface.
+- High-level packages (like `@dxgjs/ai` or `@dxgjs/generators`) are more specific and can evolve rapidly without impacting the foundations.
 
-## Rejetés / alternatives considérées
-- **Un seul paquet de utilities** regroupant `fs`, `json`, `env`, `validation` aurait créé un « god package » inutile et aurait lié des préoccupations autrement indépendantes.
-- **Faire dépendre le core de tous les infrastructures** aurait rendu le core lourd et aurait introduit des risques de cycles (ex. core → fs → logger → core si logger dépendait de core pour quelque raison).
-- **Autoriser les dépendances latérales au sein d’une même couche** uniquement lorsqu’elles sont clairement justifiées et acycliques (ex. `@dxgjs/config` → `@dxgjs/json` est acceptable car json est plus fondamental que config).
+## Rejected / Alternatives Considered
+- **A single utilities package** grouping `fs`, `json`, `env`, `validation` would have created an unnecessary "god package" and would have tied together otherwise independent concerns.
+- **Making the core depend on all infrastructures** would have made the core heavy and introduced cycle risks (e.g., core → fs → logger → core if logger depended on core for some reason).
+- **Allowing lateral dependencies within the same layer** only when clearly justified and acyclic (e.g., `@dxgjs/config` → `@dxgjs/json` is acceptable because json is more fundamental than config).

@@ -1,75 +1,127 @@
 # CURRENT PHASE
 
-Implement Phase 1 packages
+Phase 5 — Generator Platform Consolidation / Architecture Audit (PLANNED)
 
-COMPLETED
+## COMPLETED
 
-✓ Ecosystem vision
-✓ Monorepo decision
-✓ Package philosophy
-✓ Type strategy
-✓ Architecture review (initial)
-✓ Validate dependency graph
-✓ Define package boundaries
-✓ Turborepo vs alternatives
-✓ Public vs internal packages
-✓ Plugin architecture (basic discovery & registration)
-✓ AI architecture (provider abstraction, prompt registry, context builder, cache, rate‑limiting)
-✓ Terminal architecture
-✓ Monorepo bootstrap
-✓ Implement Phase 1 packages (terminal, logger, workspace, fs, config, templates, generators, prompts)
-✓ Set up CI/CD pipelines
-✓ Create initial CLI command skeleton
-✓ Define exact versioning and release process (changesets)
-✓ Develop first generator example
-✓ Write initial tests for fundamental packages (logger, fs, terminal, workspace, config, prompts, templates, generators)
+### Phase 4A — COMPLETE
+- Enhanced `@dxgjs/fs` operations:
+  - mkdir / mkdirSync
+  - rm / rmSync
+  - copyFile / copyFileSync
+  - appendFile / appendFileSync
+- Workspace dependency calculation
+- `.mjs` ESM build output configuration where applicable
+- Corresponding tests
+- Successful validation:
+  - lint
+  - typecheck
+  - tests
+  - build
 
-TESTING CHECKPOINT
+### Phase 4B / 4B.1 — COMPLETE
+- Tailwind CSS v4 ecosystem researched
+- Existing DXG architecture audited against generator requirements
+- Existing Generator lifecycle considered sufficient
+- GeneratorContext did not require architectural expansion
+- No new generic command-execution abstraction required at this stage
+- Required Phase 4C implementation scope identified
 
-- logger: 5 tests passing
-- fs: 7 tests passing
-- terminal: 12 tests passing
-- workspace: 7 tests passing
-- config: 1 test passing
-- prompts: 1 test passing
-- templates: 1 test passing
-- generators: 3 tests passing
-- Total: 37 tests passing
+### Phase 4C — `dxg add tailwind` — COMPLETE
+- Tailwind CSS v4 generator implemented
+- Framework detection
+- Package-manager detection
+- Existing Tailwind detection
+- Node.js version validation
+- Package.json validation
+- CSS entrypoint detection
+- Tailwind directive insertion
+- Optional Tailwind configuration generation
+- Optional PostCSS configuration generation
+- Actual `.tmpl` template usage
+- Idempotent file modifications
+- Dependency installation
+- Verification phase
+- Summary phase
+- Generator follows the established lifecycle: `validate → plan → execute → verify → summarize`
+- Generator does NOT require changes to:
+  - GeneratorRunner
+  - GeneratorContext
+  - `@dxgjs/fs`
+  - `@dxgjs/workspace`
+  - `@dxgjs/config`
+  - `@dxgjs/prompts`
+  - `@dxgjs/templates`
+  - `@dxgjs/logger`
+  - `@dxgjs/terminal`
+  (unless proven otherwise by repository evidence)
 
-IN PROGRESS
+### Final Phase 4C Validation
+- Existing Tailwind detection: PASS
+- Package-manager detection tests: PASS
+- lint: PASS
+- typecheck: PASS
+- tests: PASS
+- build: PASS
+- Final status: COMPLETE / READY
 
-→ Review and stabilize the current Phase 1 implementations (API review, edge-case testing, integration validation, cross-platform validation)
+### English-only Standardization
+- Developer-facing content standardized to English
+- User-facing CLI/generator content standardized to English
+- Architecture documentation standardized to English
+- Final verification performed
+- No intentional French developer/user-facing content remains
+- Rule: DXG developer-facing and user-facing content = English only
 
-NEXT
+## CURRENT STATE
 
-→ Define CLI feature scope and design (command parsing, help system)
+DXG now has:
+- Validated generator lifecycle
+- Reusable filesystem primitives (`@dxgjs/fs`)
+- Workspace awareness (`@dxgjs/workspace`)
+- Production-oriented Tailwind generator (`dxg add tailwind`)
+- Framework-aware generation
+- Package-manager-aware generation
+- Idempotent generation
+- Generator tests
+- Validated build/typecheck/test pipeline
 
-DECISIONS
+## DEFERRED
 
-✓ No giant @dxgjs/types
-✓ Domain-local types
-✓ Minimal @dxgjs/core (DI container + typed event bus, minimal implementation) [deferred to internal]
-✓ No god packages
-✓ pnpm workspace strategy (pnpm workspaces + optional TurboRepo for caching when needed)
-✓ Terminal/backend agnosticism (ANSI, simulator, web backends)
-✓ AI provider abstraction with fallback and rate limiting (specialized agents deferred)
-✓ Plugin system: discovery via convention/dxg-plugin:true, basic registration for commands, generators, hooks (no sandboxing, no AI/provider/terminal extensions, no AJV validation)
-✓ Dependency layering (no cycles, high-level → low-level only)
+Keep genuinely deferred architecture items deferred, including:
+- Generic command execution abstraction
+- `@dxgjs/utils`
+- Generator registry
+- Plugin architecture
+- Transactions
+- Rollback
+- Dry-run
+- Force mode
+- Advanced template system
 
-OPEN QUESTIONS
+## NEXT PHASE
 
-→ Exact version bump automation tool (changesets vs standard-version)
-→ Default AI provider list ordering (Claude, GPT, Gemini, Fable)
-→ Specific theme syntax for terminal (JSON schema for themes)
-→ Precise set of built‑in prompts for AI orchestrator
-→ Level of detail for plugin manifest validation (use AJV vs custom simple checks)
-→ Need for @dxgjs/node package (deferred until multi‑runtime support required)
-→ Whether to telemetry as public package or internal utility (deferred)
-→ Plugin sandboxing strategy (ESM dynamic vs VM2) – deferred
-→ AI specialized agents (generator, reviewer, refactorer, auditor, planner) – deferred
-→ Plugin AI provider and terminal extensions – deferred
-→ Plugin reload command and version‑compatibility peer checks – deferred
+## Phase 5 — Generator Platform Consolidation / Architecture Audit
 
-BLOCKERS
+Phase 5 is PLANNED, not IMPLEMENTED.
 
-None
+Its purpose is to audit the current generator implementation after the first real production-oriented generator (Tailwind). The audit should investigate:
+- Duplicated logic introduced by Tailwind
+- Reusable generator utilities
+- Package-manager detection reuse
+- Framework detection reuse
+- File/idempotence helpers
+- Package.json handling
+- Command execution patterns
+- Whether additional GeneratorContext capabilities are actually justified
+- Whether abstractions should be extracted based on real repetition
+- What is required before implementing additional generators such as database/auth/ui
+
+Follow YAGNI.
+
+## VERIFICATION
+
+- No source code modified beyond documentation (this update only)
+- No tests modified
+- No dependencies changed
+- No build configuration changed

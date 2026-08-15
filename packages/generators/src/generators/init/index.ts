@@ -1,5 +1,5 @@
 // Template source strings (owned by the init generator)
-import { GeneratorContext, Generator } from '../../types';
+import { GeneratorContext, Generator } from "../../types";
 
 const packageJsonTpl = `{
   "name": "{{name}}",
@@ -24,11 +24,11 @@ const tsconfigTpl = `{
   }
 }`;
 
-const indexTpl = `// Point d'entrée minimal
-console.log('Projet {{name}} initialisé !');
+const indexTpl = `// Minimal entry point
+console.log('Project {{name}} initialized!');
 `;
 
-const gitignoreTpl = `# dépendances
+const gitignoreTpl = `# dependencies
 node_modules/
 # builds
 dist/
@@ -39,24 +39,24 @@ dist/
 // Prompt questions for the init generator
 export const initPrompts = [
   {
-    type: 'input' as const,
-    name: 'name',
-    message: 'Nom du projet :',
+    type: "input" as const,
+    name: "name",
+    message: "Project name:",
     validate: (input: unknown) => {
-      if (typeof input !== 'string' || !input?.trim()) {
-        return 'Le nom du projet est requis';
+      if (typeof input !== "string" || !input?.trim()) {
+        return "Project name is required";
       }
       return true;
     },
   },
   {
-    type: 'input' as const,
-    name: 'description',
-    message: 'Description (optionnelle) :',
-    default: '',
+    type: "input" as const,
+    name: "description",
+    message: "Description (optional):",
+    default: "",
   },
 ] satisfies {
-  type: 'input' | 'confirm' | 'select';
+  type: "input" | "confirm" | "select";
   name: string;
   message: string;
   default?: unknown;
@@ -66,7 +66,7 @@ export const initPrompts = [
 
 // Validation function
 export function validateInit(answers: Record<string, unknown>): boolean {
-  return typeof answers.name === 'string' && answers.name.trim().length > 0;
+  return typeof answers.name === "string" && answers.name.trim().length > 0;
 }
 
 // Planning function
@@ -77,10 +77,10 @@ export function planInit(answers: Record<string, unknown>) {
     year: new Date().getFullYear(),
   };
   return [
-    { path: 'package.json', data, template: packageJsonTpl },
-    { path: 'tsconfig.json', data, template: tsconfigTpl },
-    { path: 'src/index.ts', data, template: indexTpl },
-    { path: '.gitignore', data, template: gitignoreTpl },
+    { path: "package.json", data, template: packageJsonTpl },
+    { path: "tsconfig.json", data, template: tsconfigTpl },
+    { path: "src/index.ts", data, template: indexTpl },
+    { path: ".gitignore", data, template: gitignoreTpl },
   ] as const;
 }
 
@@ -88,7 +88,7 @@ export function planInit(answers: Record<string, unknown>) {
 export async function executeInit(
   answers: Record<string, unknown>,
   ctx: GeneratorContext,
-  plan?: ReturnType<typeof planInit>
+  plan?: ReturnType<typeof planInit>,
 ): Promise<{ created: string[]; updated: string[]; skipped: string[] }> {
   const planToUse = plan ?? planInit(answers);
   const result: { created: string[]; updated: string[]; skipped: string[] } = {
@@ -101,15 +101,15 @@ export async function executeInit(
     const rendered = await ctx.templates.render(template, data);
     const exists = await ctx.fs.pathExists(path);
     if (exists) {
-      const current = await ctx.fs.readFile(path, 'utf8');
+      const current = await ctx.fs.readFile(path, "utf8");
       if (current === rendered) {
         result.skipped.push(path);
         continue;
       }
-      await ctx.fs.writeFile(path, rendered, 'utf8');
+      await ctx.fs.writeFile(path, rendered, "utf8");
       result.updated.push(path);
     } else {
-      await ctx.fs.writeFile(path, rendered, 'utf8');
+      await ctx.fs.writeFile(path, rendered, "utf8");
       result.created.push(path);
     }
   }
@@ -120,13 +120,13 @@ export async function executeInit(
 export async function verifyInit(
   answers: Record<string, unknown>,
   ctx: GeneratorContext,
-  plan?: ReturnType<typeof planInit>
+  plan?: ReturnType<typeof planInit>,
 ): Promise<void> {
   const planToUse = plan ?? planInit(answers);
   for (const { path } of planToUse) {
     const exists = await ctx.fs.pathExists(path);
     if (!exists) {
-      throw new Error(`Fichier attendu manquant après génération : ${path}`);
+      throw new Error(`Expected file missing after generation: ${path}`);
     }
   }
 }
@@ -135,21 +135,23 @@ export async function verifyInit(
 export function summarizeInit(
   answers: Record<string, unknown>,
   result: { created: string[]; updated: string[]; skipped: string[] },
-  ctx: GeneratorContext
+  ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
   const { created, updated, skipped } = result;
   const total = created.length + updated.length + skipped.length;
   if (created.length) {
-    logger.info(`�������������������������������������📄 Créés : ${created.join(', ')}`);
+    logger.info(` Created: ${created.join(", ")}`);
   }
   if (updated.length) {
-    logger.info(`���������������������������������������������🔄 Mis à jour : ${updated.join(', ')}`);
+    logger.info(` Updated: ${updated.join(", ")}`);
   }
   if (skipped.length) {
-    logger.info(`������������������������������⏭������������������������������️  Inchangés : ${skipped.join(', ')}`);
+    logger.info(`️  Unchanged: ${skipped.join(", ")}`);
   }
-  logger.info(`������������������������������✅ Initialisation terminée : ${answers.name} (${total} fichiers traités)`);
+  logger.info(
+    ` Initialization completed: ${answers.name} (${total} files processed)`,
+  );
 }
 
 /**
@@ -157,15 +159,15 @@ export function summarizeInit(
  * The run method executes the full pipeline: validate → plan → execute → verify → summarize.
  */
 export const initGenerator: Generator = {
-  name: 'init',
-  description: 'Initialise un petit projet DXG (pipeline de preuve)',
+  name: "init",
+  description: "Initializes a small DXG project (proof pipeline)",
   prompts: initPrompts,
   async run(answers: Record<string, unknown>, context: GeneratorContext) {
     const ctx = context;
 
     // Validate
     if (!validateInit(answers)) {
-      throw new Error('Réponses non valides pour le générateur init');
+      throw new Error("Invalid responses for init generator");
     }
 
     // Plan

@@ -1,15 +1,9 @@
 import { Logger } from "@dxgjs/logger";
-import { readFile, stat, writeFile, readdir } from "@dxgjs/fs";
+import type * as FS from "@dxgjs/fs";
 
 export interface GeneratorContext {
   logger: Logger;
-  fs: {
-    readFile: typeof readFile;
-    writeFile: typeof writeFile;
-    stat: typeof stat;
-    readdir: typeof readdir;
-    pathExists: (filePath: string) => Promise<boolean>;
-  };
+  fs: typeof FS;
   templates: {
     render: (template: string, data: Record<string, unknown>) => string;
   };
@@ -19,7 +13,7 @@ export interface GeneratorPrompt {
   type: "input" | "confirm" | "select";
   name: string;
   message: string;
-  default?: string | (() => string);
+  default?: string | (() => string) | boolean;
   choices?: Array<{ name: string; value: string }>;
   validate?: (input: unknown) => boolean | string;
 }

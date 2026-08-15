@@ -3,9 +3,6 @@
   "version": "0.0.0",
   "description": "Interactive prompt system for DXG",
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -13,17 +10,20 @@
       "require": "./dist/index.js"
     }
   },
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsup",
-    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint ."
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",
-    "@dxgjs/terminal": "workspace:*",
-    "@dxgjs/logger": "workspace:*"
+    "@dxgjs/logger": "workspace:*",
+    "@dxgjs/terminal": "workspace:*"
   },
   "devDependencies": {
     "@dxgjs/eslint-config": "workspace:*",

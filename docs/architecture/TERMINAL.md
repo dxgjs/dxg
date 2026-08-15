@@ -1,180 +1,179 @@
-# Architecture du terminal DXG
+# DXG Terminal Architecture
 
-Ce document décrit conceptuellement l'architecture du système de rendu terminal haut de gamme de DXG. Il reste au niveau de la spécification ; aucune implémentation n'est fournie.
+This document conceptually describes the architecture of DXG's premium terminal rendering system. It remains at the specification level; no implementation is provided.
 
 ## Vision
-Le terminal DXG vise à offrir une expérience riche, réactive et personnalisable comparable à celle des terminaux modernes comme ceux de Bun, Biome, npm, pnpm ou Turbo, tout en restant découplé de la logique métier. Il doit permettre d'afficher du texte coloré, des layouts complexes, des animations fluides, des panneaux interactifs, des tableaux et des arbres de données, tout en supportant le clavier, la souris et le redimensionnement. L'objectif est de fournir une couche de présentation que les autres parties du système (CLI, generators, plugins, IA) peuvent utiliser sans avoir à connaître les détails du rendu sous‑jacent (ANSI, SIXEL, protocoles de terminal avancés, ou même un rendu web pour un mode « playground »).
+The DXG terminal aims to offer a rich, responsive, and customizable experience comparable to modern terminals like those of Bun, Biome, npm, pnpm, or Turbo, while remaining decoupled from business logic. It must allow displaying colored text, complex layouts, smooth animations, interactive panels, tables and data trees, while supporting keyboard, mouse and resizing. The goal is to provide a presentation layer that other parts of the system (CLI, generators, plugins, AI) can use without needing to know the underlying rendering details (ANSI, SIXEL, advanced terminal protocols, or even a web rendering for a "playground" mode).
 
-## Principes directeurs
-1. **Separation of concerns** : le terminal ne connaît rien de la logique de l'application (pas d’accès direct au système de fichiers, au workspace, aux commandes, etc.). Il ne sait que rendre un arbre de nœuds et retourner des événements d’entrée.
-2. **Render‑agnostic** : le noyau définit une représentation abstraite de l’interface (éléments comme `Box`, `Text`, `Table`, `Tree`, `Spinner`, `ProgressBar`, `Panel`, `Modal`, `Tooltip`) qui peut être implémentée par différents backends (ANSI terminal réel, simulateur pour les tests, rendu HTML/CSS pour un aperçu web, ou même un protocole de terminal riche comme SIXEL ou sixel lorsqu’il est disponible).
-3. **Composable et hiérarchique** : l’interface est construite comme un arbre d’éléments imbriqués, où chaque nœud possède des propriétés de layout (flex‑like, dimensions, marges, padding, alignement) et de style (couleurs, bordures, caractères de ligne).
-4. **Thémable à chaud** : les thèmes (palettes de couleurs, styles de bordure, caractères de ligne) peuvent être changés en temps réel sans devoir détruire et recréer l’arbre entier.
-5. **Performance par rendu différé** : seules les régions de l’écran réellement modifiées sont réécrites, réduisant le trafic sortant et évitant le scintillement.
-6. **Accessibilité** : support de la navigation au clavier (tab, flèches, entrée, échappement), contraste suffisante par défaut, et possibilité d’exposer des rôles ARIA‑like pour les lecteurs d’écran dans les environnements qui le permettent (ex. rendu web).
-7. **Extensibilité** : lesplugins peuvent enregistrer de nouveaux types de nœuds de rendu ou des panneaux personnalisés qui s’intègrent dans l’arbre de rendu.
-8. **Mode non‑interactif et CI** : lorsqu’il détecte une sortie non‑interactive (pas de TTY, variable d’environnement `CI=true`), le terminal se désactive automatiquement et retourne des représentations simples (texte brut ou JSON) selon la configuration.
+## Guiding Principles
+1. **Separation of concerns**: the terminal knows nothing of application logic (no direct access to filesystem, workspace, commands, etc.). It only knows how to render a node tree and return input events.
+2. **Render-agnostic**: the core defines an abstract interface representation (elements like `Box`, `Text`, `Table`, `Tree`, `Spinner`, `ProgressBar`, `Panel`, `Modal`, `Tooltip`) that can be implemented by different backends (real ANSI terminal, simulator for tests, HTML/CSS rendering for web preview, or even a rich terminal protocol like SIXEL or sixel when available).
+3. **Composable and hierarchical**: the interface is built as a tree of nested elements, where each node has layout properties (flex-like, dimensions, margins, padding, alignment) and style properties (colors, borders, line characters).
+4. **Hot themeable**: themes (color palettes, border styles, line characters) can be changed in real time without needing to destroy and recreate the entire tree.
+5. **Performance through deferred rendering**: only screen regions that are actually modified are rewritten, reducing outbound traffic and avoiding flicker.
+6. **Accessibility**: keyboard navigation support (tab, arrows, enter, escape), sufficient default contrast, and possibility to expose ARIA-like roles for screen readers in environments that allow it (e.g. web rendering).
+7. **Extensibility**: plugins can register new renderable node types or custom panels that integrate into the render tree.
+8. **Non-interactive and CI mode**: when it detects a non-interactive output (no TTY, environment variable `CI=true`), the terminal automatically deactivates and returns simple representations (plain text or JSON) according to configuration.
 
-## Couches de l'architecture
+## Architecture Layers
 
-### 1. Nœuds de rendu de base (`RenderableNode`)
-Tous les éléments visibles dérivent d’une classe ou interface abstrait `RenderableNode` possédant :
-- `type` : chaîne discriminante identifiant le nœud (`"box"`, `"text"`, `"table"`, etc.).
-- `props` : objet de propriétés spécifiques au type (contenu du texte, données du tableau, options du spinner, etc.).
-- `layout` : objet décrivant comment le nœud doit être dimensionné et positionné dans son parent (flex‑grow, flex‑shrink, basis, minWidth, maxWidth, height, alignSelf, margin, padding).
-- `style` : objet de style qui référence le thème actif (couleurs de premier plan et d’arrière‑plan, style de bordure, caractères de ligne pour les bordures, éventuellement ombre ou effet).
-- `children?` : liste optionnelle de `RenderableNode` pour les nœuds pouvant contenir d’autres nœuds (ex. `Box`, `Panel`, `Table` possède des lignes contenant des cellules qui peuvent être du texte ou d’autres nœuds).
+### 1. Base Renderable Nodes (`RenderableNode`)
+All visible elements derive from an abstract class or interface `RenderableNode` possessing:
+- `type`: discriminating string identifying the node (`"box"`, `"text"`, `"table"`, etc.).
+- `props`: object of type-specific properties (text content, table data, spinner options, etc.).
+- `layout`: object describing how the node should be sized and positioned within its parent (flex-grow, flex-shrink, basis, minWidth, maxWidth, height, alignSelf, margin, padding).
+- `style`: style object referencing the active theme (foreground and background colors, border style, line characters for borders, optionally shadow or effect).
+- `children?`: optional list of `RenderableNode` for nodes that can contain other nodes (e.g. `Box`, `Panel`, `Table` has lines containing cells that can be text or other nodes).
 
-### 2. Moteur de layout (`LayoutEngine`)
-Donné un nœud racine et les dimensions du terminal (largeur × hauteur en cellules), le moteur de layout calcule la boîte englobante (x, y, width, height) de chaque nœud en suivant un algorithme de type flexbox simplifié :
-- L’axe principal (`flexDirection`) peut être `column` (défaut) ou `row`.
-- Les propriétés `flexGrow`, `flexShrink` et `flexBasis` déterminent comment l’espace disponible est distribué.
-- `alignItems` contrôle l’alignement sur l’axe secondaire.
-- Dimensions absolutes (`width`, `height` en cellules) peuvent dépasser les contraintes flex et provoquer du débordement (gestion du débordement : scrollable, ellipsis, ou héritage du comportement du parent).
-- Le moteur travaille en deux passes : première pour déterminer les tailles mínimes/maximales, deuxième pour répartir l’espace restant selon les flex factors.
-- Le résultat est un arbre annoté avec des boîtes de rendu absolues.
+### 2. Layout Engine (`LayoutEngine`)
+Given a root node and terminal dimensions (width × height in cells), the layout engine computes the bounding box (x, y, width, height) of each node following a simplified flexbox-type algorithm:
+- The main axis (`flexDirection`) can be `column` (default) or `row`.
+- Properties `flexGrow`, `flexShrink` and `flexBasis` determine how available space is distributed.
+- `alignItems` controls alignment on the secondary axis.
+- Absolute dimensions (`width`, `height` in cells) can exceed flex constraints and cause overflow (overflow handling: scrollable, ellipsis, or inheriting parent behavior).
+- The engine works in two passes: first to determine minimum/maximum sizes, second to distribute remaining space according to flex factors.
+- The result is a tree annotated with absolute render boxes.
 
-### 3. Gestionnaire de thème (`ThemeManager`)
-Un thème est un objet contenant :
-- `palette` : mapping de noms de couleurs sémantiques vers des valeurs RGB ou ANSI (`foreground`, `background`, `primary`, `secondary`, `success`, `warning`, `error`, `muted`, `border`, `inputBackground`, etc.).
-- `borderStyle` : objet définissant les caractères à utiliser pour les différents types de bordure (horizontal, vertical, coin supérieur‑gauche, etc.) – permet de passer d’un style ASCII simple à un style double ou à des caractères Unicode.
-- `cursor` : forme du cursor (`block`, `underline`, `beam`) et couleur.
-- `animationSpeed` : facteur multiplicateur pour la durée des animations (spinners, transitions de panneaux).
-Le gestionnaire de thème fournit des méthodes :
-- `getColor(name: string) => string` : retourne la séquence ANSI ou la valeur CSS correspondant à la couleur nommée.
-- `getBorderChar(side: string) => string` : retourne le caractère de bordure demandé.
-- `applyTheme(theme: Partial<Theme>) => void` : fusionne le thème partiel avec le thème actif et déclenche un re‑render de l’arbre complet (puisque les couleurs peuvent avoir changé partout).
-Les thèmes peuvent être définis en JSON et chargés depuis un fichier ou fournis par un plugin.
+### 3. Theme Manager (`ThemeManager`)
+A theme is an object containing:
+- `palette`: mapping of semantic color names to RGB or ANSI values (`foreground`, `background`, `primary`, `secondary`, `success`, `warning`, `error`, `muted`, `border`, `inputBackground`, etc.).
+- `borderStyle`: object defining characters to use for different border types (horizontal, vertical, top-left corner, etc.) – allows switching from simple ASCII style to double style or Unicode characters.
+- `cursor`: cursor shape (`block`, `underline`, `beam`) and color.
+- `animationSpeed`: multiplicative factor for animation durations (spinners, panel transitions).
+The theme manager provides methods:
+- `getColor(name: string) => string`: returns the ANSI sequence or CSS value corresponding to the named color.
+- `getBorderChar(side: string) => string`: returns the requested border character.
+- `applyTheme(theme: Partial<Theme>) => void`: merges the partial theme with the active theme and triggers a re-render of the entire tree (since colors may have changed everywhere).
+Themes can be defined in JSON and loaded from a file or provided by a plugin.
 
-### 4. Analyseur d’événements (`EventParser`)
-Le terminal reçoit des entrées brutes depuis l’entrée standard (clavier, souris, redimensionnement) sous forme de séquences d’octets (comme celles émises par un véritable terminal VT‑compatible). L'`EventParser` transforme cette séquence en événements sémantiques :
-- **Événements de clavier** : `keypress` (avec propriétés `key` : nom de la touche comme `"Enter"`, `"Escape"`, `"ArrowUp"`, `"a"`, `"A"` avec indicateur de shift/ctrl/meta), `keydown`, `keyup` (optionnel selon le niveau de détail souhaité).
-- **Événements de souris** : si le terminal supporte le protocole de souris (ex. `X10` ou `UTF-8 mouse reporting`), des événements `mousedown`, `mouseup`, `mousemove` avec coordonnées de colonne/ligne et bouton.
-- **Événements de redimensionnement** : `resize` comportant la nouvelle largeur et hauteur en colonnes/ligne.
-- **Événements de focus** : `focus` et `blur` si le terminal supporte la notion de focus provenant d’un gestionnaire de fenêtres (rare dans les terminaux pur texte, mais utile dans un rendu web).
-L'analyseur doit gérer les séquences d’échappement (ESC `[ …`) et être capable de distinguer les touches fonction des séquences de couleur ANSI.
+### 4. Event Parser (`EventParser`)
+The terminal receives raw input from standard input (keyboard, mouse, resizing) as byte sequences (like those emitted by a true VT-compatible terminal). The `EventParser` transforms this sequence into semantic events:
+- **Keyboard events**: `keypress` (with properties `key`: key name like `"Enter"`, `"Escape"`, `"ArrowUp"`, `"a"`, `"A"` with shift/ctrl/meta indicator), `keydown`, `keyup` (optional according to desired detail level).
+- **Mouse events**: if the terminal supports the mouse protocol (e.g. `X10` or `UTF-8 mouse reporting`), events `mousedown`, `mouseup`, `mousemove` with column/row coordinates and button.
+- **Resize events**: `resize` comprising the new width and height in columns/rows.
+- **Focus events**: `focus` and `blur` if the terminal supports the notion of focus coming from a window manager (rare in pure text terminals, but useful in web rendering).
+The parser must handle escape sequences (ESC `[ …`) and be able to distinguish function keys from ANSI color sequences.
 
-### 5. Rendu spécifique au backend (`Renderer`)
-L'interface du renderer abstrait définit comment traduire un arbre de nœuds annoté avec leurs boîtes absolutess en sorties spécifiques au dispositif. Trois backends principaux sont envisagés :
-- **ANSI Renderer** : destiné à un véritable terminal émulant VT100/ANSI. Il traduit chaque nœud en séquence d’échappement pour positionner le curseur (`\x1b[<y>;<x>H`), définir les couleurs (`\x1b[38;2;<r>;<g>;<b>m` pour le foreground, `\x1b[48;2;<r>;<g>;<b>m` pour le background), dessiner les caractères de bordure, remplir le contenu, puis remettre les attributs par défaut.
-- **Simulateur Renderer** : utilisé durant les tests unitaires. Il ne produit aucune sortie réelle mais enregistre les appels (ou construit un buffer en mémoire) permettant d’affirmer que certains caractères apparaissent à certaines coordonnées.
-- **Web Renderer** : destiné à un aperçu dans une page web (ex. le playground DXG ou une intégration dans un IDE). Il transforme l’arbre de nœuds en une structure DOM réelle (en utilisant du HTML/CSS) et la rend dans un conteneur fourni. Ce backend permet d’avoir un rendu riche avec des polices, des ombres, des animations CSS, tout en réutilisant la même définition d’arbre de nœuds.
-Chaque renderer doit respecter le même contrat : donné un nœud racine et les dimensions du terminal, il retourne (ou écrit dans un flux) la représentation visuelle.
+### 5. Backend-Specific Rendering (`Renderer`)
+The abstract renderer interface defines how to translate a node tree annotated with their absolute boxes into device-specific outputs. Three main backends are envisaged:
+- **ANSI Renderer**: destined for a true VT100/ANSI emulating terminal. It translates each node into an escape sequence to position the cursor (`\x1b[<y>;<x>H`), set colors (`\x1b[38;2;<r>;<g>;<b>m` for foreground, `\x1b[48;2;<r>;<g>;<b>m` for background), draw border characters, fill content, then reset attributes to default.
+- **Simulator Renderer**: used during unit tests. It produces no real output but records calls (or builds an in-memory buffer) allowing to assert that certain characters appear at certain coordinates.
+- **Web Renderer**: destined for a web preview (e.g. the DXG playground or an IDE integration). It transforms the node tree into a real DOM structure (using HTML/CSS) and renders it in a provided container. This backend allows for rich rendering with fonts, shadows, CSS animations, while reusing the same node tree definition.
+Each renderer must respect the same contract: given a root node and terminal dimensions, it returns (or writes to a stream) the visual representation.
 
-### 6. Gestionnaire d’arbre et de rendu différé (`TerminalCore`)
-Le cœur du terminal possède :
-- Une référence au nœud racine actuel (`root: RenderableNode`).
-- Le renderer actif (`renderer: Renderer`).
+### 6. Tree and Deferred Rendering Manager (`TerminalCore`)
+The terminal core possesses:
+- A reference to the current root node (`root: RenderableNode`).
+- The active renderer (`renderer: Renderer`).
 
-Il offre une méthode principale :
+It offers a main method:
 ```ts
 render(root: RenderableNode, options?: { force?: boolean }) => void
 ```
-Qui :
-1. (Optionnel) exécute le moteur de layout sur le nouveau `root` pour produire les boîtes absolutess.
-2. Compare les boîtes absolutess nouvellement calculées avec celles du rendu précédent (stockées en interne).
-3. Calcule le ensemble des régions qui ont changé (nouveaux nœuds, nœuds déplacés, nœuds dont le contenu ou le style a changé, nœuds supprimés).
-4. Si `options.force` est vrai ou si des différences existent, demande au `renderer` de ne redessiner que ces régions (ou, si force, tout l’écran).
-5. Met à jour le cache des boîtes absolutess pour le prochain rendu.
-6. Retourne éventuellement une promesse qui se résout quand le rendu est terminé (utile pour les animations).
+Which:
+1. (Optional) executes the layout engine on the new `root` to produce the absolute boxes.
+2. Compares the newly calculated absolute boxes with those from the previous render (stored internally).
+3. Computes the set of regions that have changed (new nodes, moved nodes, nodes whose content or style changed, deleted nodes).
+4. If `options.force` is true or if differences exist, asks the `renderer` to redraw only these regions (or, if force, the entire screen).
+5. Updates the cache of absolute boxes for the next render.
+6. Optionally returns a promise that resolves when rendering is complete (useful for animations).
 
-Le terminal gère également un boucle d’événements interne qui :
-- Lit l’entrée standard (en mode non bloquant ou via un wrapper qui transforme les données brutes en flux d’événements grâce à `EventParser`).
-- Pour chaque événement sémantique reçu, le distribue aux enregistreurs d’écoute (`onKeyPress`, `onMouseClick`, `onResize`) associés au nœud racine ou à des nœuds spécifiques (via un système de propagasion d’événement similaire au DOM : capture → cible → bouillonnement).
-- Met à jour l’état interne (ex. position du curseur actif si un nœud d’entrée comme un `Input` est présent).
-- Peut demander un re‑render si l’événement a modifié l’état (ex. frappe de touche dans un champ de texte).
+The terminal also manages an internal event loop that:
+- Reads standard input (in non-blocking mode or via a wrapper that transforms raw data into an event stream thanks to `EventParser`).
+- For each semantic event received, distributes it to registered listeners (`onKeyPress`, `onMouseClick`, `onResize`) associated with the root node or specific nodes (via a DOM-like event propagation system: capture → target → bubbling).
+- Updates internal state (e.g. active cursor position if an input node like an `Input` is present).
+- May request a re-render if the event modified state (e.g. keystroke in a text field).
 
-### 7. Composants de rendu prêts à l’emploi
-Le terminal fournit une bibliothèque de composants de haut niveau construits à partir des nœuds de base :
+### 7. Ready-to-Use Rendering Components
+The terminal provides a library of high-level components built from the base nodes:
 
-| Composant | Description | Props typiques |
+| Component | Description | Typical Props |
 |----------|-------------|----------------|
-| `Box` | Conteneur générique pouvant avoir bordure, fond, padding, et alignement flex. | `border?: boolean`, `bg?: string`, `color?: string`, `padding: number | {top:number,right:number,bottom:number,left:number}`, `flex?: number | {grow:number,shrink:number,basis:string}` |
-| `Text` | Chaîne de caractères, avec retour à la ligne automatique si largeur connue. | `content: string`, `wrap?: boolean`, `truncate?: boolean` |
-| `Spinner` | Indicateur d’activité animé (points, barre, bouncing ball). | `type?: "dots" | "bar" | "pulse"`, `speed?: number` |
-| `ProgressBar` | Barre indiquant la proportion d’une tâche terminée. | `value: number` (0‑1), `bg?: string`, `filled?: string` |
-| `Panel` | Boîte avec titre éventuel et contenu scrollable si débordement. | `title?: string`, `scrollable?: boolean` |
-| `Table` | Grille de données avec en-têtes, lignes, alignement par colonne, possibilité de tri interactif. | `columns: Array<{header:string, accessor:(row:any)=>any, align:'left'|'center'|'right', width?:number|string}>`, `rows: Array<any>` |
-| `Tree` | Représentation hiérarchique (ex. dépendances, structure de fichiers). Chaque nœud peut être développé/réduit. | `nodes: Array<{label:string, children?:Array<...>, value:any}>`, `selected?: string` |
-| `Modal` | Boîte flottante centrée qui obscurcit l’arrière‑plan lorsqu’elle est ouverte. | `title?: string`, `content: RenderableNode`, `onClose: () => void` |
-| `Tooltip` | Petite boîte apparaissant près d’un élément lorsqu’on le survole ou le focus (clavier). | `content: string`, `delay?: number` |
-| `Input` | Champ de saisie de texte simple (pour les prompts). | `placeholder?: string`, `value: string`, `onChange: (val:string)=>void`, `onSubmit: (val:string)=>void` |
+| `Box` | Generic container that can have border, background, padding, and flex alignment. | `border?: boolean`, `bg?: string`, `color?: string`, `padding: number | {top:number,right:number,bottom:number,left:number}`, `flex?: number | {grow:number,shrink:number,basis:string}` |
+| `Text` | Character string, with automatic line wrapping if width known. | `content: string`, `wrap?: boolean`, `truncate?: boolean` |
+| `Spinner` | Animated activity indicator (dots, bar, bouncing ball). | `type?: "dots" | "bar" | "pulse"`, `speed?: number` |
+| `ProgressBar` | Bar indicating the proportion of a completed task. | `value: number` (0‑1), `bg?: string`, `filled?: string` |
+| `Panel` | Box with optional title and scrollable content if overflow. | `title?: string`, `scrollable?: boolean` |
+| `Table` | Data grid with headers, rows, column alignment, possibility of interactive sorting. | `columns: Array<{header:string, accessor:(row:any)=>any, align:'left'|'center'|'right', width?:number|string}>`, `rows: Array<any>` |
+| `Tree` | Hierarchical representation (e.g. dependencies, file structure). Each node can be expanded/collapsed. | `nodes: Array<{label:string, children?:Array<...>, value:any}>`, `selected?: string` |
+| `Modal` | Floating box centered that obscures the background when opened. | `title?: string`, `content: RenderableNode`, `onClose: () => void` |
+| `Tooltip` | Small box appearing near an element when hovered or focused (keyboard). | `content: string`, `delay?: number` |
+| `Input` | Simple text input field (for prompts). | `placeholder?: string`, `value: string`, `onChange: (val:string)=>void`, `onSubmit: (val:string)=>void` |
 
-Ces composants retournent un `RenderableNode` (ou un arbre) que l’appelant peut intégrer dans son propre arbre de rendu.
+These components return a `RenderableNode` (or a tree) that the caller can integrate into their own render tree.
 
-### 8. Gestion des États et animations
-Pour les composants qui nécessitent un état interne (spinner, barre de progression, champ de saisie, arbre développable/réductible) le terminal offre :
-- Un mécanisme d’état local similaire à React (`useState` simplifié) où chaque nœud peut déclarer un état qui, lorsqu’il change, déclenche un nouveau rendu de ce nœud et de ses descendants.
-- Un système d’animation basé sur `requestAnimationFrame` (ou équivalent via `setInterval` avec timestamps) pour les propriétés numériques pouvant être interpolées (opacity, rotation du spinner, taille d’une barre de progression).
-Le développeur de composant n’a pas besoin de gérer le timer directement ; il indique la propriété à animer, la durée et la fonction d’interpolation (linear, ease-in-out, etc.) et le moteur s’en charge.
+### 8. State and Animation Management
+For components that require internal state (spinner, progress bar, input field, expandable/collapsible tree) the terminal offers:
+- A local state mechanism similar to React (`useState` simplified) where each node can declare a state that, when it changes, triggers a new render of this node and its descendants.
+- An animation system based on `requestAnimationFrame` (or equivalent via `setInterval` with timestamps) for numeric properties that can be interpolated (opacity, spinner rotation, progress bar size).
+The component developer does not need to manage the timer directly; they indicate the property to animate, the duration and the interpolation function (linear, ease-in-out, etc.) and the engine handles it.
 
-### 9. Mode non‑interactif / CI / JSON
-Lorsque le terminal détecte qu’il n’est pas rattaché à un TTY (via `process.stdout.isTTY === false` ou la variable `CI=true`), il peut basculer automatiquement en un mode de sortie alternative :
-- **Mode texte brut** : rendu uniquement des chaînes de texte sans séquences d’échappement ANSI, utile pour les logs ou la redirection vers un fichier.
-- **Mode JSON** : au lieu de produire des caractères visuels, le terminal émet une représentation JSON de l’arbre de rendu à chaque frame (ou uniquement lorsqu’il y a changement). Cela permet à un frontend externe (ex. une extension IDE) de reconstruire l’interface sans devoir parser des séquences d’échappement.
-Le mode à utiliser peut être configuré via une option globale (`dxg config set terminal.outputMode json`) ou déduit automatiquement.
+### 9. Non-interactive / CI / JSON Mode
+When the terminal detects that it is not attached to a TTY (via `process.stdout.isTTY === false` or the variable `CI=true`), it can automatically switch to an alternative output mode:
+- **Plain text mode**: render only text strings without ANSI escape sequences, useful for logs or redirection to a file.
+- **JSON mode**: instead of producing visual characters, the terminal emits a JSON representation of the render tree at each frame (or only when there is a change). This allows an external frontend (e.g. an IDE extension) to reconstruct the interface without having to parse escape sequences.
+The mode to use can be configured via a global option (`dxg config set terminal.outputMode json`) or deduced automatically.
 
-### 10. Extensibilité via les plugins
-Les plugins peuvent enrichir le terminal de deux manières principales :
-1. **Enregistrement de nouveaux types de nœuds** : en fournissant une fabrique qui, donnée un nom et des propriétés, retourne un `RenderableNode` personnalisé (ex. un nœud qui affiche un graphique sparkline ou un compteur de téléchargements).
-2. **Enregistrement de panneaux ou de composants de terminal** : via l’API du système de plugins (`registerTerminalExtension`) qui spécifie où le composant doit apparaître (ex. dans une barre latérale droite, en modal, ou intégré dans la ligne de statut).
-Le moteur de thème et le renderer doivent être suffisamment génériques pour gérer ces nouveaux nœuds ; idéalement, ils s’appuient sur une méthode `renderNode(node: RenderableNode, ctx: RenderContext) => void` que chaque type de nœud implémente (ou que le renderer délègue à un registre de renderers par type de nœud).
+### 10. Extensibility via Plugins
+Plugins can enrich the terminal in two main ways:
+1. **Registration of new node types**: by providing a factory that, given a name and properties, returns a custom `RenderableNode` (e.g. a node that displays a sparkline chart or a download counter).
+2. **Registration of panels or terminal components**: via the plugin system API (`registerTerminalExtension`) that specifies where the component should appear (e.g. in a right sidebar, in a modal, or integrated in the status line).
+The theme manager and renderer must be sufficiently generic to handle these new nodes; ideally, they rely on a method `renderNode(node: RenderableNode, ctx: RenderContext) => void` that each node type implements (or that the renderer delegates to a registry of renderers by node type).
 
-## Flux de rendu typé (exemple)
+## Typical Typed Render Flow (example)
 ```mermaid
-sequenceDiagonal
-    participant App as Code qui veut afficher quelque chose (CLI, Generator, Plugin)
+sequenceDiagram
+    participant App as Code that wants to display something (CLI, Generator, Plugin)
     participant TC as TerminalCore
     participant LE as Layout Engine
     participant TM as Theme Manager
     participant RD as Renderer (ANSI)
-    participant Ev as Event Parser (clavier/souris)
+    participant Ev as Event Parser (keyboard/mouse)
 
     App->>TC: render(rootNode)
     TC->>LE: calculate layout(rootNode, terminalSize)
-    LE-->>TC: arbre avec boîtes absolutess
-    TC->>TC: diff avec précédent rendu
-    alt changements détectés
+    LE-->>TC: tree with absolute boxes
+    TC->>TC: diff with previous render
+    alt changes detected
         TC->>RD: renderOnly(diffRegion)
-        RD-->>TC: séquences ANSI écrites sur stdout
-    else aucun changement et pas force
-        TC-->>App: pas de sortie (optimisation)
+        RD-->>TC: ANSI sequences written to stdout
+    else no change and not force
+        TC-->>App: no output (optimization)
     end
-    loop écoute d’entrée
+    loop input listening
         Ev-->>TC: keypress, mouse, resize events
-        TC->>App: propager l’événement aux handlers enregistrés (ex. onKeyPress sur un Input)
+        TC->>App: propagate the event to registered handlers (e.g. onKeyPress on an Input)
     end
 ```
 
-## Sécurité et bonnes pratiques
-- **Isolation** : le terminal ne fait aucune appel au système de fichiers, au réseau ou à des processus enfants ; toute interaction avec l’extérieur doit passer par l’appelant (ex. le CLI lit un fichier puis passe son contenu comme propriété à un nœud `Text`).
-- **Non‑privé par défaut** : sauf activation explicite, le terminal ne tente pas de lire le presse‑papiers ni d’accéder à la géolocalisation.
-- **Performance** : le rendu différé et le layout efficace visent à maintenir un taux de rafraîchissement de 60 fps même dans de grands tableaux ou arbres, tant que le nombre de réellement modifiés reste faible.
-- **Testabilité** : le simulateur renderer permet d’écrire des tests unitaires qui affirment que certaines coordonnées contiennent un certain caractère ou une certaine couleur, sans dépendre d’un vraie terminal.
-- **Accessibilité** : dans le rendu web, chaque nœud de rendu peut recevoir des attributs `role`, `aria-label`, `tabindex` pour une navigation au clavier et une lecture par les écrans.
-- **Thèmes respectant le contraste** : les thèmes fournis par défaut respectent un rapport de contraste d’au moins 4,5:1 pour le texte normal et 3:1 pour le texte grand, suivant les WCAG AA.
+## Security and Best Practices
+- **Isolation**: the terminal makes no calls to filesystem, network or child processes; any interaction with the outside must go through the caller (e.g. the CLI reads a file then passes its content as a property to a `Text` node).
+- **Non-private by default**: unless explicitly activated, the terminal does not attempt to read the clipboard or access geolocation.
+- **Performance**: deferred rendering and efficient layout aim to maintain a 60 fps refresh rate even in large tables or trees, as long as the number of actually modified elements remains low.
+- **Testability**: the simulator renderer allows writing unit tests that assert certain coordinates contain a certain character or color, without depending on a real terminal.
+- **Accessibility**: in web rendering, each renderable node can receive `role`, `aria-label`, `tabindex` attributes for keyboard navigation and screen reader reading.
+- **WCAG AA compliant themes**: the default themes provided respect a contrast ratio of at least 4.5:1 for normal text and 3:1 for large text, following WCAG AA.
 
-## Rejetés / alternatives considérées
-- **Terminal basé exclusivement sur les séquences ANSI** : aurait rendu difficile le support d’un rendu web ou d’un protocole avancé comme SIXEL sans réécrire beaucoup de code.
-- **Chaque composant gère son propre rendu** : aurait conduits à du code dupliqué et à des incohérences de layout (marge, padding, alignement hétérogènes).
-- **Pas de rendu différé** : aurait généré un flot constante de séquences d’échappement même quand rien ne change, surchargeant la liaison série ou consommant inutilement la batterie sur les terminaux sans fil.
-- **Thème statique (changé seulement au redémarrage)** : aurait limité la capacité de répondre à des changements de préférences en temps réel (ex. basculer entre clair et sombre basé sur l’heure du jour).
-- **Pas de séparation entre rendu et événements** : aurait mélangé les préoccupations, rendant difficile le remplacement du backend de rendu sans toucher la logique d’entrée.
+## Rejected / Alternatives Considered
+- **Terminal based exclusively on ANSI sequences**: would have made supporting a web rendering or an advanced protocol like SIXEL difficult without rewriting much code.
+- **Each component handles its own rendering**: would have led to duplicated code and layout inconsistencies (margins, padding, alignment heterogeneous).
+- **No deferred rendering**: would have generated a constant stream of escape sequences even when nothing changes, overloading the serial link or unnecessarily consuming battery on wireless terminals.
+- **Static theme (changed only at restart)**: would have limited the ability to respond to real-time preference changes (e.g. switching between light and dark based on time of day).
+- **No separation between rendering and events**: would have mixed concerns, making it difficult to replace the rendering backend without touching input logic.
 
-## Résumé des décisions prises
-- **Arbre de nœuds de rendu abstrait** (`Box`, `Text`, `Table`, etc.) totalement séparé de la logique d’entrée et du rendu spécifique au backend.
-- **Moteur de layout basé sur flexbox simplifié** pour déterminer les positions et tailles.
-- **Gestionnaire de thème à chaud** permettant de changer palette, bordures et cursor sans reconstruction complète.
-- **Analyseur d’événements robuste** transformant les séquences d’échappement brutes en événements sémantiques (clavier, souris, redimensionnement).
-- **Renderer abstrait** avec implémentations ANSI, simulateur et web, permettant de choisir le backend adapté au contexte.
-- **TerminalCore** qui orchestre le layout, le diff, le rendu différé et la distribution d’événements.
-- **Bibliothèque de composants prêts à l’emploi** construits à partir des nœuds de base (spinner, barre de progression, tableau, arbre, modal, tooltip, input).
-- **État local et système d’animation** intégrés pour permettre des éléments dynamiques sans gestion manuelle de timers.
-- **Mode non‑interactif / CI / JSON** automatique basé sur la détection de TTY ou de variables d’environnement.
-- **Extensibilité via les plugins** pour de nouveaux types de nœuds et des panneaux/extensions de terminal.
-- **Sécurité et bonnes pratiques** : aucun accès au FS ou réseau depuis le terminal, rendu différé pour performance, thèmes respectant l’accessibilité, testabilité via simulateur renderer.
+## Summary of Decisions Made
+- **Abstract renderable node tree** (`Box`, `Text`, `Table`, etc.) completely separated from input logic and backend-specific rendering.
+- **Simplified flexbox-based layout engine** to determine positions and sizes.
+- **Hot theme manager** allowing to change palette, borders and cursor without complete reconstruction.
+- **Robust event parser** transforming raw escape sequences into semantic events (keyboard, mouse, resizing).
+- **Abstract renderer** with ANSI, simulator and web implementations, allowing to choose the backend adapted to context.
+- **TerminalCore** that orchestrates layout, diff, deferred rendering and event distribution.
+- **Library of ready-to-use components** built from base nodes (spinner, progress bar, table, tree, modal, tooltip, input).
+- **Integrated local state and animation system** to allow dynamic elements without manual timer management.
+- **Automatic non-interactive / CI / JSON mode** based on TTY detection or environment variables.
+- **Extensibility via plugins** for new node types and terminal panels/extensions.
+- **Security and best practices**: no FS or network access from the terminal, deferred rendering for performance, WCAG-compliant themes, testability via simulator renderer.
 
-Cette architecture fournit une base solide pour une expérience terminale haut de gamme, modulable et adaptée aux besoins variés d’un CLI moderne, tout en restant prête à évoluer vers des protocoles de terminal plus riches ou des rendus web lorsqu’ils sont pertinents.
+This architecture provides a solid foundation for a high-end, modular and adaptable terminal experience suited to the varied needs of a modern CLI, while remaining ready to evolve towards richer terminal protocols or web renderings when relevant.
 
 ---
-

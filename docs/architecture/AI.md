@@ -1,220 +1,237 @@
-# Architecture de l'IA DXG
+# DXG AI Architecture
 
-Ce document décrit conceptuellement l'architecture d'orchestration de l'intelligence artificielle au sein de l'écosystème DXG. Il reste au niveau de la spécification ; aucune implémentation n'est fournie.
+This document conceptually describes the artificial intelligence orchestration architecture within the DXG ecosystem. It remains at the specification level; no implementation is provided.
 
 ## Vision
-L'IA dans DXG n'est pas une simple enveloppe autour d'un appel API à un modèle de langage ; elle constitue une couche d'orchestration qui combine plusieurs fournisseurs, des agents spécialisés, un registre de prompts, un construction de contexte riche, un cache sémantique et des mécanismes de fiabilité (rate‑limiter, retry, fallback). Cette approche permet de changer de fournisseur ou de modèle sans toucher le reste du système, d'offrir des fonctionnalités avancées telles que la révision de code, le refactoring assisté ou l'audit de sécurité, et de maintenir une expérience cohérente indépendamment du fournisseur sous-jacent.
 
-## Principes directeurs
-1. **Abstraction du fournisseur** : le détail du fournisseur (Claude, GPT, Gemini, Fable, futur) est caché derrière une interface commune.
-2. **Orchestration spécialisée** : différentes tâches (génération, révision, refactor, audit) sont traitées par des agents dédiés qui peuvent utiliser le même fournisseur ou des fournisseurs différents selon la pertinence.
-3. **Construction de contexte** : avant d'appeler un modèle, le système rassemble des informations provenant du workspace, de la configuration, du système de fichiers, des variables d’environnement et éventuellement de l’état du terminal (ex. sélection courante) pour produire un prompt précis et pertinent.
-4. **Registre de prompts versionnés** : les modèles de prompt sont stockés, nommés et versionnés, avec un schéma de validation pour leurs variables, permettant une réutilisation sûre et une évolution maîtrisée.
-5. **Cache sémantique** : les réponses sont mises en cache basé sur le hachage du prompt rendu, du contexte et de la version du fournisseur, réduisant les coûts et la latence pour les requêtes répétées.
-6. **Fiabilité** : rate‑limiter par fournisseur, exponentielle backoff avec jitter, retry automatique et fallback vers un autre fournisseur en cas d’échec ou de dépassement de quota.
-7. **Sécurité et confidentialité** : les clés API ne sont jamais enregistrées en clair ; elles sont lues depuis des variables d’environnement ou un gestionnaire de secrets et ne sont transmises que via des canaux TLS. Le contexte envoyé aux modèles peut être filtré pour exclure les données sensibles sauf si l'utilisateur l'autorise explícitement.
-8. **Extensibilité** : les plugins peuvent enregistrer de nouveaux fournisseurs, de nouveaux prompts ou même de nouveaux agents spécialisés.
+AI in DXG is not just a simple wrapper around a language model API call; it constitutes an orchestration layer that combines multiple providers, specialized agents, a prompt registry, a rich context construction, a semantic cache, and reliability mechanisms (rate‑limiter, retry, fallback). This approach allows changing providers or models without touching the rest of the system, offering advanced features such as code review, assisted refactoring, or security auditing, while maintaining a consistent experience regardless of the underlying provider.
 
-## Couches de l'architecture
+## Guiding Principles
 
-### 1. Interface du fournisseur (`AIProvider`)
-Tous les fournisseurs doivent implémenter cette interface minimale :
+1. **Provider Abstraction**: the provider detail (Claude, GPT, Gemini, Fable, future) is hidden behind a common interface.
+2. **Specialized Orchestration**: different tasks (generation, review, refactoring, audit) are handled by dedicated agents that can use the same provider or different providers according to relevance.
+3. **Context Construction**: before calling a model, the system gathers information from the workspace, configuration, file system, environment variables, and optionally the terminal state (e.g., current selection) to produce a precise and relevant prompt.
+4. **Versioned Prompt Registry**: prompt templates are stored, named, and versioned, with a validation schema for their variables, enabling safe reuse and controlled evolution.
+5. **Semantic Cache**: responses are cached based on the hash of the rendered prompt, context, and provider version, reducing costs and latency for repeated requests.
+6. **Reliability**: provider‑specific rate‑limiter, exponential backoff with jitter, automatic retry, and fallback to another provider in case of failure or quota exceeded.
+7. **Security and Confidentiality**: API keys are never stored in plain text; they are read from environment variables or a secrets manager and transmitted only via TLS channels. The context sent to models can be filtered to exclude sensitive data unless the user explicitly authorizes it.
+8. **Extensibility**: plugins can register new providers, new prompts, or even new specialized agents.
+
+## Architecture Layers
+
+### 1. Provider Interface (`AIProvider`)
+
+All providers must implement this minimal interface:
+
 ```ts
 interface AIProvider {
-  /** Génère une completion unique */
+  /** Generates a single completion */
   complete(prompt: string, opts?: AIOptions): Promise<string>;
-  /** Génère une completion en flux (utile pour le chat interactif) */
+  /** Generates a streaming completion (useful for interactive chat) */
   stream(prompt: string, opts?: AIOptions): AsyncIterable<string>;
-  /** Génère des embeddings vecteurs */
+  /** Generates vector embeddings */
   embed(text: string): Promise<number[]>;
 }
 ```
-Les options (`AIOptions`) peuvent contenir : `temperature`, `topP`, `maxTokens`, `stopSequences`, `signal` (AbortSignal pour annulation), etc.
 
-### 2. Registre de fournisseurs
-Le noyau de l'IA maintient un registre où l'on peut :
-- **Enregistrer** un fournisseur par nom (`registerProvider(name: string, provider: AIProvider)`).
-- **Obtenir** une instance enregistrée (`getProvider(name: string) => AIProvider | undefined`).
-- **Définir** le fournisseur par défaut (`setDefaultProvider(name: string)`).
-- **Lister** les fournisseurs disponibles.
+The options (`AIOptions`) may contain: `temperature`, `topP`, `maxTokens`, `stopSequences`, `signal` (AbortSignal for cancellation), etc.
 
-Les plugins peuvent appeler `registerProvider` pour ajouter un support pour un nouveau modèle (ex. un modèle open‑source hébergé en interne) ou un fournisseur propriétaire.
+### 2. Provider Registry
 
-### 3. Registre de prompts
-Chaque prompt est identifié par un nom et possède :
-- Un **modèle de chaîne** (ex. « Génère un composant React nommé {{name}} avec les props {{props}} »).
-- Un **schéma de validation** (optionnel, basé sur `@dxgjs/validation`) qui décrit les variables attendues et leurs contraintes.
-- Une **version** (semver) permettant de suivre les évolutions du prompt sans casser les consommateurs qui dépendent d’une version précédente.
+The AI core maintains a registry where one can:
+- **Register** a provider by name (`registerProvider(name: string, provider: AIProvider)`).
+- **Obtain** a registered instance (`getProvider(name: string) => AIProvider | undefined`).
+- **Set** the default provider (`setDefaultProvider(name: string)`).
+- **List** available providers.
 
-API du registre :
+Plugins can call `registerProvider` to add support for a new model (e.g., an internally hosted open‑source model) or a proprietary provider.
+
+### 3. Prompt Registry
+
+Each prompt is identified by a name and has:
+- A **string template** (e.g., "Generate a React component named {{name}} with props {{props}}").
+- An **optional validation schema** (based on `@dxgjs/validation`) describing the expected variables and their constraints.
+- A **version** (semver) allowing tracking of prompt evolution without breaking consumers that depend on a previous version.
+
+Prompt registry API:
 - `registerPrompt(name: string, template: string, schema?: Schema<any>, version: string = "1.0.0") => void`
 - `getPrompt(name: string) => { template: string; schema: Schema<any> | undefined; version: string } | undefined`
 - `listPrompts() => Array<{name: string; version: string}>`
 
-Lors de l'exécution, le système récupère le modèle, le rend avec les variables fournies (après validation du schéma si présent), puis passe le résultat au fournisseur.
+During execution, the system retrieves the template, renders it with the provided variables (after schema validation if present), then passes the result to the provider.
 
-### 4. Construction de contexte (`ContextBuilder`)
-Avant d'appeler un fournisseur, l'orchestrateur peut construire un contexte riche à partir de plusieurs sources :
-- **Workspace** : racine du projet, liste des paquets dépendants, scripts disponibles (via `@dxgjs/workspace`).
-- **Configuration** : paramètres spécifiques à l'IA chargés depuis `dxg.config.json` ou variables d’environnement (clés API, modèle préféré, température par défaut) (via `@dxgjs/config`).
-- **Système de fichiers** : contenu de fichiers pertinents (ex. le fichier actuellement ouvert dans un éditeur intégré, ou un fichier de configuration à refactorer) (via `@dxgjs/fs`).
-- **Variables d’environnement** : clés API, tokens, etc. (via `@dxgjs/env`).
-- **État du terminal** : sélection de texte actuelle, curseur, thème actif (via `@dxgjs/terminal` si l'orchestrateur est appelé depuis une session interactive).
-- **Historique** : précédents appels IA dans la même session (pour offrir une continuité de conversation).
+### 4. Context Builder (`ContextBuilder`)
 
-Le `ContextBuilder` expose une méthode `build(contextSpec: ContextSpec) => Promise<ContextObject>` où `contextSpec` indique quelles sources inclure et comment les transformer (ex. lire un fichier, extraire les dépendances d'un package.json, etc.). Le résultat est un objet plain qui peut être utilisé pour rendre le template de prompt.
+Before calling a provider, the orchestrator can build a rich context from multiple sources:
+- **Workspace**: project root, list of dependent packages, available scripts (via `@dxgjs/workspace`).
+- **Configuration**: AI‑specific parameters loaded from `dxg.config.json` or environment variables (API keys, preferred model, default temperature) (via `@dxgjs/config`).
+- **File System**: content of relevant files (e.g., the file currently open in an integrated editor, or a configuration file to refactor) (via `@dxgjs/fs`).
+- **Environment Variables**: API keys, tokens, etc. (via `@dxgjs/env`).
+- **Terminal State**: current text selection, cursor, active theme (via `@dxgjs/terminal` if the orchestrator is called from an interactive session).
+- **History**: previous AI calls in the same session (to offer conversation continuity).
 
-### 5. Orchestrateur principal (`AIOrchestrator`)
-L'orchestrateur coordonne toutes les étapes :
-1. **Sélection du fournisseur** : utilisation du fournisseur par défaut ou celui spécifié dans les options de l'appel.
-2. **Récupération du prompt** : recherche du template nommé dans le registre.
-3. **Validation des variables** : si le prompt possède un schéma, validation du dictionnaire de variables fourni par l'appelant.
-4. **Construction du contexte** : (optionnel) exécution du `ContextBuilder` selon les indications du prompt (certains prompts peuvent ne nécessiter aucun contexte supplémentaire, d'autres peuvent vouloir inclure le contenu d'un fichier).
-5. **Rendu du template** : substitution des variables (et éventuellement du contexte) dans le modèle de chaîne.
-6. **Clé de cache** : calcul d'un hash basé sur le texte rendu, le nom du fournisseur, la version du modèle et d'autres paramètres pertinents.
-7. **Lookup du cache** : si la clé existe et est valide (non expirée), retourner la réponse mise en cache.
-8. **Appel au fournisseur** : sinon, appeler `complete` (ou `stream` si demandé) avec gestion du rate‑limiter, retry et fallback.
-9. **Mise en cache** : stocker la réponse reçue (avec horodatage d'expiration).
-10. **Post‑treatment éventuel** : extraction de blocs de code, formatage, ou passage à un agent spécialisé (voir ci‑dessous).
-11. **Retour** : fournir le résultat à l'appelant.
+The `ContextBuilder` exposes a method `build(contextSpec: ContextSpec) => Promise<ContextObject>` where `contextSpec` indicates which sources to include and how to transform them (e.g., read a file, extract dependencies from a package.json, etc.). The result is a plain object usable for rendering the prompt template.
 
-L'orchestrateur expose principalement deux méthodes :
-- `execute(taskName: string, variables: Record<string, any>, options?: { provider?: string; stream?: boolean; }): Promise<any>` – pour une tâche nommée (voir registre de tâches ci‑dessous) ou un prompt libre.
-- `prompt(promptName: string, variables: Record<string, any>, options?: { provider?: string; stream?: boolean; }): Promise<any>` – exécute directement un prompt enregistré.
+### 5. Main Orchestrator (`AIOrchestrator`)
 
-### 6. Agents spécialisés
-Au lieu d’appeler directement le fournisseur pour chaque besoin, le système définit des agents qui encapsulent une intention particulière et peuvent appliquer du pré‑ ou post‑treatment.
+The orchestrator coordinates all steps:
+1. **Provider Selection**: use the default provider or the one specified in the call options.
+2. **Prompt Retrieval**: search for the named template in the registry.
+3. **Variable Validation**: if the prompt has a schema, validate the variable dictionary provided by the caller.
+4. **Context Construction**: (optional) execute the `ContextBuilder` according to the prompt’s indications (some prompts may need no extra context, others may want to include file content).
+5. **Template Rendering**: substitute variables (and possibly context) into the string template.
+6. **Cache Key Calculation**: compute a hash based on the rendered text, provider name, model version, and other relevant parameters.
+7. **Cache Lookup**: if the key exists and is valid (not expired), return the cached response.
+8. **Provider Call**: otherwise, call `complete` (or `stream` if requested) with rate‑limiter, retry, and fallback management.
+9. **Caching**: store the received response (with expiration timestamp).
+10. **Optional Post‑treatment**: extract code blocks, format, or pass to a specialized agent (see below).
+11. **Return**: provide the result to the caller.
+
+The orchestrator mainly exposes two methods:
+- `execute(taskName: string, variables: Record<string, any>, options?: { provider?: string; stream?: boolean; }): Promise<any>` – for a named task (see task registry below) or a free prompt.
+- `prompt(promptName: string, variables: Record<string, any>, options?: { provider?: string; stream?: boolean; }): Promise<any>` – executes a registered prompt directly.
+
+### 6. Specialized Agents
+
+Instead of calling the provider directly for each need, the system defines agents that encapsulate a particular intention and may apply pre‑ or post‑treatment.
 
 #### Agent Generator
-- **Objectif** : produire du code ou du texte à partir d’une description.
-- **Workflow** :
-  1. Utiliser un prompt de génération enregistré (ex. « generate-component ») ;
-  2. Construire le contexte (workspace, sélection de fichier, etc.) ;
-  3. Appeler le fournisseur ;
-  4. Extraire le bloc de code du retour (en cherchant des délimiteurs comme ```tsx…```) ;
-  5. Optionnellement passer le code à un formateur (Prettier, ESLint via `@dxgjs/validation` ou intégration d’un linter) ;
-  6. Retourner le code fini.
+- **Objective**: produce code or text from a description.
+- **Workflow**:
+  1. Use a registered generation prompt (e.g., « generate-component »).
+  2. Build the context (workspace, file selection, etc.).
+  3. Call the provider.
+  4. Extract the code block from the response (by looking for delimiters like ```tsx…```).
+  5. Optionally pass the code to a formatter (Prettier, ESLint via `@dxgjs/validation` or linter integration).
+  6. Return the final code.
 
 #### Agent Reviewer (Code Reviewer)
-- **Objectif** : analyser du code existant pour y détecter des bugs, des problèmes de style, des vulnérabilités légères ou des améliorations possibles.
-- **Workflow** :
-  1. Utiliser un prompt de révision (ex. « Revise le suivant code TSX pour les meilleures pratiques React et détecte les props inutilisées ») ;
-  2. Fournir le code à reviewer comme variable ;
-  3. Appeler le fournisseur ;
-  4. Parser la réponse pour extraire une liste de commentaires (chaque commentaire comprenant localisation, sévérité, suggestion) ;
-  5. Retourner une structurée d’issues.
+- **Objective**: analyze existing code to detect bugs, style issues, minor vulnerabilities, or improvement opportunities.
+- **Workflow**:
+  1. Use a registered review prompt (e.g., « Review the following TSX code for React best practices and detect unused props »).
+  2. Provide the code to review as a variable.
+  3. Call the provider.
+  4. Parse the response to extract a list of comments (each comment includes location, severity, suggestion).
+  5. Return a structured issues list.
 
 #### Agent Refactorer
-- **Objectif** : transformer du code selon une intention spécifiée (ex. « convertir cette classe en hooks fonctionnels », « extraire cette fonction en utility »).
-- **Workflow** similaire au reviewer, mais le prompt demande une transformation et le retour attendue est le nouveau code (éventuellement avec une explication).
+- **Objective**: transform code according to a specified intention (e.g., « convert this class to functional hooks », « extract this function into a utility »).
+- **Workflow**: similar to the reviewer, but the prompt requests a transformation and the expected return is the new code (possibly with an explanation).
 
-#### Agent Auditor (Sécurité, performance, licences)
-- **Objectif** : vérifier le code ou la configuration contre des règles connues (ex. dépendances vulnérables, exposition de secrets, boucles infinies potentielles).
-- **Workflow** :
-  1. Peut combiner analyse statique locale (via `@dxgjs/validation`, `@dxgjs/fs` pour lire `package-lock.yaml`) avec appel IA pour des jugements plus subtils (ex. « Cette fonction d’authentification résiste‑t-elle aux attaques par force brute ? ») ;
-  2. Retourner un rapport d’audit.
+#### Agent Auditor (Security, Performance, Licenses)
+- **Objective**: verify code or configuration against known rules (e.g., vulnerable dependencies, secret exposure, potential infinite loops).
+- **Workflow**:
+  1. May combine local static analysis (via `@dxgjs/validation`, `@dxgjs/fs` to read `package-lock.yaml`) with AI calls for subtler judgments (e.g., « Does this authentication function resist brute‑force attacks? »).
+  2. Return an audit report.
 
 #### Agent Planner
-- **Objectif** : décomposer une demande de haut niveau en sous‑tâches ordonnées (ex. « Créer un nouveau blog avec authentification » → [créer le modèle de données, créer l’API REST, créer le composant UI, ajouter les tests]).
-- **Workflow** :
-  1. Utiliser un prompt de planification qui demande de retourner une liste d’étapes ordonnées ;
-  2. Exécuter le fournisseur ;
-  3. Parser la réponse en tableau d’objets `{title: string, description?: string, estimatedEffort?: string}` ;
-  4. Retourner le plan à l’appelant qui pourra alors exécuter chaque étape (possiblement en invoquant d’autres agents ou des generators).
+- **Objective**: decompose a high‑level request into ordered subtasks (e.g., « Create a new blog with authentication » → [create data model, create REST API, create UI component, add tests]).
+- **Workflow**:
+  1. Use a planning prompt that asks to return an ordered list of steps.
+  2. Execute the provider.
+  3. Parse the response into an array of objects `{title: string, description?: string, estimatedEffort?: string}`.
+  4. Return the plan to the caller, who can then execute each step (possibly by invoking other agents or generators).
 
-### 7. Cache sémantique
-Le cache repose sur une clé déterministe :
+### 7. Semantic Cache
+
+The cache relies on a deterministic key:
 ```
 hash(
   renderedPrompt ||
   providerName ||
   modelVersion ||
-  options.hash()   // température, topP, maxTokens, etc.
+  options.hash()   // temperature, topP, maxTokens, etc.
 )
 ```
-Le cache peut être implémenté de plusieurs façons selon les besoins :
-- **In‑memory** (défaut pour le développement) : Map simple avec limite de taille LRU.
-- **Redis‑like** (optionnel pour les environnements partagés ou les déploiements distribués) : permettant le partage du cache entre plusieurs instances du CLI ou des services backend.
-- **Disque** (optionnel pour la persistance entre redémarrages) : fichier JSON ou SQLite contenant les entrées avec horodatage.
 
-La politique d’expiration est basée sur le temps (TTL configurable, par défaut 1 heure) ou sur la taille (éviction LRU cuando se supera el límite máximo de entradas).
+The cache can be implemented in several ways according to needs:
+- **In‑memory** (default for development): simple LRU‑limited Map.
+- **Redis‑like** (optional for shared or distributed environments): enabling cache sharing between multiple CLI instances or backend services.
+- **Disk** (optional for persistence across restarts): JSON or SQLite file containing entries with timestamps.
 
-### 8. Rate‑limiter, retry et fallback
-Chaque fournisseur enregistré possède un quota configuré (requêtes par seconde, par heure, ou nombre de tokens). L'orchestrateur enveloppe chaque appel dans :
-- **Rate‑limiter** : file d’attente qui respecte le quota (implémentation type leaky bucket ou fixed window avec redécoupage).
-- **Retry** : en cas d’erreur temporelle (timeout, 5xx, rate limit exceeded), nouvelle tentative avec exponentielle backoff (base 500 ms, facteur 2, jitter) jusqu’à un maximum de 3 tentatives.
-- **Fallback** : si toutes les tentatives échouent ou si le fournisseur signale un dépassement de quota définitif, l'orchestrateur essaye le prochain fournisseur dans une liste ordonnée (configurée par l'utilisateur ou définie par défaut comme `[claude, gpt, gemini, fable]`). Si aucun fournisseur ne réussit, une erreur est propagée à l'appelant.
+Expiration policy is time‑based (configurable TTL, default 1 hour) or size‑based (LRU eviction when maximum entries exceeded).
 
-Ces mécanismes garantissent une expérience fluide même lorsque les services externes sont intermittents ou soumis à des limitations.
+### 8. Rate‑limiter, Retry, and Fallback
 
-## Flux de données typé (exemple d’appel)
+Each registered provider has a configured quota (requests per second, per hour, or token count). The orchestrator wraps each call with:
+- **Rate‑limiter**: a queue that respects the quota (implementation type leaky bucket or fixed window with re‑windowing).
+- **Retry**: on temporal error (timeout, 5xx, rate limit exceeded), retry with exponential backoff (base 500 ms, factor 2, jitter) up to a maximum of 3 attempts.
+- **Fallback**: if all attempts fail or the provider signals a definitive quota exceeded, the orchestrator tries the next provider in an ordered list (configured by the user or defaulted to `[claude, gpt, gemini, fable]`). If no provider succeeds, an error is propagated to the caller.
+
+These mechanisms ensure a smooth experience even when external services are intermittent or rate‑limited.
+
+## Typical Data Flow (example call)
+
 ```mermaid
 sequenceDiagram
-    participant CL as Appelant (CLI, Generator, Plugin)
+    participant CL as Caller (CLI, Generator, Plugin)
     participant AI as AIOrchestrator
     participant PR as Prompt Registry
     participant CB as Context Builder
     participant PV as Provider Registry
     participant PRV as Specified Provider
     participant CA as Semantic Cache
-    participant RT as AI Provider (réel)
+    participant RT as AI Provider (real)
 
     CL->>AI: execute(taskName, variables)
     AI->>PR: getPrompt(taskName)
-    alt taskName non trouvé
-        AI-->>CL: Erreur prompt inconnu
-    else trouvé
-        PR-->>AI: template, schéma, version
-        AI->>PRV: validate(variables, schéma)
-        alt validation échoue
-            AI-->>CL: Erreur de validation
+    alt taskName not found
+        AI-->>CL: Error unknown prompt
+    else found
+        PR-->>AI: template, schema, version
+        AI->>PRV: validate(variables, schema)
+        alt validation fails
+            AI-->>CL: Validation error
         else validation OK
-            PRV-->>AI: variables valides
+            PRV-->>AI: valid variables
             AI->>CB: build(contextSpec from prompt)
-            CB-->>AI: contexte construit
-            AI: render template + variables + contexte
+            CB-->>AI: built context
+            AI: render template + variables + context
             AI->>CA: compute cache key
             alt cache hit
-                CA-->>AI: réponse mise en cache
-                AI-->>CL: retourner réponse
+                CA-->>AI: cached response
+                AI-->>CL: return response
             else cache miss
-                AI->>PV: getProvider(default or spécifié)
-                PV-->>AI: instance du fournisseur
-                loop retry/jusqu'à max 3
-                    AI->>RT: complete(prompt rendu, options)
-                    alt échec temporaire
-                        RT-->>AI: erreur (timeout, 5xx, rate limit)
-                        AI: attendre backoff + jitter
-                    else succès
-                        RT-->>AI: réponse texte
+                AI->>PV: getProvider(default or specified)
+                PV-->>AI: provider instance
+                loop retry/up to max 3
+                    AI->>RT: complete(rendered prompt, options)
+                    alt temporary failure
+                        RT-->>AI: error (timeout, 5xx, rate limit)
+                        AI: wait for backoff + jitter
+                    else success
+                        RT-->>AI: text response
                         break
                 end
-                alt toutes les tentatives échouées ou quota épuisé
-                    AI: essayer prochain fournisseur dans liste de fallback
+                alt all attempts failed or quota exhausted
+                    AI: try next provider in fallback list
                 end
-                AI->>CA: stocker réponse dans cache
-                AI-->>CL: retourner réponse
+                AI->>CA: store response in cache
+                AI-->>CL: return response
             end
         end
     end
 ```
 
-## Sécurité et confidentialité
-- **Clés API** : ne sont jamais codées en dur ; elles doivent être fournies via des variables d’environnement (ex. `CLAUDE_API_KEY`, `OPENAI_API_KEY`) ou via un gestionnaire de secrets intégré au système d’exploitation. Le chargeur de configuration (`@dxgjs/core` ou `@dxgjs/config`) ne les expose pas dans les logs grâce à un masque automatique emprunté à `@dxgjs/env`.
-- **Contexte transmis** : le `ContextBuilder` permet de exclure des champs sensibles par défaut (ex. toute variable contenant le mot-clé `secret`, `key`, `token`). L'appelant peut toutefois choisir d'inclure expressément un secret après avoir été averti.
-- **Journalisation** : les appels à l'IA sont journalisés au niveau `debug` uniquement, et ne contiennent jamais le prompt complet ni la réponse (seulement le nom du tâche, le fournisseur utilisé, la durée et le statut).
-- **Conformité RGPD / CCPA** : aucune donnée personnelle n'est envoyée à moins que l'utilisateur ne le décide explicite (ex. en passant des données utilisateur dans les variables du prompt). Le système ne collecte pas de télémétrie d'utilisation des IA sauf si la télémétrie générale de DXG est activée et que l'utilisateur y consent.
+## Security and Confidentiality
 
-## Points d'extension pour les plugins
-Les plugins peuvent étendre l'IA de trois manières principales :
-1. **Enregistrer un nouveau fournisseur** : via `AIOrchestrator.registerProvider(name, factory)`.
-2. **Enregistrer un nouveau prompt** : via `AIOrchestrator.registerPrompt(name, template, schema, version)`.
-3. **Enregistrer un nouvel agent spécialisé** : bien que les agents principaux soient fournis par le core, un plugin peut fournir une fonction qui, étant donné un nom de tâche, retourne une promesse de résultat (en interne il peut appeler l'orchestrateur avec un prompt personnalisé ou effectuer du pré/post‑treatment spécifique). Le noyau pourrait offrir une fonction `registerAgent(taskName: string, handler: (vars, options) => Promise<any>) => void` pour permettre cela.
+- **API Keys**: never hard‑coded; must be provided via environment variables (e.g., `CLAUDE_API_KEY`, `OPENAI_API_KEY`) or an integrated secrets manager. The configuration loader (`@dxgjs/core` or `@dxgjs/config`) does not expose them in logs thanks to an automatic mask borrowed from `@dxgjs/env`.
+- **Transmitted Context**: the `ContextBuilder` allows excluding sensitive fields by default (e.g., any variable containing the keyword `secret`, `key`, `token`). The caller may, however, choose to include a secret explicitly after being warned.
+- **Logging**: AI calls are logged at `debug` level only, and never contain the full prompt or response (only task name, provider used, duration, and status).
+- **GDPR / CCPA Compliance**: no personal data is sent unless the user decides explicitly (e.g., by passing user data in the prompt variables). The system does not collect AI usage telemetry unless DXG’s general telemetry is enabled and the user consents.
 
-Chaque extension est soumise aux mêmes règles de validation et de sandbox que les autres types de plugins.
+## Extension Points for Plugins
 
-## Configuration globale de l'IA
-Un sous‑objet dans `dxg.config.json` (ou une section dédiée dans le fichier de configuration) peut contenir :
+Plugins can extend DXG’s AI in three main ways:
+1. **Register a new provider**: via `AIOrchestrator.registerProvider(name, factory)`.
+2. **Register a new prompt**: via `AIOrchestrator.registerPrompt(name, template, schema, version)`.
+3. **Register a new specialized agent**: although the core agents are provided by the core, a plugin can supply a function that, given a task name, returns a promise of result (internally it may call the orchestrator with a custom prompt or perform specific pre/post‑treatment). The core could offer a function `registerAgent(taskName: string, handler: (vars, options) => Promise<any>) => void` to allow this.
+
+Each extension is subject to the same validation and sandbox rules as other plugin types.
+
+## Global AI Configuration
+
+A sub‑object in `dxg.config.json` (or a dedicated section in the configuration file) may contain:
 ```json
 {
   "ai": {
@@ -228,27 +245,27 @@ Un sous‑objet dans `dxg.config.json` (ou une section dédiée dans le fichier 
   }
 }
 ```
-Le chargeur de configuration (@dxgjs/config) lit ce bloc et le fournit à l'orchestrateur lors de son initialisation.
 
-## Rejetés / alternatives considérées
-- **Appel direct au fournisseur dans chaque paquet** : aurait créé un couplage fort et rendu impossible le changement de fournisseur sans mettre à jour plusieurs paquets.
-- **Un seul prompt monolithique** : aurait limité la réutilisation et rendu la gestion des versions complexe.
-- **Pas de contexte** : aurait forcé chaque appel à répéter la logique de rassemblement d'informations, conduisant à du code dupliqué et à des prompts moins pertinents.
-- **Cache basé uniquement sur le texte du prompt** : aurait ignoré les différences de fournisseur, de modèle ou d'options, entraînant des retours potentiellement inappropriés lorsqu'on change de paramètre.
-- **Aucun mécanisme de fallback** : aurait rendu le système fragile face aux pannes de service ou aux dépassements de quota.
+The configuration loader (`@dxgjs/config`) reads this block and provides it to the orchestrator at initialization.
 
-## Résumé des décisions prises
-- **Fournisseur abstrait** avec interface commune (`complete`, `stream`, `embed`).
-- **Registre de prompts versionnés avec validation de schéma**.
-- **Construction de contexte modulaire** permettant d'agréger workspace, config, FS, env, terminal.
-- **Orchestrateur centralisé** qui gère la sélection du fournisseur, le rendu, le cache, le taux de limite, les tentatives nouvelles et le basculement.
-- **Agents spécialisés** (générateur, réviseur, refactorer, auditeur, planificateur) pour encapsuler des intentions courantes.
-- **Cache sémantique** basé sur le hachage du prompt rendu + fournisseur + options.
-- **Rate‑limiter, exponentielle backoff avec jitter, et fallback entre fournisseurs**.
-- **Sécurité** : clés API via variables d’environnement, masque automatique des secrets dans les logs, filtrage du contexte sensible par défaut.
-- **Extensibilité** pour les plugins afin d’ajouter de nouveaux fournisseurs, prompts ou agents.
+## Rejected / Alternatives Considered
 
-Cette architecture offre une base solide pour des fonctionnalités IA avancées tout en restant interchangeable, fiable et sécurisée.
+- **Direct provider call in each package**: would have created tight coupling and made provider changes require updates across multiple packages.
+- **Single monolithic prompt**: would have limited reuse and complicated version management.
+- **No context**: would have forced each call to repeat information‑gathering logic, leading to duplicated code and less relevant prompts.
+- **Prompt‑only based cache**: would have ignored provider, model, or option differences, potentially returning inappropriate responses when parameters change.
+- **No fallback mechanism**: would have made the fragile in the face of service outages or quota exceedances.
 
----
+## Summary of Decisions Made
 
+- **Abstract provider** with common interface (`complete`, `stream`, `embed`).
+- **Versioned prompt registry with schema validation**.
+- **Modular context construction** enabling workspace, config, FS, env, terminal aggregation.
+- **Centralized orchestrator** managing provider selection, rendering, cache, rate limiting, retries, and fallbacks.
+- **Specialized agents** (generator, reviewer, refactorer, auditor, planner) to encapsulate common intentions.
+- **Semantic cache** based on hash of rendered prompt + provider + options.
+- **Rate‑limiter, exponential backoff with jitter, and provider fallback**.
+- **Security**: API keys via environment variables, automatic secret masking in logs, context‑level sensitive data filtering by default.
+- **Extensibility** for plugins to add new providers, prompts, or agents.
+
+This architecture provides a solid foundation for advanced AI features while remaining interchangeable, reliable, and secure.

@@ -7,7 +7,17 @@ import {
   readFileSync,
   writeFileSync,
   statSync,
-  readdirSync
+  readdirSync,
+  pathExists,
+  pathExistsSync,
+  mkdir,
+  mkdirSync,
+  rm,
+  rmSync,
+  copyFile,
+  copyFileSync,
+  appendFile,
+  appendFileSync
 } from './src/index';
 import {
   join,
@@ -108,5 +118,117 @@ describe('FS Abstraction Layer', () => {
     expect(join('/a/b', 'c')).toBe(path.join('/a/b', 'c'));
     expect(dirname('/a/b/c')).toBe(path.dirname('/a/b/c'));
     expect(resolve('/a/b', '../c')).toBe(path.resolve('/a/b', '../c'));
+  });
+
+  test('should create directory async', async () => {
+    const dirPath = join(TEST_DIR, 'new-dir');
+    await mkdir(dirPath, { recursive: true });
+    const exists = await pathExists(dirPath);
+    expect(exists).toBe(true);
+
+    // Verify it's a directory
+    const stats = await stat(dirPath);
+    expect(stats.isDirectory()).toBe(true);
+  });
+
+  test('should create directory sync', () => {
+    const dirPath = join(TEST_DIR, 'new-dir-sync');
+    mkdirSync(dirPath, { recursive: true });
+    const exists = pathExistsSync(dirPath);
+    expect(exists).toBe(true);
+
+    // Verify it's a directory
+    const stats = statSync(dirPath);
+    expect(stats.isDirectory()).toBe(true);
+  });
+
+  test('should remove file async', async () => {
+    const filePath = join(TEST_DIR, 'to-remove.txt');
+    await writeFile(filePath, 'content', { encoding: 'utf8' });
+    let exists = await pathExists(filePath);
+    expect(exists).toBe(true);
+
+    await rm(filePath);
+    exists = await pathExists(filePath);
+    expect(exists).toBe(false);
+  });
+
+  test('should remove file sync', () => {
+    const filePath = join(TEST_DIR, 'to-remove-sync.txt');
+    writeFileSync(filePath, 'content', { encoding: 'utf8' });
+    let exists = pathExistsSync(filePath);
+    expect(exists).toBe(true);
+
+    rmSync(filePath);
+    exists = pathExistsSync(filePath);
+    expect(exists).toBe(false);
+  });
+
+  test('should copy file async', async () => {
+    const srcPath = join(TEST_DIR, 'source.txt');
+    const destPath = join(TEST_DIR, 'destination.txt');
+    const content = 'Hello, copy!';
+
+    await writeFile(srcPath, content, { encoding: 'utf8' });
+    await copyFile(srcPath, destPath);
+
+    const srcContent = await readFile(srcPath, { encoding: 'utf8' });
+    const destContent = await readFile(destPath, { encoding: 'utf8' });
+    expect(srcContent).toBe(content);
+    expect(destContent).toBe(content);
+  });
+
+  test('should copy file sync', () => {
+    const srcPath = join(TEST_DIR, 'source-sync.txt');
+    const destPath = join(TEST_DIR, 'destination-sync.txt');
+    const content = 'Hello, copy sync!';
+
+    writeFileSync(srcPath, content, { encoding: 'utf8' });
+    copyFileSync(srcPath, destPath);
+
+    const srcContent = readFileSync(srcPath, { encoding: 'utf8' });
+    const destContent = readFileSync(destPath, { encoding: 'utf8' });
+    expect(srcContent).toBe(content);
+    expect(destContent).toBe(content);
+  });
+
+  test('should append to file async', async () => {
+    const filePath = join(TEST_DIR, 'append-test.txt');
+    const initialContent = 'Initial content\n';
+    const appendedContent = 'Appended content';
+    const expectedContent = initialContent + appendedContent;
+
+    await writeFile(filePath, initialContent, { encoding: 'utf8' });
+    await appendFile(filePath, appendedContent, { encoding: 'utf8' });
+
+    const result = await readFile(filePath, { encoding: 'utf8' });
+    expect(result).toBe(expectedContent);
+  });
+
+  test('should append to file sync', () => {
+    const filePath = join(TEST_DIR, 'append-test-sync.txt');
+    const initialContent = 'Initial content\n';
+    const appendedContent = 'Appended content sync';
+    const expectedContent = initialContent + appendedContent;
+
+    writeFileSync(filePath, initialContent, { encoding: 'utf8' });
+    appendFileSync(filePath, appendedContent, { encoding: 'utf8' });
+
+    const result = readFileSync(filePath, { encoding: 'utf8' });
+    expect(result).toBe(expectedContent);
+  });
+
+  test('should create nested directories async', async () => {
+    const dirPath = join(TEST_DIR, 'nested', 'deep', 'directory');
+    await mkdir(dirPath, { recursive: true });
+    const exists = await pathExists(dirPath);
+    expect(exists).toBe(true);
+  });
+
+  test('should create nested directories sync', () => {
+    const dirPath = join(TEST_DIR, 'nested-sync', 'deep-sync', 'directory-sync');
+    mkdirSync(dirPath, { recursive: true });
+    const exists = pathExistsSync(dirPath);
+    expect(exists).toBe(true);
   });
 });

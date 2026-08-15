@@ -1,499 +1,498 @@
-# API publiques DXG (conceptuelles)
+# DXG Public APIs (Conceptual)
 
-Cette section décrit conceptuellement les API publiques des différents packages DXG. Aucune implémentation n'est fournie ici ; seules les signatures, les responsabilités et les consommateurs sont expliqués.
+This section conceptually describes the public APIs of the different DXG packages. No implementation is provided here; only the signatures, responsibilities, and consumers are explained.
 
-Chaque entrée indique :
-- **Ce que fait l’API**
-- **Quel paquet la possède**
-- **Qui la consomme** (ex. CLI, autres packages, plugins)
-- **Public ou interne** (visibilité hors du monorepo ou uniquement interne)
+Each entry indicates:
+- **What the API does**
+- **Which package owns it**
+- **Who consumes it** (e.g. CLI, other packages, plugins)
+- **Public or internal** (visibility outside the monorepo or only internal)
 
 ---
 
 ## @dxgjs/terminal
 
 ### `terminal.render(tree: RenderableNode, options?: RenderOptions) => void`
-- **Ce que fait** : Rend un arbre de nœuds terminaux (`Box`, `Text`, `Table`, etc.) dans le terminal réel, en appliquant le thème actif et en ne mettant à jour que les régions modifiées (render différé).
-- **Possédé par** : `@dxgjs/terminal`
-- **Consommateurs** : CLI (pour afficher le résultat des commandes), prompts interactifs (`@dxgjs/prompts`), panneaux de plugins, sorties de génération de code, tout composant qui veut afficher du contenu riche.
-- **Public** : Oui
+- **What it does**: Renders a terminal node tree (`Box`, `Text`, `Table`, etc.) in the real terminal, applying the active theme and updating only modified regions (deferred rendering).
+- **Owned by**: `@dxgjs/terminal`
+- **Consumers**: CLI (to display command results), interactive prompts (`@dxgjs/prompts`), plugin panels, code generation outputs, any component that wants to display rich content.
+- **Public**: Yes
 
 ### `terminal.clear() => void`
-- **Ce que fait** : Efface complètement l’écran terminal et replace le curseur en haut‑gauche.
-- **Possédé par** : `@dxgjs/terminal`
-- **Consommateurs** : CLI (avant d’afficher une nouvelle vue), prompts, écrans de bienvenue.
-- **Public** : Oui
+- **What it does**: Completely clears the terminal screen and places the cursor in the top-left corner.
+- **Owned by**: `@dxgjs/terminal`
+- **Consumers**: CLI (before displaying a new view), prompts, welcome screens.
+- **Public**: Yes
 
 ### `terminal.resize(width: number, height: number) => void`
-- **Ce que fait** : Informe le terminal d’un changement de taille de la console (généralement déclenché par un événement SIGWINCH ou via l’API du terminal).
-- **Possédé par** : `@dxgjs/terminal`
-- **Consommateurs** : Gestionnaire d’événements du terminal interne, CLI pour adapter les layouts.
-- **Public** : Oui (souvent utilisé en interne mais exposé pour les intégrations avancées)
+- **What it does**: Informs the terminal of a console size change (typically triggered by a SIGWINCH event or via the terminal API).
+- **Owned by**: `@dxgjs/terminal`
+- **Consumers**: Internal terminal event handler, CLI to adapt layouts.
+- **Public**: Yes (often used internally but exposed for advanced integrations)
 
 ### `terminal.onKeyPress(handler: (key: KeyEvent) => void) => () => void`
-- **Ce que fait** : Enregistre un rappel pour les événements de touche clavier ; retourne une fonction de désabonnement.
-- **Possédé par** : `@dxgjs/terminal`
-- **Consommateurs** : Prompts interactifs, panneaux personnalisés, plugins qui veulent ajouter des raccourcis clavier.
-- **Public** : Oui
+- **What it does**: Registers a callback for keyboard key events; returns an unsubscribe function.
+- **Owned by**: `@dxgjs/terminal`
+- **Consumers**: Interactive prompts, custom panels, plugins that want to add keyboard shortcuts.
+- **Public**: Yes
 
 ### `terminal.getTheme() => Theme`
-- **Ce que fait** : Retourne l’objet thème actuellement actif (couleurs, styles de bordure, caractères de ligne).
-- **Possédé par** : `@dxgjs/terminal`
-- **Consommateurs** : Composants de rendu qui ont besoin de connaître les couleurs actuelles, plugins qui souhaitent adapter leur apparence.
-- **Public** : Oui
+- **What it does**: Returns the currently active theme object (colors, border styles, line characters).
+- **Owned by**: `@dxgjs/terminal`
+- **Consumers**: Rendering components that need to know current colors, plugins wishing to adapt their appearance.
+- **Public**: Yes
 
 ### `terminal.setTheme(theme: Theme) => void`
-- **Ce que fait** : Définit un nouveau thème actif ; déclenche un re‑render de l’affichage actuel.
-- **Possédé par** : `@dxgjs/terminal`
-- **Consommateurs** : CLI (changement de thème via commande), plugins, fichiers de configuration.
-- **Public** : Oui
+- **What it does**: Sets a new active theme; triggers a re-render of the current display.
+- **Owned by**: `@dxgjs/terminal`
+- **Consumers**: CLI (theme change via command), plugins, configuration files.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/logger
 
 ### `logger.createLogger(options?: LoggerOptions) => LoggerInstance`
-- **Ce que fait** : Crée une nouvelle instance de logger avec les options spécifiées (niveau minimal, formatters, transports, contexte par défaut).
-- **Possédé par** : `@dxgjs/logger`
-- **Consommateurs** : Tous les packages qui ont besoin de journaliser (core, terminal, cli, generators, IA, etc.), plugins, applications.
-- **Public** : Oui
+- **What it does**: Creates a new logger instance with the specified options (minimum level, formatters, transports, default context).
+- **Owned by**: `@dxgjs/logger`
+- **Consumers**: All packages that need to log (core, terminal, cli, generators, AI, etc.), plugins, applications.
+- **Public**: Yes
 
 ### `loggerInstance.log(level: LogLevel, message: string, meta?: Record<string, any>) => void`
-- **Ce que fait** : Écrit un message de journal au niveau spécifié, en enrichissant avec le contexte éventuel.
-- **Possédé par** : `@dxgjs/logger` (sur l’instance)
-- **Consommateurs** : Code interne des packages.
-- **Public** : Oui (via l’instance retournée)
+- **What it does**: Writes a log message at the specified level, enriching with optional context.
+- **Owned by**: `@dxgjs/logger` (on the instance)
+- **Consumers**: Internal package code.
+- **Public**: Yes (via the returned instance)
 
-### Méthodes de commodité : `trace`, `debug`, `info`, `warn`, `error`, `fatal`
-- **Ce que font** : Appellent `log` avec le niveau correspondant.
-- **Possédé par** : `@dxgjs/logger`
-- **Consommateurs** : Tout le code.
-- **Public** : Oui
+### Convenience methods: `trace`, `debug`, `info`, `warn`, `error`, `fatal`
+- **What they do**: Call `log` with the corresponding level.
+- **Owned by**: `@dxgjs/logger`
+- **Consumers**: All code.
+- **Public**: Yes
 
 ### `loggerInstance.setLevel(level: LogLevel) => void`
-- **Ce que fait** : Change dynamiquement le niveau minimal de journalisation pour cette instance.
-- **Possédé par** : `@dxgjs/logger`
-- **Consommateurs** : CLI (option `--verbose`/`--silent`), programmes qui veulent ajuster le verbeage à l’exécution.
-- **Public** : Oui
+- **What it does**: Dynamically changes the minimum log level for this instance.
+- **Owned by**: `@dxgjs/logger`
+- **Consumers**: CLI (`--verbose`/`--silent` option), programs that want to adjust verbosity at runtime.
+- **Public**: Yes
 
 ### `loggerInstance.addTransport(transport: Transport) => void`
-- **Ce que fait** : Ajoute un nouveau transport (ex. fichier, HTTP, webhook) à l’instance de logger.
-- **Possédé par** : `@dxgjs/logger`
-- **Consommateurs** : Applications qui veulent envoyer les logs vers un fichier ou un service externe.
-- **Public** : Oui
+- **What it does**: Adds a new transport (e.g. file, HTTP, webhook) to the logger instance.
+- **Owned by**: `@dxgjs/logger`
+- **Consumers**: Applications that want to send logs to a file or external service.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/workspace
 
 ### `workspace.detect(root?: string) => Promise<WorkspaceResult>`
-- **Ce que fait** : À partir d’un répertoire racine optionnel (défaut : répertoire de travail courant), détecte si le projet est un workspace (pnpm, Turborepo, Nx, Lerna, ou simple monorepo) et retourne la racine du workspace ainsi que la liste des projets présents avec leur `package.json`.
-- **Possédé par** : `@dxgjs/workspace`
-- **Consommateurs** : CLI (commandes qui travaillent sur l’ensemble du workspace, ex. `dxg update --all`), generators qui veulent itérer sur tous les paquets, plugins qui ont besoin de connaître la structure du projet.
-- **Public** : Oui
+- **What it does**: From an optional root directory (default: current working directory), detects if the project is a workspace (pnpm, Turborepo, Nx, Lerna, or simple monorepo) and returns the workspace root plus the list of present projects with their `package.json`.
+- **Owned by**: `@dxgjs/workspace`
+- **Consumers**: CLI (commands that work on the entire workspace, e.g. `dxg update --all`), generators that want to iterate over all packages, plugins that need to know project structure.
+- **Public**: Yes
 
-### Interfaces retournées :
+### Returned interfaces:
 - `interface WorkspaceResult { root: string; projects: WorkspaceProject[]; }`
 - `interface WorkspaceProject { name: string; path: string; packageJson: Record<string, any>; dependencies: Record<string, string>; }`
-- **Possédé par** : `@dxgjs/workspace`
-- **Consommateurs** : Tout consommateur de la fonction `detect`.
-- **Public** : Oui (les interfaces sont publiques car retournées par une fonction publique)
+- **Owned by**: `@dxgjs/workspace`
+- **Consumers**: Any consumer of the `detect` function.
+- **Public**: Yes (the interfaces are public as they are returned by a public function)
 
 ---
 
 ## @dxgjs/git
 
 ### `git.clone(url: string, destination?: string, options?: CloneOptions) => Promise<void>`
-- **Ce que fait** : Clone un dépôt Git distant dans le répertoire de destination (ou répertoire courant si non spécifié).
-- **Possédé par** : `@dxgjs/git`
-- **Consommateurs** : CLI (commande `dxg clone` éventuelle), updater qui récupère des sources, plugins qui veulent ajouter un sous‑module.
-- **Public** : Oui
+- **What it does**: Clones a remote Git repository into the destination directory (or current directory if not specified).
+- **Owned by**: `@dxgjs/git`
+- **Consumers**: CLI (potential `dxg clone` command), updater that fetches sources, plugins that want to add a submodule.
+- **Public**: Yes
 
 ### `git.pull(options?: PullOptions) => Promise<void>`
-- **Ce que fait** : Effectue un `git pull` dans le répertoire de travail actuel (ou spécifié dans les options).
-- **Possédé par** : `@dxgjs/git`
-- **Consommateurs** : CLI (commande `dxg pull`), updater, scripts de release.
-- **Public** : Oui
+- **What it does**: Performs a `git pull` in the current working directory (or specified in options).
+- **Owned by**: `@dxgjs/git`
+- **Consumers**: CLI (command `dxg pull`), updater, release scripts.
+- **Public**: Yes
 
 ### `git.push(options?: PushOptions) => Promise<void>`
-- **Ce que fait** : Effectue un `git push`.
-- **Possédé par** : `@dxgjs/git`
-- **Consommateurs** : CLI, workflows de release.
-- **Public** : Oui
+- **What it does**: Performs a `git push`.
+- **Owned by**: `@dxgjs/git`
+- **Consumers**: CLI, release workflows.
+- **Public**: Yes
 
-### `git.commit(message: string, options?: CommitOptions) => Promise<string>` (renvoie le hash du commit)
-- **Ce que fait** : Crée un commit avec le message donné et les options (ajout éventuel de fichiers, signature GPG).
-- **Possédé par** : `@dxgjs/git`
-- **Consommateurs** : CLI (commande `dxg commit`), plugins qui veulent automatiser le commit après génération.
-- **Public** : Oui
+### `git.commit(message: string, options?: CommitOptions) => Promise<string>` (returns the commit hash)
+- **What it does**: Creates a commit with the given message and options (optional file addition, GPG signing).
+- **Owned by**: `@dxgjs/git`
+- **Consumers**: CLI (command `dxg commit`), plugins that want to automate commit after generation.
+- **Public**: Yes
 
 ### `git.status() => Promise<GitStatusResult>`
-- **Ce que fait** : Retourne l’état du répertoire de travail (fichiers modifiés, ajoutés, supprimés, branche actuelle, etc.).
-- **Possédé par** : `@dxgjs/git`
-- **Consommateurs** : CLI (commande `dxg status`), plugins qui veulent vérifier avant d’agir.
-- **Public** : Oui
+- **What it does**: Returns the status of the working directory (modified, added, deleted files, current branch, etc.).
+- **Owned by**: `@dxgjs/git`
+- **Consumers**: CLI (command `dxg status`), plugins that want to check before acting.
+- **Public**: Yes
 
-### Autres fonctions utiles : `branch`, `tag`, `log`, `diff`, `show`, `submoduleUpdate`, `fetch`, `reset`
-- **Possédé par** : `@dxgjs/git`
-- **Consommateurs** : CLI, plugins, scripts d’automatisation.
-- **Public** : Oui
+### Other useful functions: `branch`, `tag`, `log`, `diff`, `show`, `submoduleUpdate`, `fetch`, `reset`
+- **Owned by**: `@dxgjs/git`
+- **Consumers**: CLI, plugins, automation scripts.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/config
 
 ### `config.load(sources: ConfigSource[], schema?: Schema<any>) => Promise<ConfigObject>`
-- **Ce que fait** : Charge la configuration à partir d’une liste ordonnée de sources (fichiers JSON/YAML/TOML, variables d’environnement, arguments CLI, valeurs par défaut), les fusionne selon la priorité (CLI > env > fichier > defaults), puis valide le résultat contre le schéma fourni (le cas échéant).
-- **Possédé par** : `@dxgjs/config`
-- **Consommateurs** : CLI (chargement de `dxg.config.json`), generators qui veulent lire la configuration du projet, plugins qui ont besoin de paramètres, IA (pour lire les clés API et les préférences de modèle).
-- **Public** : Oui
+- **What it does**: Loads configuration from an ordered list of sources (JSON/YAML/TOML files, environment variables, CLI arguments, default values), merges them according to priority (CLI > env > file > defaults), then validates the result against the provided schema (if any).
+- **Owned by**: `@dxgjs/config`
+- **Consumers**: CLI (loading `dxg.config.json`), generators that want to read project configuration, plugins that need parameters, AI (to read API keys and model preferences).
+- **Public**: Yes
 
 ### Interfaces
 - `type ConfigSource = { type: 'file' | 'env' | 'cli' | 'default'; payload?: any; }`
-- `interface ConfigObject extends Record<string, any>` – le résultat typé si un schéma est fourni, sinon `Record<string, any>`.
-- **Possédé par** : `@dxgjs/config`
-- **Consommateurs** : Toute fonction qui consomme le résultat de `load`.
-- **Public** : Oui
+- `interface ConfigObject extends Record<string, any>` – the typed result if a schema is provided, otherwise `Record<string, any>`.
+- **Owned by**: `@dxgjs/config`
+- **Consumers**: Any function that consumes the result of `load`.
+- **Public**: Yes
 
 ### `config.watch(sources: ConfigSource[], callback: (newConfig: ConfigObject) => void) => () => void`
-- **Ce que fait** : Surveille les fichiers de configuration spécifiés et rappelle le callback lorsqu’un quelconque change (re‑chargement et re‑validation).
-- **Possédé par** : `@dxgjs/config`
-- **Consommateurs** : CLI (mode watch pour les commandes de développement), plugins qui veulent réagir aux changements de config à chaud.
-- **Public** : Oui
+- **What it does**: Watches the specified configuration files and calls the callback when any changes (reload and re-validation).
+- **Owned by**: `@dxgjs/config`
+- **Consumers**: CLI (watch mode for development commands), plugins that want to react to hot config changes.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/validation
 
 ### `validation.object<T extends Record<string, any>>(shape: { [K in keyof T]: Schema<T[K]> }) => Schema<T>`
-- **Ce que fait** : Crée un schéma pour un objet avec les champs spécifiés.
-- **Possédé par** : `@dxgjs/validation`
-- **Consommateurs** : Tous les packages qui veulent valider des entrées de configuration, des réponses de prompts, des données d’IA, etc.
-- **Public** : Oui
+- **What it does**: Creates a schema for an object with the specified fields.
+- **Owned by**: `@dxgjs/validation`
+- **Consumers**: All packages that want to validate configuration inputs, prompt responses, AI data, etc.
+- **Public**: Yes
 
 ### `validation.string(options?: { minLength?: number; maxLength?: number; regex?: RegExp; }) => Schema<string>`
-- **Ce que fait** : Crée un schéma pour une chaîne avec contraintes éventuelles.
-- **Possédé par** : `@dxgjs/validation`
-- **Consommateurs** : Validation de noms de paquets, de chemins, de réponses de prompts.
-- **Public** : Oui
+- **What it does**: Creates a schema for a string with optional constraints.
+- **Owned by**: `@dxgjs/validation`
+- **Consumers**: Package name, path, and prompt response validation.
+- **Public**: Yes
 
 ### `validation.number(options?: { min?: number; max?: number; integer?: boolean; }) => Schema<number>`
-- **Ce que fait** : Crée un schéma pour un nombre.
-- **Possédé par** : `@dxgjs/validation`
-- **Consommateurs** : Validation de ports, de versions, de compteurs.
-- **Public** : Oui
+- **What it does**: Creates a schema for a number.
+- **Owned by**: `@dxgjs/validation`
+- **Consumers**: Port, version, and counter validation.
+- **Public**: Yes
 
 ### `validation.union<T extends Schema<any>[]>(schemas: T) => Schema<UnionType<T>>`
-- **Ce que fait** : Crée un schéma qui accepte l’un des schémas fournis.
-- **Possédé par** : `@dxgjs/validation`
-- **Consommateurs** : Quand un champ peut être de plusieurs types (ex. string ou number).
-- **Public** : Oui
+- **What it does**: Creates a schema that accepts one of the provided schemas.
+- **Owned by**: `@dxgjs/validation`
+- **Consumers**: When a field can be of several types (e.g. string or number).
+- **Public**: Yes
 
 ### `validation.refine<T>(schema: Schema<T>, refinement: (value: T) => boolean, message?: string) => Schema<T>`
-- **Ce que fait** : Ajoute une affirmation personnalisée à un schéma existant.
-- **Possédé par** : `@dxgjs/validation`
-- **Consommateurs** : Validation conditionnelle (ex. « ce nombre doit être pair »).
-- **Public** : Oui
+- **What it does**: Adds a custom assertion to an existing schema.
+- **Owned by**: `@dxgjs/validation`
+- **Consumers**: Conditional validation (e.g. "this number must be even").
+- **Public**: Yes
 
-### `schema.parse(data: unknown) => T` (et `schema.safeParse`)
-- **Ce que fait** : Valide `data` contre le schéma ; lance une erreur détaillée si échec ou retourne la valeur typée si succès. `safeParse` retourne un objet `{ success: boolean; data?: T; error?: ValidationError }`.
-- **Possédé par** : `@dxgjs/validation` (sur l’instance de schéma retournée par les fabriques ci‑dessus).
-- **Consommateurs** : Tout code qui veut garantir la conformité d’une entrée.
-- **Public** : Oui
+### `schema.parse(data: unknown) => T` (and `schema.safeParse`)
+- **What it does**: Validates `data` against the schema; throws a detailed error on failure or returns the typed value on success. `safeParse` returns an object `{ success: boolean; data?: T; error?: ValidationError }`.
+- **Owned by**: `@dxgjs/validation` (on the schema instance returned by the factories above).
+- **Consumers**: Any code that wants to guarantee input conformity.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/package-manager
 
 ### `packageManager.detect() => Promise<PackageManagerInstance>`
-- **Ce que fait** : Détermine quel gestionnaire de paquets est actif dans le répertoire courant (en cherchant `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `bun.lockb` ou en vérifiant les variables d’environnement).
-- **Possédé par** : `@dxgjs/package-manager`
-- **Consommateurs** : CLI (avant d’exécuter une installation), generators qui veulent ajouter une dépendance, updater qui veut vérifier les versions.
-- **Public** : Oui
+- **What it does**: Determines which package manager is active in the current directory (by looking for `pnpm-lock.yaml`, `yarn.lock`, `package-lock.json`, `bun.lockb` or by checking environment variables).
+- **Owned by**: `@dxgjs/package-manager`
+- **Consumers**: CLI (before executing an installation), generators that want to add a dependency, updater that wants to check versions.
+- **Public**: Yes
 
-### Méthodes sur l’instance (exemplaires) :
-- `install(options?: InstallOptions) => Promise<void>` – Installe les dépendances selon le lockfile.
-- `add(packageName: string, version?: string, options?: AddOptions) => Promise<void>` – Ajoute une dépendance.
-- `remove(packageName: string, options?: RemoveOptions) => Promise<void>` – Supprime une dépendance.
-- `list(options?: ListOptions) => Promise<Array<PackageInfo>>` – Retourne la liste des paquets installés.
-- `outdated(options?: OutdatedOptions) => Promise<Array<OutdatedInfo>>` – Retourne les paquets avec une version plus récente disponible.
-- `runScript(scriptName: string, args?: string[], options?: RunOptions) => Promise<void>` – Exécute un script défini dans `package.json`.
-- **Possédé par** : `@dxgjs/package-manager`
-- **Consommateurs** : CLI (commandes `dxg add`, `dxg remove`, `dxg update`), generators, updater, plugins.
-- **Public** : Oui
+### Instance methods (examples):
+- `install(options?: InstallOptions) => Promise<void>` – Installs dependencies according to the lockfile.
+- `add(packageName: string, version?: string, options?: AddOptions) => Promise<void>` – Adds a dependency.
+- `remove(packageName: string, options?: RemoveOptions) => Promise<void>` – Removes a dependency.
+- `list(options?: ListOptions) => Promise<Array<PackageInfo>>` – Returns the list of installed packages.
+- `outdated(options?: OutdatedOptions) => Promise<Array<OutdatedInfo>>` – Returns packages with a newer version available.
+- `runScript(scriptName: string, args?: string[], options?: RunOptions) => Promise<void>` – Executes a script defined in `package.json`.
+- **Owned by**: `@dxgjs/package-manager`
+- **Consumers**: CLI (commands `dxg add`, `dxg remove`, `dxg update`), generators, updater, plugins.
+- **Public**: Yes
 
-### Interfaces de retour (exemple) :
+### Return interfaces (example):
 - `interface PackageInfo { name: string; version: string; dev: boolean; }`
-- **Possédé par** : `@dxgjs/package-manager`
-- **Consommateurs** : Toute fonction qui consomme le résultat de `list` ou `outdated`.
-- **Public** : Oui
+- **Owned by**: `@dxgjs/package-manager`
+- **Consumers**: Any function that consumes the result of `list` or `outdated`.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/node
 
 ### `node.getRuntime() => Promise<'node' | 'bun' | 'deno' | 'unknown'>`
-- **Ce que fait** : Détermine quel runtime JavaScript est actuellement utilisé.
-- **Possédé par** : `@dxgjs/node`
-- **Consommateurs** : CLI (pour afficher des avertissements ou adapter le comportement), generators qui veulent générer du code spécifique au runtime, upgrader qui veut vérifier la compatibilité.
-- **Public** : Oui
+- **What it does**: Determines which JavaScript runtime is currently used.
+- **Owned by**: `@dxgjs/node`
+- **Consumers**: CLI (to display warnings or adapt behavior), generators that want to generate runtime-specific code, updater that wants to check compatibility.
+- **Public**: Yes
 
 ### `node.resolveNodeBinary() => Promise<string>`
-- **Ce que fait** : Retourne le chemin complet du binaire Node à utiliser (en tenant compte de `.nvmrc`, `nvm`, `fnm` ou du PATH).
-- **Possédé par** : `@dxgjs/node`
-- **Consommateurs** : CLI (exécution de sous‑processus Node), updater qui veut télécharger un binaire Node spécifique.
-- **Public** : Oui
+- **What it does**: Returns the full path to the Node binary to use (taking into account `.nvmrc`, `nvm`, `fnm` or the PATH).
+- **Owned by**: `@dxgjs/node`
+- **Consumers**: CLI (execution of Node subprocesses), updater that wants to download a specific Node binary.
+- **Public**: Yes
 
 ### `node.satisfiesEngines(packageJsonPath: string, currentVersion: string) => Promise<boolean>`
-- **Ce que fait** : Vérifie si la version du runtime actuelle satisfait le champ `engines` du `package.json` indiqué.
-- **Possédé par** : `@dxgjs/node`
-- **Consommateurs** : CLI (avant d’exécuter un générateur qui dépend d’une version Node précise), plugins qui veulent vérifier lacompatibilité.
-- **Public** : Oui
+- **What it does**: Checks if the current runtime version satisfies the `engines` field of the specified `package.json`.
+- **Owned by**: `@dxgjs/node`
+- **Consumers**: CLI (before executing a generator that depends on a specific Node version), plugins that want to check compatibility.
+- **Public**: Yes
 
 ### `node.readNVMRC(filePath?: string) => Promise<string | null>`
-- **Ce que fait** : Lit le fichier `.nvmrc` et retourne la version spécifiée (ou null si absent/invalide).
-- **Possédé par** : `@dxgjs/node`
-- **Consommateurs** : Même usage que ci‑dessus.
-- **Public** : Oui
+- **What it does**: Reads the `.nvmrc` file and returns the specified version (or null if absent/invalid).
+- **Owned by**: `@dxgjs/node`
+- **Consumers**: Same usage as above.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/env
 
 ### `env.load(options?: { cwd?: string; override?: boolean; mask?: RegExp[] }) => Promise<EnvMap>`
-- **Ce que fait** : Charge les variables d’environnement à partir des fichiers `.env`, `.env.local`, `.env.development`, `.env.production` (selon la valeur de `NODE_ENV` ou du mode) en appliquant la priorité et en expandant les références `${VAR}`.
-- **Possédé par** : `@dxgjs/env`
-- **Consommateurs** : CLI (chargement de la configuration initiale), config loader (pour injecter les variables d’environnement dans la hiérarchie de configuration), generators qui veulent accéder à des variables lors du rendu, IA (pour lire les clés API stockées en .env).
-- **Public** : Oui
+- **What it does**: Loads environment variables from `.env`, `.env.local`, `.env.development`, `.env.production` files (according to `NODE_ENV` value or mode) applying priority and expanding `${VAR}` references.
+- **Owned by**: `@dxgjs/env`
+- **Consumers**: CLI (initial configuration loading), config loader (to inject environment variables into the configuration hierarchy), generators that want to access variables during rendering, AI (to read API keys stored in .env).
+- **Public**: Yes
 
 ### `env.maskSecrets(target: Record<string, any>, mask?: RegExp[]) => Record<string, any>`
-- **Ce que fait** : Retourne une copie de l’objet où les valeurs correspondant aux motifs de masque (par défaut : `/(pass|secret|key|token|auth)/i`) sont remplacées par `"[SECRET]"`.
-- **Possédé par** : `@dxgjs/env`
-- **Consommateurs** : Logger (pour éviter d’écrire des sekrets en clair), tout code qui veut afficher en toute sécurité un objet de configuration.
-- **Public** : Oui
+- **What it does**: Returns a copy of the object where values matching the mask patterns (by default: `/(pass|secret|key|token|auth)/i`) are replaced with `"[SECRET]"`.
+- **Owned by**: `@dxgjs/env`
+- **Consumers**: Logger (to avoid writing secrets in clear text), any code that wants to safely display a configuration object.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/core
 
 ### `core.container.register<T>(token: string, factory: () => T) => void`
-- **Ce que fait** : Enregistre une factory pour créer une dépendance de type `T` associée à `token`. La factory est appelée lazy‑ement au moment de la résolution.
-- **Possédé par** : `@dxgjs/core`
-- **Consommateurs** : Tous les packages qui veulent fournir un service (ex. logger, config, fs) aux autres packages via injection de dépendances.
-- **Public** : Oui
+- **What it does**: Registers a factory to create a dependency of type `T` associated with `token`. The factory is called lazily at resolution time.
+- **Owned by**: `@dxgjs/core`
+- **Consumers**: All packages that want to provide a service (e.g. logger, config, fs) to other packages via dependency injection.
+- **Public**: Yes
 
 ### `core.container.resolve<T>(token: string) => T`
-- **Ce que fait** : Résout et retourne une instance de la dépendance associée à `token` (en appelant la factory si nécessaire).
-- **Possédé par** : `@dxgjs/core`
-- **Consommateurs** : Tous les packages qui veulent consommer un service fourni par un autre paquet.
-- **Public** : Oui
+- **What it does**: Resolves and returns an instance of the dependency associated with `token` (by calling the factory if necessary).
+- **Owned by**: `@dxgjs/core`
+- **Consumers**: All packages that want to consume a service provided by another package.
+- **Public**: Yes
 
 ### `core.eventBus.on<T>(event: string, handler: (data: T) => void) => () => void`
-- **Ce que fait** : S’abonne à un événement nommé ; retourne une fonction de désabonnement.
-- **Possédé par** : `@dxgjs/core`
-- **Consommateurs** : Packages qui veulent réagir à des événements du cycle de vie (ex. `pre:generate`, `post:update`), plugins qui veulent étendre le comportement.
-- **Public** : Oui
+- **What it does**: Subscribes to a named event; returns an unsubscribe function.
+- **Owned by**: `@dxgjs/core`
+- **Consumers**: Packages that want to react to lifecycle events (e.g. `pre:generate`, `post:update`), plugins that want to extend behavior.
+- **Public**: Yes
 
 ### `core.eventBus.emit<T>(event: string, data: T) => void`
-- **Ce que fait** : Publie un événement avec la donnée associée ; tous les abonnés reçoivent l’appel.
-- **Possédé par** : `@dxgjs/core`
-- **Consommateurs** : Packages qui veulent notifier d’un changement d’état.
-- **Public** : Oui
+- **What it does**: Publishes an event with associated data; all subscribers receive the call.
+- **Owned by**: `@dxgjs/core`
+- **Consumers**: Packages that want to notify of a state change.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/ai
 
 ### `ai.orchestrator.execute(taskName: string, variables: Record<string, any>, options?: { provider?: string; temperature?: number; }) => Promise<any>`
-- **Ce que fait** : Exécute une tâche d’IA nommée (ex. « generate-component », « refactor-code », « audit-security ») en construisant un prompt à partir d’un template enregistré, en injectant les variables, en appelant le fournisseur sélectionné (ou le défaut), et en retournant le résultat brut du modèle.
-- **Possédé par** : `@dxgjs/ai`
-- **Consommateurs** : CLI (commande `dxg ai`), generators qui veulent une génération assistée ou une révision, plugins qui veulent offrir des fonctionnalités IA.
-- **Public** : Oui
+- **What it does**: Executes a named AI task (e.g. "generate-component", "refactor-code", "audit-security") by building a prompt from a registered template, injecting variables, calling the selected provider (or the default), and returning the raw model result.
+- **Owned by**: `@dxgjs/ai`
+- **Consumers**: CLI (command `dxg ai`), generators that want AI-assisted generation or revision, plugins that want to offer AI features.
+- **Public**: Yes
 
 ### `ai.orchestrator.registerProvider(name: string, provider: AIProvider) => void`
-- **Ce que fait** : Enregistre un nouveau fournisseur d’IA (doit implémenter l’interface `AIProvider` avec méthodes `complete`, `stream`, `embed`).
-- **Possédé par** : `@dxgjs/ai`
-- **Consommateurs** : Plugins qui veulent ajouter un support pour un nouveau modèle ou un fournisseur privé.
-- **Public** : Oui
+- **What it does**: Registers a new AI provider (must implement the `AIProvider` interface with `complete`, `stream`, `embed` methods).
+- **Owned by**: `@dxgjs/ai`
+- **Consumers**: Plugins that want to add support for a new model or private provider.
+- **Public**: Yes
 
 ### `ai.orchestrator.registerPrompt(name: string, template: string, schema?: Schema<any>) => void`
-- **Ce que fait** : Enregistre un template de prompt associé à un nom et éventuellement un schéma de validation pour les variables.
-- **Possédé par** : `@dxgjs/ai`
-- **Consommateurs** : Même chose que ci‑dessus ; permet de définir des prompts réutilisables pour différentes tâches.
-- **Public** : Oui
+- **What it does**: Registers a prompt template associated with a name and optionally a validation schema for variables.
+- **Owned by**: `@dxgjs/ai`
+- **Consumers**: Same as above; allows defining reusable prompts for different tasks.
+- **Public**: Yes
 
 ### `ai.orchestrator.getCacheStats() => CacheStats`
-- **Ce que fait** : Retourne des statistiques sur le cache sémantique (taux de hit, nombre d’entrées, taille moyenne).
-- **Possédé par** : `@dxgjs/ai`
-- **Consommateurs** : CLI (option de débogage), outils de monitoring.
-- **Public** : Oui
+- **What it does**: Returns statistics on the semantic cache (hit rate, number of entries, average size).
+- **Owned by**: `@dxgjs/ai`
+- **Consumers**: CLI (debug option), monitoring tools.
+- **Public**: Yes
 
-### Interfaces (exemple) :
+### Interfaces (example):
 - `interface AIProvider { complete(prompt: string, opts?: AIOptions): Promise<string>; stream(prompt: string, opts?: AIOptions): AsyncIterable<string>; embed(text: string): Promise<number[]>; }`
 - `interface CacheStats { hits: number; misses: number; hitRate: number; entryCount: number; }`
-- **Possédé par** : `@dxgjs/ai`
-- **Consommateurs** : Tout ce qui consomme les méthodes ci‑dessus.
-- **Public** : Oui
+- **Owned by**: `@dxgjs/ai`
+- **Consumers**: Anything that consumes the methods above.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/templates
 
 ### `templates.compile(source: string | TemplateSource) => TemplateFunction`
-- **Ce que fait** : Compile une chaîne de template (ou une promesse qui résout vers une chaîne) en une fonction de rendu efficace.
-- **Possédé par** : `@dxgjs/templates`
-- **Consommateurs** : Generators (pour rendre des fichiers à partir de données), plugins qui veulent fournir leurs propres templates, tout code qui veut générer du texte dynamique.
-- **Public** : Oui
+- **What it does**: Compiles a template string (or a promise resolving to a string) into an efficient rendering function.
+- **Owned by**: `@dxgjs/templates`
+- **Consumers**: Generators (to render files from data), plugins that want to provide their own templates, any code that wants to generate dynamic text.
+- **Public**: Yes
 
 ### `templates.render(fn: TemplateFunction, data: Record<string, any>) => string`
-- **Ce que fait** : Exécute la fonction de template compilée avec les données fournies, retourne la chaîne résultante.
-- **Possédé par** : `@dxgjs/templates`
-- **Consommateurs** : Même que ci‑dessus.
-- **Public** : Oui
+- **What it does**: Executes the compiled template function with the provided data, returning the resulting string.
+- **Owned by**: `@dxgjs/templates`
+- **Consumers**: Same as above.
+- **Public**: Yes
 
 ### `templates.registerHelper(name: string, fn: HelperFunction) => void`
-- **Ce que fait** : Enregistre un helper utilisable dans les templates (`{{name arg1 arg2}}`).
-- **Possédé par** : `@dxgjs/templates`
-- **Consommateurs** : Ceux qui veulent étendre le moteur de template avec des fonctions personnalisées (ex. formatage de date, conversion en majuscules).
-- **Public** : Oui
+- **What it does**: Registers a helper usable in templates (`{{name arg1 arg2}}`).
+- **Owned by**: `@dxgjs/templates`
+- **Consumers**: Those who want to extend the template engine with custom functions (e.g. date formatting, uppercase conversion).
+- **Public**: Yes
 
 ### `templates.registerPartial(name: string, template: string) => void`
-- **Ce que fait** : Enregistre un partial (un sous‑template) pouvant être inclus avec `{{> name}}`.
-- **Possédé par** : `@dxgjs/templates`
-- **Consommateurs** : Même que ci‑dessus.
-- **Public** : Oui
+- **What it does**: Registers a partial (a sub-template) that can be included with `{{> name}}`.
+- **Owned by**: `@dxgjs/templates`
+- **Consumers**: Same as above.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/generators
 
 ### `generators.generate(name: string, options?: { cwd?: string; promptsOverride?: any; skipAi?: boolean }) => Promise<GenerateResult>`
-- **Ce que fait** : Lance le processus de génération pour le générateur identifié par `name` : collecte d’informations via des prompts (sauf si `promptsOverride` est fourni), sélection du template approprié, rendu avec les données, écriture des fichiers, étape optionnelle de révision ou de refactoring via IA (si `skipAi` est false et qu’un fournisseur est configuré).
-- **Possédé par** : `@dxgjs/generators`
-- **Consommateurs** : CLI (commande `dxg generate`), plugins qui veulent offrir leurs propres generators, scripts d’automatisation qui veulent scaffollder un nouveau composant ou un nouveau service.
-- **Public** : Oui
+- **What it does**: Launches the generation process for the generator identified by `name`: information gathering via prompts (unless `promptsOverride` is provided), template selection, rendering with data, file writing, optional AI revision or refactoring step (if `skipAi` is false and a provider is configured).
+- **Owned by**: `@dxgjs/generators`
+- **Consumers**: CLI (command `dxg generate`), plugins that want to offer their own generators, automation scripts that want to scaffold a new component or service.
+- **Public**: Yes
 
-### Interface de résultat (exemple) :
+### Result interface (example):
 - `interface GenerateResult { created: string[]; modified: string[]; skipped: string[]; warnings: string[]; }`
-- **Possédé par** : `@dxgjs/generators`
-- **Consommateurs** : Même que ci‑dessus.
-- **Public** : Oui
+- **Owned by**: `@dxgjs/generators`
+- **Consumers**: Same as above.
+- **Public**: Yes
 
 ### `generators.registerGenerator(name: string, factory: () => GeneratorInterface) => void`
-- **Ce que fait** : Permet à un plugin d’enregistrer un nouveau generator qui deviendra disponible via `dxg generate <name>`.
-- **Possédé par** : `@dxgjs/generators`
-- **Consommateurs** : Plugins qui veulent étendre les possibilités de scaffolding.
-- **Public** : Oui
+- **What it does**: Allows a plugin to register a new generator that will become available via `dxg generate <name>`.
+- **Owned by**: `@dxgjs/generators`
+- **Consumers**: Plugins that want to extend scaffolding possibilities.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/updater
 
 ### `updater.checkForUpdates(currentVersion: string, channel?: 'stable' | 'beta' | 'nightly') => Promise<UpdateInfo | null>`
-- **Ce que fait** : Interroge le registre configuré (npm, GitHub Releases, serveur personnalisé) pour déterminer si une version plus récente de DXG est disponible dans le canal spécifié.
-- **Possédé par** : `@dxgjs/updater`
-- **Consommateurs** : CLI (commande `dxg update` ou vérification automatique au démarrage), scripts de CI qui veulent s’assurer d’utiliser la dernière version.
-- **Public** : Oui
+- **What it does**: Queries the configured registry (npm, GitHub Releases, custom server) to determine if a newer version of DXG is available in the specified channel.
+- **Owned by**: `@dxgjs/updater`
+- **Consumers**: CLI (command `dxg update` or automatic check at startup), CI scripts that want to ensure using the latest version.
+- **Public**: Yes
 
-### Interface `UpdateInfo` (exemple) :
+### `UpdateInfo` interface (example):
 - `interface UpdateInfo { version: string; releaseNotes: string; tarballUrl: string; signature?: string; requiredNodeVersion?: string; }`
-- **Possédé par** : `@dxgjs/updater`
-- **Consommateurs** : Même que ci‑dessus.
-- **Public** : Oui
+- **Owned by**: `@dxgjs/updater`
+- **Consumers**: Same as above.
+- **Public**: Yes
 
 ### `updater.applyUpdate(updateInfo: UpdateInfo) => Promise<void>`
-- **Ce que fait** : Télécharge l’artifact spécifié, vérifie son intégrité, extrait éventuellement l’archive, remplace l’installation actuelle (ou installe la version côte à côte selon la stratégie).
-- **Possédé par** : `@dxgjs/updater`
-- **Consommateurs** : Même que ci‑dessus (généralement appelé après un `checkForUpdates` positif).
-- **Public** : Oui
+- **What it does**: Downloads the specified artifact, verifies its integrity, optionally extracts the archive, replaces the current installation (or installs version side-by-side according to strategy).
+- **Owned by**: `@dxgjs/updater`
+- **Consumers**: Same as above (generally called after a positive `checkForUpdates`).
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/plugins
 
 ### `plugins.load(options?: { cwd?: string; allowUnsafe?: boolean }) => Promise<PluginLoadResult>`
-- **Ce que fait** : Recherche dans le répertoire spécifié (ou cwd) les paquets installés qui déclarent être un plugin DXG (champ `dxg-plugin:true` dans `package.json` ou suivant la convention `dxg-plugin-*`), les charge dans un environnement sandboxé, valide leur manifeste et enregistre leurs extensions (commands, generators, hooks, AI providers, terminal extensions).
-- **Possédé par** : `@dxgjs/plugins`
-- **Consommateurs** : CLI (au démarrage, pour activer les plugins installés), outils de développement qui veulent recharger les plugins à la volée.
-- **Public** : Oui
+- **What it does**: Searches in the specified directory (or cwd) for installed packages that declare themselves as DXG plugins (field `dxg-plugin:true` in `package.json` or following the `dxg-plugin-*` convention), loads them in a sandboxed environment, validates their manifest and registers their extensions (commands, generators, hooks, AI providers, terminal extensions).
+- **Owned by**: `@dxgjs/plugins`
+- **Consumers**: CLI (at startup, to activate installed plugins), development tools that want to reload plugins on the fly.
+- **Public**: Yes
 
-### Interface `PluginLoadResult` (exemple) :
+### `PluginLoadResult` interface (example):
 - `interface PluginLoadResult { loaded: string[]; failed: Array<{ name: string; error: string }>; warnings: string[]; }`
-- **Possédé par** : `@dxgjs/plugins`
-- **Consommateurs** : Même que ci‑dessus.
-- **Public** : Oui
+- **Owned by**: `@dxgjs/plugins`
+- **Consumers**: Same as above.
+- **Public**: Yes
 
-### API pour les plugins (exposées au sein du sandbox) :
+### Plugin APIs (exposed within the sandbox):
 - `plugin.registerCommand(command: CommandDescriptor) => void`
 - `plugin.registerGenerator(generator: GeneratorDescriptor) => void`
 - `plugin.registerHook(hook: HookDescriptor) => void`
 - `plugin.registerAIProvider(provider: AIProviderDescriptor) => void`
 - `plugin.registerTerminalExtension(extension: TerminalExtensionDescriptor) => void`
-- **Possédé par** : `@dxgjs/plugins` (mais appelées depuis le contexte du plugin)
-- **Consommateurs** : Le code du plugin lui‑même.
-- **Public** : Non (ces fonctions ne sont accessibles que à l’intérieur du sandbox du plugin ; elles ne font pas partie de l’API publique publiée sur npm).
+- **Owned by**: `@dxgjs/plugins` (but called from within the plugin context)
+- **Consumers**: The plugin code itself.
+- **Public**: No (these functions are only accessible inside the plugin sandbox; they are not part of the public API published on npm).
 
 ---
 
 ## @dxgjs/prompts
 
 ### `prompts.input(message: string, options?: { default?: string; validate?: (input:string)=>boolean|Promise<boolean>; }) => Promise<string>`
-- **Ce que fait** : Affiche un invité demandant une entrée de texte, retourne la valeur saisie lorsque l’utilisateur appuie sur Entrée.
-- **Possédé par** : `@dxgjs/prompts`
-- **Consommateurs** : Generators (pour recueillir des paramètres comme le nom d’un composant), CLI (pour des interactions simples), plugins qui veulent poser une question à l’utilisateur.
-- **Public** : Oui
+- **What it does**: Displays a prompt asking for text input, returns the entered value when the user presses Enter.
+- **Owned by**: `@dxgjs/prompts`
+- **Consumers**: Generators (to gather parameters like component name), CLI (for simple interactions), plugins that want to ask a question to the user.
+- **Public**: Yes
 
 ### `prompts.confirm(message: string, options?: { default?: boolean }) => Promise<boolean>`
-- **Ce que fait** : Demande une confirmation oui/non ; retourne `true` pour oui, `false` pour non ou annulation.
-- **Possédé par** : `@dxgjs/prompts`
-- **Consommateurs** : CLI (avant une action destructive), generators (pour confirmer l’écrasement de fichiers), plugins.
-- **Public** : Oui
+- **What it does**: Asks for a yes/no confirmation; returns `true` for yes, `false` for no or cancellation.
+- **Owned by**: `@dxgjs/prompts`
+- **Consumers**: CLI (before destructive action), generators (to confirm file overwrite), plugins.
+- **Public**: Yes
 
 ### `prompts.select(message: string, choices: Array<{ title: string; value: any; description?: string }>, options?: { default?: any }) => Promise<any>`
-- **Ce que fait** : Présente une liste d’options et retourne la valeur associée à la sélection de l’utilisateur.
-- **Possédé par** : `@dxgjs/prompts`
-- **Consommateurs** : Generators (choix d’un template), CLI (choix d’une configuration), plugins.
-- **Public** : Oui
+- **What it does**: Presents a list of options and returns the value associated with the user's selection.
+- **Owned by**: `@dxgjs/prompts`
+- **Consumers**: Generators (template selection), CLI (configuration choice), plugins.
+- **Public**: Yes
 
 ### `prompts.checkbox(message: string, choices: same as select) => Promise<any[]>`
-- **Ce que fait** : Permet de sélectionner zéro, une ou plusieurs options.
-- **Possédé par** : `@dxgjs/prompts`
-- **Consommateurs** : Generators (activer/désactiver des fonctionnalités), CLI (multi‑choix).
-- **Public** : Oui
+- **What it does**: Allows selecting zero, one, or multiple options.
+- **Owned by**: `@dxgjs/prompts`
+- **Consumers**: Generators (enable/disable features), CLI (multi-choice).
+- **Public**: Yes
 
 ### `prompts.autocomplete(message: string, suggestions: (input:string)=>Promise<string[]>, options?: { default?: string }) => Promise<string>`
-- **Ce que fait** : Suggestion dynamique pendant la saisie ; l’utilisateur peut choisir parmi les propositions ou taper sa propre valeur.
-- **Possédé par** : `@dxgjs/prompts`
-- **Consommateurs** : Generators (saisie de nom de dépendance avec recherche dans le registre), CLI (saisie de commande avec historique).
-- **Public** : Oui
+- **What it does**: Dynamic suggestion during input; the user can choose from propositions or type their own value.
+- **Owned by**: `@dxgjs/prompts`
+- **Consumers**: Generators (dependency name input with registry search), CLI (command input with history).
+- **Public**: Yes
 
 ### `prompts.password(message: string, options?: { mask?: string }) => Promise<string>`
-- **Ce que fait** : Comme `input` mais masque les caractères tapés (utile pour les mots de passe ou les clés API).
-- **Possédé par** : `@dxgjs/prompts`
-- **Consommateurs** : CLI (demande de clé API pour un fournisseur IA), plugins qui veulent récupérer un secret de manière sécurisée.
-- **Public** : Oui
+- **What it does**: Like `input` but masks typed characters (useful for passwords or API keys).
+- **Owned by**: `@dxgjs/prompts`
+- **Consumers**: CLI (request for AI provider API key), plugins that want to securely retrieve a secret.
+- **Public**: Yes
 
 ---
 
 ## @dxgjs/telemetry
 
 ### `telemetry.start(options?: { endpoint?: string; intervalMs?: number; consentCallback?: () => Promise<boolean>; }) => Promise<TelemetryController>`
-- **Ce que fait** : Initialise la collecte de télémétrie ; si le consentement est donné (via `consentCallback` ou une configuration opt‑in), commence à recueillir des événements périodiquement et à les envoyer à l’endpoint spécifié.
-- **Possédé par** : `@dxgjs/telemetry`
-- **Consommateurs** : CLI (au démarrage, pour activer la télémétrie si l’utilisateur a accepté), outils qui veulent désactiver ou re‑configurer la télémétrie à l’exécution.
-- **Public** : Oui
+- **What it does**: Initializes telemetry collection; if consent is given (via `consentCallback` or opt-in configuration), begins gathering events periodically and sending them to the specified endpoint.
+- **Owned by**: `@dxgjs/telemetry`
+- **Consumers**: CLI (at startup, to activate telemetry if user has consented), tools that want to disable or reconfigure telemetry at runtime.
+- **Public**: Yes
 
-### Interface `TelemetryController` (exemple) :
+### `TelemetryController` interface (example):
 - `interface TelemetryController { updateConsent(consent: boolean): void; forceFlush(): Promise<void>; stop(): Promise<void>; }`
-- **Possédé par** : `@dxgjs/telemetry`
-- **Consommateurs** : Même que ci‑dessus.
-- **Public** : Oui
+- **Owned by**: `@dxgjs/telemetry`
+- **Consumers**: Same as above.
+- **Public**: Yes
 
-### Le payload envoyé (exemple) :
+### Example payload sent:
 - `{ anonId: string; timestamp: number; os: string; arch: string; runtime: string; version: string; command: string; success: boolean; durationMs: number; }`
-- **Possédé par** : `@dxgjs/telemetry` (en interne)
-- **Consommateurs** : Service de télémétrie backend.
-- **Public** : Non (le payload est interne, mais la fonction de démarrage est publique)
+- **Owned by**: `@dxgjs/telemetry` (internally)
+- **Consumers**: Telemetry backend service.
+- **Public**: No (the payload is internal, but the start function is public)
 
 ---
-

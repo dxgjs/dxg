@@ -68,8 +68,10 @@ export default ${componentName};
 
 // Import the init generator we just created
 import initGenerator from './generators/init';
+// Import the tailwind generator
+import tailwindGenerator from './generators/tailwind';
 
-export { initGenerator, reactComponentGenerator };
+export { initGenerator, reactComponentGenerator, tailwindGenerator };
 
 // Default export for convenience (keep existing behavior)
 export default reactComponentGenerator;

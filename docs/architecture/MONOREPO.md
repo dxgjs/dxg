@@ -1,78 +1,79 @@
-# Structure du monorepo DXG
+# DXG Monorepo Structure
 
-## Arborescence proposée
+## Proposed Tree Structure
 ```
 DXG/
 ├── apps/
-│   ├── cli/              # Interface en ligne de commande principale
-│   ├── studio/           # Interface graphique légère (optionnelle, futur)
-│   └── playground/       # Bac à sable pour tester les générateurs/plugins
+│   ├── cli/              # Main command-line interface
+│   ├── studio/           # Lightweight graphical interface (optional, future)
+│   └── playground/       # Sandbox for testing generators/plugins
 ├── packages/
-│   ├── @dxgjs/terminal     # Framework de rendu terminal premium
-│   ├── @dxgjs/logger       # Système de logging structuré & configurable
-│   ├── @dxgjs/workspace    # Détection & manipulation de workspace
-│   ├── @dxgjs/git          # Abstraction Git (commands, parsing)
-│   ├── @dxgjs/fs           # Couche d’abstraction système de fichiers
-│   ├── @dxgjs/config       # Chargement, validation, merge de configurations
-│   ├── @dxgjs/validation   # Schémas de validation (Zod‑like) et helpers
-│   ├── @dxgjs/package-manager  # Interface unifiée npm/yarn/pnpm/bun
-│   ├── @dxgjs/node         # Utilitaires spécifiques à Node (versionning, engines)
-│   ├── @dxgjs/json         # Manipulation avancée de JSON
-│   ├── @dxgjs/env          # Gestion des variables d’environnement
-│   ├── @dxgjs/core         # Kernel léger : DI container, event bus
-│   ├── @dxgjs/ai           # Orchestration IA (providers, agents, planner, cache)
-│   ├── @dxgjs/templates    # Moteur de templates (ejs/liquid‑like)
-│   ├── @dxgjs/generators   # Scaffolding basé sur les templates + prompts
-│   ├── @dxgjs/updater      # Vérification de mise à jour, téléchargement de binaires
-│   ├── @dxgjs/plugins      # Système de plugins (découverte, chargement, hooks)
-│   ├── @dxgjs/prompts      # Bibliothèque de prompts interactifs
-│   └── @dxgjs/telemetry    # Collecte de données d’usage (opt‑in)
+│   ├── @dxgjs/terminal     # Premium terminal rendering framework
+│   ├── @dxgjs/logger       # Structured & configurable logging system
+│   ├── @dxgjs/workspace    # Workspace detection & manipulation
+│   ├── @dxgjs/git          # Git abstraction (commands, parsing)
+│   ├── @dxgjs/fs           # File system abstraction layer
+│   ├── @dxgjs/config       # Configuration loading, validation, merging
+│   ├── @dxgjs/validation   # Validation schemas (Zod-like) and helpers
+│   ├── @dxgjs/package-manager  # Unified npm/yarn/pnpm/bun interface
+│   ├── @dxgjs/node         # Node-specific utilities (versioning, engines)
+│   ├── @dxgjs/json         # Advanced JSON manipulation
+│   ├── @dxgjs/env          # Environment variable management
+│   ├── @dxgjs/core         # Lightweight kernel: DI container, event bus
+│   ├── @dxgjs/ai           # AI orchestration (providers, agents, planner, cache)
+│   ├── @dxgjs/templates    # Template engine (ejs/liquid-like)
+│   ├── @dxgjs/generators   # Scaffolding based on templates + prompts
+│   ├── @dxgjs/updater      # Update checking, binary downloads
+│   ├── @dxgjs/plugins      # Plugin system (discovery, loading, hooks)
+│   ├── @dxgjs/prompts      # Interactive prompts library
+│   └── @dxgjs/telemetry    # Usage data collection (opt-in)
 ├── tooling/
-│   ├── scripts/          # Scripts d’automatisation (release, changelog)
-│   ├── configs/          # Configurations partagées (eslint, prettier, tsconfig, jest)
-│   └── types/            # Types TypeScript partagés entre packages (non publiés)
+│   ├── scripts/          # Automation scripts (release, changelog)
+│   ├── configs/          # Shared configurations (eslint, prettier, tsconfig, jest)
+│   └── types/            # Shared TypeScript types between packages (not published)
 ├── examples/
-│   ├── cli‑example/      # Mini‑CLI utilisant les packages DXG
-│   └── plugin‑example/   # Exemple de plugin externe
+│   ├── cli-example/      # Mini-CLI using DXG packages
+│   └── plugin-example/   # External plugin example
 ├── tests/
-│   ├── fixtures/         # Jeux de données réutilisables
-│   └── scripts/          # Harness de test (vitest, playwright, etc.)
-├── .github/              # Workflows CI/CD, modèles d’issue/PR
+│   ├── fixtures/         # Reusable test datasets
+│   └── scripts/          # Test harness (vitest, playwright, etc.)
+├── .github/              # CI/CD workflows, issue/PR templates
 ├── README.md
-├── pnpm-workspace.yaml   # Définition du workspace
-└── package.json          # Racine du monorepo (scripts globaux, version)
+├── pnpm-workspace.yaml   # Workspace definition
+└── package.json          # Monorepo root (global scripts, version)
 ```
 
-## Explication des dossiers
+## Folder Explanations
 
-- **apps/** : Contient les applications exécutables. Séparer le CLI d'éventuelles futures GUI (studio, playground) permet une évolution indépendante. Chaque application dépend uniquement des packages publiés.
-- **packages/** : Regroupe chaque bibliothèque réutilisable, publiée individuellement sur npm sous le scope `@dxg`. Chaque package a son propre `package.json` et suit SemVer.
-- **tooling/** : Héberge tout ce qui sert au développement du monorepo lui‑même (scripts, configurations, types partagés) sans être exposé aux consommateurs.
-- **examples/** : Démos et showcases pour les contributeurs ; montrent l'usage réel des packages et des plugins.
-- **tests/** : Tests d’intégration cross‑packages ; centralise fixtures et harness de test.
-- **scripts/** : Scripts globaux du monorepo (ex. `release`, `changelog`, `lint-all`).
-- **.github/** : Workflows GitHub Actions, modèles d'issue et de pull‑request.
-- **README.md** : Présentation du projet, guide de contribution, liens vers la documentation.
-- **pnpm-workspace.yaml** : Définit les espaces de travail pour pnpm, permettant aux packages de se référencer par leur nom (`workspace:*`).
-- **package.json** (racine) : Scripts globaux (`install`, `build`, `test`, `lint`) et métadonnées du monorepo.
+- **apps/** : Contains executable applications. Separating the CLI from potential future GUIs (studio, playground) allows independent evolution. Each application depends only on published packages.
+- **packages/** : Groups each reusable library, published individually on npm under the `@dxg` scope. Each package has its own `package.json` and follows SemVer.
+- **tooling/** : Houses everything used for monorepo development itself (scripts, configurations, shared types) without exposing it to consumers.
+- **examples/** : Demos and showcases for contributors; show real usage of packages and plugins.
+- **tests/** : Cross-packages integration tests; centralizes fixtures and test harness.
+- **scripts/** : Global monorepo scripts (e.g., `release`, `changelog`, `lint-all`).
+- **.github/** : GitHub Actions workflows, issue and pull-request templates.
+- **README.md** : Project presentation, contribution guide, links to documentation.
+- **pnpm-workspace.yaml** : Defines workspaces for pnpm, allowing packages to reference each other by name (`workspace:*`).
+- **package.json** (root) : Global scripts (`install`, `build`, `test`, `lint`) and monorepo metadata.
 
-## Choix de la solution de gestion de monorepo
+## Monorepo Management Solution Choice
 
-### Options évaluées
-1. **pnpm workspaces seuls**
-   - Avantages : extrêmement rapide, efficace en espace disque grâce au magasin de contenu adressable, prise en charge native des protocoles de workspace (`workspace:*`). Aucun ajout de dépendance externe.
-   - Inconvénients : manque de fonctionnalités avancées de mise en cache de tâches (comme Turborepo) ; les scripts sont exécutés tels quels.
+### Evaluated Options
+
+1. **pnpm workspaces only**
+   - Advantages: extremely fast, disk-space efficient thanks to content-addressable store, native support for workspace protocols (`workspace:*`). No external dependency added.
+   - Disadvantages: lacks advanced task caching features (like Turborepo); scripts are executed as-is.
 
 2. **pnpm + Turborepo**
-   - Avantages : pnpm gère l'installation et le linking ; Turborepo apporte un système de mise en cache puissant pour les tâches de build, test, lint, basé sur le hachage des entrées et des dépendances. Peut considérablement accélérer les CI sur de gros monorepos.
-   - Inconvénients : ajout d'une dépendance (`turbo`) ; légère complexité de configuration supplémentaire.
+   - Advantages: pnpm handles installation and linking; Turborepo brings a powerful caching system for build, test, lint tasks, based on input and dependency hashing. Can considerably speed up CI on large monorepos.
+   - Disadvantages: adds a dependency (`turbo`); slight additional configuration complexity.
 
 3. **Nx**
-   - Avantages : intégré avec des plugins pour nombreuses technologies, fournit une expérience complète (cache, affectation de tâches, génération de code).
-   - Inconvénients : plus lourd, impose certaines conventions, peut être surdimensionné pour nos besoins actuels.
+   - Advantages: integrated with plugins for many technologies, provides a complete experience (caching, task affectedness, code generation).
+   - Disadvantages: heavier, imposes certain conventions, can be overdimensioned for current needs.
 
-4. **Autres solutions (Lerna, Rush, etc.)**
-   - Généralement moins performantes ou moins adaptées à l'écosystème pnpm/TypeScript.
+4. **Other solutions (Lerna, Rush, etc.)**
+   - Generally less performant or less suited to pnpm/TypeScript ecosystem.
 
-### Recommandation
-Commencer avec **pnpm workspaces seuls** pour sa simplicité et ses performances intrinsèques. Ajouter **Turborepo** exclusivement pour la mise en cache des tâches de build/test/lint lorsque le monorepo dépasse une certaine taille (par ex. > 30 packages) ou lorsque les temps de CI deviennent un goulot d'étranglement. Cette approche permet de bénéficier du meilleur des deux mondes sans complexité initiale inutile.
+### Recommendation
+Start with **pnpm workspaces only** for its simplicity and intrinsic performance. Add **Turborepo** exclusively for caching build/test/lint tasks when the monorepo exceeds a certain size (e.g. > 30 packages) or when CI times become a bottleneck. This approach allows getting the best of both worlds without initial unnecessary complexity.

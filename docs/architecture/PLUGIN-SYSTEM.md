@@ -1,198 +1,199 @@
-# Système de plugins DXG
+# DXG Plugin System
 
-Ce document décrit l’architecture du système de plugins permettant d’étendre les fonctionnalités de DXG sans modifier le core. Il reste conceptuel ; aucune implémentation n’est fournie.
+This document describes the architecture of the plugin system that allows extending DXG functionalities without modifying the core. It remains conceptual; no implementation is provided.
 
-## Objectif
-Permettre à des développeurs tiers de créer des paquets npm (par exemple `@acme/dxg-plugin-tailwind`) qui s’intègrent facilement à DXG en ajoutant :
-- De nouvelles commandes CLI
-- De nouveaux generators
-- Des templates supplémentaires
-- Des hooks de cycle de vie
-- Des fournisseurs d’IA personnalisés
-- Des extensions du terminal (panels, composants, thèmes)
-Le tout tout en maintenant une isolation sécurisée (sandbox) et en évitant les conflits de dépendances.
+## Objective
+Allow third-party developers to create npm packages (e.g., `@acme/dxg-plugin-tailwind`) that integrate easily with DXG by adding:
+- New CLI commands
+- New generators
+- Additional templates
+- Lifecycle hooks
+- Custom AI providers
+- Terminal extensions (panels, components, themes)
+All while maintaining secure isolation (sandbox) and avoiding dependency conflicts.
 
-## Découverte des plugins
-Au démarrage du CLI (ou lorsqu’une commande `dxg plugin …` est invoquée), DXG recherche les plugins selon deux mécanismes :
-1. **Convention de nommage** : tout paquet installé localement ou dans le workspace dont le nom commence par `dxg-plugin-` (ex. `dxg-plugin-myfeature`, `@scope/dxg-plugin-foo`) est considéré comme un candidat.
-2. **Champ explicite dans `package.json`** : tout paquet possédant le champ `"dxg-plugin": true` est également reconnu, indépendamment de son nom.
+## Plugin Discovery
+At CLI startup (or when a `dxg plugin …` command is invoked), DXG searches for plugins via two mechanisms:
+1. **Naming convention**: any locally installed or workspace package whose name starts with `dxg-plugin-` (e.g., `dxg-plugin-myfeature`, `@scope/dxg-plugin-foo`) is considered a candidate.
+2. **Explicit field in `package.json`**: any package possessing the field `"dxg-plugin": true` is also recognized, regardless of its name.
 
-Cette double approche permet une flexibilité : les plugins peuvent suivre la convention de nommage pour une découverte automatique, ou simplement indiquer leur intention via le champ booléen.
+This dual approach allows flexibility: plugins can follow the naming convention for automatic discovery, or simply indicate their intention via the boolean field.
 
-Le recherche se limite au répertoire de travail du projet (et éventuellement aux workspaces configurés via `pnpm-workspace.yaml`) afin d’éviter de charger des plugins globaux non désirés.
+The search is limited to the project's working directory (and optionally to workspaces configured via `pnpm-workspace.yaml`) to avoid loading unwanted global plugins.
 
-## Chargement et sandboxing
-Chaque plugin candidat est chargé dans un environnement **sandboxé** afin de limiter son accès uniquement aux API exposées par DXG. Deux stratégies sont envisagées :
-- **ESM dynamique avec `importAttributes`** : le paquet est importé comme module ES avec un objet `global` restreint (pas d’accès à `process`, `require`, etc.) et uniquement les exportations que le plugin déclare sont visibles.
-- **VM2 ou équivalent** : pour une isolation plus forte, le code du plugin est exécuté dans un contexte virtuel où seules les fonctions explícitement autorisées sont injectées.
+## Loading and Sandboxing
+Each candidate plugin is loaded in a **sandboxed** environment to limit its access solely to APIs exposed by DXG. Two strategies are envisaged:
+- **Dynamic ESM with `importAttributes`**: the package is imported as an ES module with a restricted `global` object (no access to `process`, `require`, etc.) and only the exports declared by the plugin are visible.
+- **VM2 or equivalent**: for stronger isolation, the plugin code is executed in a virtual context where only explicitly authorized functions are injected.
 
-Le sandbox garantit que le plugin ne peut pas effectuer d’opérations dangereuses (lecture/écriture arbitraire du système de fichiers, accès réseau non autorisé, modification du processus principal) sans passer par les API DXG qui peuvent appliquer leurs propres contrôles (ex. validation de chemins, quotas).
+The sandbox ensures the plugin cannot perform dangerous operations (arbitrary file system read/write, unauthorized network access, main process modification) without going through DXG APIs that can apply their own controls (e.g., path validation, quotas).
 
-### API exposées aux plugins (dans le sandbox)
-Depuis le contexte du plugin, les fonctions suivantes sont disponibles :
+### APIs Exposed to Plugins (in the sandbox)
+From the plugin context, the following functions are available:
 
-| Fonction | Description |
+| Function | Description |
 |----------|-------------|
-| `registerCommand(descriptor: CommandDescriptor) => void` | Enregistre une nouvelle commande disponible via `dxg <command>`. |
-| `registerGenerator(descriptor: GeneratorDescriptor) => void` | Enregistre un nouveau generator utilisable via `dxg generate <name>`. |
-| `registerHook(descriptor: HookDescriptor) => void` | Enregistre un hook qui sera appelé à un point de cycle de vie prédéterminé. |
-| `registerAIProvider(descriptor: AIProviderDescriptor) => void` | Enregistre un nouveau fournisseur d’IA utilisable par l’orchestrateur IA. |
-| `registerTerminalExtension(descriptor: TerminalExtensionDescriptor) => void` | Enregistre une extension du terminal (par exemple un nouveau type de panel ou un composant de rendu). |
-| `getCoreServices() => { logger: Logger; config: Config; fs: FS; ... }` | Fournit un accès en lecture seule à certains services du core (logger, config, fs, etc.) pour permettre au plugin d’accomplir ses tâches sans nécessiter de dépendances directes. |
-| `getPluginContext() => PluginContext` | Retourne des métadonnées sur le plugin lui‑même (nom, version, répertoire d’installation). |
+| `registerCommand(descriptor: CommandDescriptor) => void` | Registers a new command available via `dxg <command>`. |
+| `registerGenerator(descriptor: GeneratorDescriptor) => void` | Registers a new generator usable via `dxg generate <name>`. |
+| `registerHook(descriptor: HookDescriptor) => void` | Registers a hook that will be called at a predetermined lifecycle point. |
+| `registerAIProvider(descriptor: AIProviderDescriptor) => void` | Registers a new AI provider usable by the AI orchestrator. |
+| `registerTerminalExtension(descriptor: TerminalExtensionDescriptor) => void` | Registers a terminal extension (e.g., a new panel type or rendering component). |
+| `getCoreServices() => { logger: Logger; config: Config; fs: FS; ... }` | Provides read-only access to certain core services (logger, config, fs, etc.) allowing the plugin to accomplish its tasks without requiring direct dependencies. |
+| `getPluginContext() => PluginContext` | Returns metadata about the plugin itself (name, version, installation directory). |
 
-Chacune de ces APIs effectue une validation d’entrée et, le cas échéant, une vérification de capacités (ex. un plugin qui essaie d’enregistrer une commande doit fournir un nom unique et un handler fonctionnel).
+Each of these APIs performs input validation and, if applicable, capability verification (e.g., a plugin attempting to register a command must provide a unique name and a functional handler).
 
-## Enregistrement des points d’extension
+## Extension Points Registration
 
-### Commandes
-Un descriptor de commande possède la forme :
+### Commands
+A command descriptor has the form:
 ```ts
 interface CommandDescriptor {
-  name: string;                   // nom de la commande (ex. "add-tailwind")
-  description: string;            // texte d’aide affiché dans `dxg help`
-  handler: (args: string[], context: PluginContext) => Promise<void>; // logique de la commande
-  options?: OptionDescriptor[];   // définitions d’options (flags) utilisables par un parseur de type commander.js ou yargs
+  name: string;                   // command name (e.g., "add-tailwind")
+  description: string;            // help text displayed in `dxg help`
+  handler: (args: string[], context: PluginContext) => Promise<void>; // command logic
+  options?: OptionDescriptor[];   // option definitions (flags) usable by a commander.js or yargs parser
 }
 ```
-Le système de commandes du CLI (probablement basé sur une bibliothèque comme `commander.js` ou `oclif`) fusionne les commandes intégrées et celles enregistrées par les plugins, en assurant l’unicité des noms.
+The CLI's command system (likely based on a library like `commander.js` or `oclif`) merges built-in commands with those registered by plugins, ensuring name uniqueness.
 
 ### Generators
-Un descriptor de generator ressemble à :
+A generator descriptor resembles:
 ```ts
 interface GeneratorDescriptor {
-  name: string;                                 // nom utilisé dans `dxg generate <name>`
-  description: string;                          // aide affichée
-  prompts?: PromptDescriptor[] | PromptFunction; // soit une liste statique de prompts, soit une fonction qui retourne des prompts basée sur des réponses précédentes
-  template: string | TemplateSource;            // chemin vers le fichier de template ou chaîne de template inline
-  outputPathResolver?: (answers: Record<string, any>) => string; // fonction retournant le chemin de destination relatif au cwd
-  postProcess?: (files: string[], answers: Record<string, any>) => Promise<void>; // étape optionnelle après écriture (formatage, lint via IA)
+  name: string;                                 // name used in `dxg generate <name>`
+  description: string;                          // help text
+  prompts?: PromptDescriptor[] | PromptFunction; // either a static list of prompts, or a function returning prompts based on previous answers
+  template: string | TemplateSource;            // path to template file or inline template string
+  outputPathResolver?: (answers: Record<string, any>) => string; // function returning destination path relative to cwd
+  postProcess?: (files: string[], answers: Record<string, any>) => Promise<void>; // optional step after writing (formatting, lint via AI)
 }
 ```
-Le generator utilise le moteur de templates `@dxgjs/templates` et le système de prompts `@dxgjs/prompts` provenant du core (fournis via les services ou directement si le plugin déclare ces dépendances en peer).
+The generator uses the `@dxgjs/templates` template engine and the `@dxgjs/prompts` prompt system from the core (provided via services or directly if the plugin declares these dependencies as peer).
 
 ### Hooks
-Un descriptor de hook possède :
+A hook descriptor has:
 ```ts
 interface HookDescriptor {
-  event: string;                                 // nom de l’événement (ex. "pre:generate", "post:update", "plugin:load")
-  handler: (context: PluginContext) => Promise<void>; // fonction asynchrone à exécuter
-  priority?: number;                             // ordre d’exécution lorsqu’il y a plusieurs hooks sur le même événement (valeur plus faible = plus tôt)
+  event: string;                                 // event name (e.g., "pre:generate", "post:update", "plugin:load")
+  handler: (context: PluginContext) => Promise<void>; // async function to execute
+  priority?: number;                             // execution order when multiple hooks on same event (lower value = earlier)
 }
 ```
-Les événements courants sont définis par le core et documentés afin que les plugins sachent à quel moment s’abonner.
+Common events are defined by the core and documented so plugins know when to subscribe.
 
-### Fournisseurs d’IA
-Un descriptor de fournisseur d’IA doit implémenter l’interface suivante :
+### AI Providers
+An AI provider descriptor must implement the following interface:
 ```ts
 interface AIProviderDescriptor {
-  name: string;                                  // identifiant unique (ex. "acme-llama")
-  factory: () => AIProvider;                     // fonction qui retourne une instance conforme à l’interface AIProvider du core
-  // L’interface AIProvider (définie dans @dxgjs/ai) est :
+  name: string;                                  // unique identifier (e.g., "acme-llama")
+  factory: () => AIProvider;                     // function returning an instance conforming to the core AIProvider interface
+  // The AIProvider interface (defined in @dxgjs/ai) is:
   //   complete(prompt: string, opts?: AIOptions): Promise<string>;
   //   stream(prompt: string, opts?: AIOptions): AsyncIterable<string>;
   //   embed(text: string): Promise<number[]>;
 }
 ```
-Une fois enregistré, le fournisseur apparaît dans le registre de l’orchestrateur IA et peut être sélectionné par nom ou défini comme fournisseur par défaut dans la configuration.
+Once registered, the provider appears in the orchestrator's registry and can be selected by name or set as default provider in the configuration.
 
-### Extensions du terminal
-Un descriptor d’extension du terminal pourrait ressembler à :
+### Terminal Extensions
+A terminal extension descriptor could resemble:
 ```ts
 interface TerminalExtensionDescriptor {
-  name: string;                                  // nom unique de l’extension
-  component: TerminalComponent;                  // composant de rendu (dépend de l’API de rendu de @dxgjs/terminal)
-  // Le TerminalComponent pourrait être une classe qui implémente une méthode `render(buffer: TerminalBuffer) => void`
-  // ou un objet qui décrit une nouvelle sorte d’élément de rendu (panel, tableau personnalisé, etc.)
-  placement?: 'sidebar' | 'modal' | 'inline';    // où l’extension doit apparaître par défaut
-  activation?: { event: string; condition?: (context: PluginContext) => boolean }; // quand l’extension doit être activée
+  name: string;                                  // unique extension name
+  component: TerminalComponent;                  // rendering component (depends on @dxgjs/terminal rendering API)
+  // TerminalComponent could be a class implementing a `render(buffer: TerminalBuffer) => void` method
+  // or an object describing a new rendering element (panel, custom table, etc.)
+  placement?: 'sidebar' | 'modal' | 'inline';    // where the extension should appear by default
+  activation?: { event: string; condition?: (context: PluginContext) => boolean }; // when the extension should be activated
 }
 ```
-Le système de terminal du core doit offrir un point d’extension où les plugins peuvent insérer leurs composants (par exemple un registre de panneaux latéraux qui sont affichés lorsque le terminal est en mode « split »).
+The core terminal system must provide an extension point where plugins can insert their components (e.g., a sidebar panel registry displayed when the terminal is in "split" mode).
 
-## Gestion du cycle de vie
-Lorsque le CLI démarre :
-1. Il découvre les plugins candidats.
-2. Pour chaque plugin, il crée un sandbox.
-3. Il exécute le point d’entrée du plugin (export nommé `manifest` ou fonction d’initialisation) qui appelle les fonctions d’enregistrement ci‑dessus.
-4. Il collecte toutes les extensions enregistrées et les intègre dans les systèmes appropriés (commande, generator, hook, IA, terminal).
-5. En cas d’erreur lors du chargement (syntaxiquement invalide, appel d’API interdit, timeout), le plugin est marqué comme échoué, un message est journalisé, mais le CLI continue de fonctionner sans ce plugin.
+## Lifecycle Management
+When the CLI starts:
+1. It discovers candidate plugins.
+2. For each plugin, it creates a sandbox.
+3. It executes the plugin's entry point (named export `manifest` or initialization function) which calls the registration functions above.
+4. It collects all registered extensions and integrates them into the appropriate systems (command, generator, hook, AI, terminal).
+5. In case of error during loading (syntactically invalid, prohibited API call, timeout), the plugin is marked as failed, a message is logged, but the CLI continues to function without this plugin.
 
-Le CLI offre également une commande `dxg plugin list` pour afficher les plugins chargés avec leur statut, et `dxg plugin reload <name>` pour recharger un plugin particulier (utile durant le développement).
+The CLI also provides a `dxg plugin list` command to display loaded plugins with their status, and `dxg plugin reload <name>` to reload a particular plugin (useful during development).
 
-## Compatibilité de version
-Les plugins déclarent leurs dépendances peer vers les paquets DXG qu’ils utilisent (ex. `"peerDependencies": { "@dxgjs/templates": "^1.0.0", "@dxgjs/prompts": "^1.0.0" }`). Le système de plugins vérifie au chargement que les versions satisfont aux contraintes peer (en utilisant la même logique que le gestionnaire de paquets). Si une version requise n’est pas présente ou est incompatible, le plugin ne sera pas chargé et un avertissement sera affiché.
+## Version Compatibility
+Plugins declare peer dependencies toward the DXG packages they use (e.g., `"peerDependencies": { "@dxgjs/templates": "^1.0.0", "@dxgjs/prompts": "^1.0.0" }`). The plugin system checks at load time that the versions satisfy the peer constraints (using the same logic as the package manager). If a required version is missing or incompatible, the plugin will not be loaded and a warning will be displayed.
 
-Cette approche permet aux plugins d’évoluer indépendamment du core tant qu’ils respectent les interfaces exposées. Lorsqu’une modification rétro‑compatible est faite dans un paquet DXG (ex. ajout d’un paramètre optionnel à une fonction), les plugins existants continuent de fonctionner. Les changements majeurs entraîneront une mise à jour majeure du paquet DXG, obligeant les plugins à mettre à jour leurs peerDependencies.
+This approach allows plugins to evolve independently of the core as long as they respect the exposed interfaces. When a backward-compatible change is made in a DXG package (e.g., adding an optional parameter to a function), existing plugins continue to function. Breaking changes will trigger a major version bump of the DXG package, obliging plugins to update their peerDependencies.
 
-## Configuration du plugin
-Un plugin peut exposer une configuration optionnelle via un champ `dxgPluginConfig` dans le `package.json` du projet consommateur ou via un fichier de configuration dédié (`dxg-plugin.<name>.json`). Le noyau de DXG fournit une fonction `getPluginConfig(name: string) => Promise<any>` que le plugin peut appeler (via les services du core) pour récupérer sa configuration spécifique.
+## Plugin Configuration
+A plugin can expose optional configuration via a `dxgPluginConfig` field in the consumer project's `package.json` or via a dedicated configuration file (`dxg-plugin.<name>.json`). The DXG core provides a function `getPluginConfig(name: string) => Promise<any>` that the plugin can call (via core services) to retrieve its specific configuration.
 
-Cette configuration permet d’ajuster le comportement du plugin sans nécessiter de nouvelle version (ex. changer les couleurs d’un thème fourni par le plugin, activer/désactiver une caractéristique, spécifier une clé API pour un fournisseur d’IA externe).
+This configuration allows adjusting the plugin's behavior without requiring a new version (e.g., changing colors of a theme provided by the plugin, enabling/disabling a feature, specifying an API key for an external AI provider).
 
-## Sécurité et bonnes pratiques
-- **Principle of least privilege** : le sandbox ne fournit que les APIs strictement nécessaires. Aucun accès direct à `process.env`, `require` ou au système de fichiers en dehors du répertoire de travail n’est offert.
-- **Validation des entrées** : toutes les fonctions d’enregistrement effectuent une validation (ex. noms de commandes non vides, handlers fonctions, schémas de prompts corrects) avant d’enregistrer l’extension.
-- **Isolation des erreurs** : si le handler d’un plugin lance une exception, elle est capturée et journalisée sans faire planter le CLI principal (les erreurs sont remontées à l’appelant sous forme de rejet de promesse gentil).
-- **Audit des dépendances** : les plugins sont encouragés à auditer leurs propres dépendances pour éviter d’introduire des vulnérabilités transmises via DXG.
-- **Signalement** : les plugins doivent éviter d’utiliser `console.log` directement ; ils doivent plutôt utiliser le service logger fourni via `getCoreServices().logger` afin que leurs messages soient uniformément formatés et respectent le niveau de verbosité global.
+## Security and Best Practices
+- **Principle of least privilege**: the sandbox provides only the strictly necessary APIs. No direct access to `process.env`, `require`, or the file system outside the working directory is offered.
+- **Input validation**: all registration functions perform validation (e.g., non-empty command names, functional handlers, correct prompt schemas) before registering the extension.
+- **Error isolation**: if a plugin's handler throws an exception, it is caught and logged without crashing the main CLI (errors are reported to the caller as a gentle promise rejection).
+- **Dependency auditing**: plugins are encouraged to audit their own dependencies to avoid introducing vulnerabilities transmitted via DXG.
+- **Reporting**: plugins must avoid using `console.log` directly; they should instead use the logger service provided via `getCoreServices().logger` so their messages are uniformly formatted and respect the global verbosity level.
 
-## Exemple de structure de plugin
+## Example Plugin Structure
 ```text
 my-dxg-plugin/
-├── package.json          // contient "name": "@acme/dxg-plugin-foo", "dxg-plugin": true, "peerDependencies": {...}
+├── package.json          // contains "name": "@acme/dxg-plugin-foo", "dxg-plugin": true, "peerDependencies": {...}
 ├── src/
-│   └── index.ts          // point d’entrée qui enregistre les extensions
-├── templates/            // fichiers de template utilisés par les generators du plugin
+│   └── index.ts          // entry point that registers extensions
+├── templates/            // template files used by the plugin's generators
 │   └── component.hbs
 └── README.md
 ```
 
-`src/index.ts` pourrait contenir :
+`src/index.ts` could contain:
 ```ts
-import { registerCommand, registerGenerator } from '@dxgjs/plugins/api'; // fourni via le sandbox
+import { registerCommand, registerGenerator } from '@dxgjs/plugins/api'; // provided via the sandbox
 
 registerCommand({
   name: 'add-foo',
-  description: 'Ajoute une fonctionnalité foo au projet',
+  description: 'Adds a foo feature to the project',
   handler: async (args, ctx) => {
-    // utilisation des services du core
+    // use core services
     const fs = ctx.getCoreServices().fs;
     const logger = ctx.getCoreServices().logger;
     await fs.writeFile('foo.txt', 'Hello from plugin');
-    logger.info('Plugin foo installé avec succès');
+    logger.info('Plugin foo installed successfully');
   }
 });
 
 registerGenerator({
   name: 'foo-component',
-  description: 'Génère un composant React foo',
+  description: 'Generates a React foo component',
   template: await ctx.getCoreServices().fs.readFile('./templates/component.hbs', 'utf-8'),
   prompts: [
-    { type: 'input', name: 'name', message: 'Nom du composant' },
-    { type: 'confirm', name: 'withHooks', message: 'Inclure des hooks ?', default: false }
+    { type: 'input', name: 'name', message: 'Component name' },
+    { type: 'confirm', name: 'withHooks', message: 'Include hooks?', default: false }
   ],
   outputPathResolver: (answers) => `src/components/${answers.name}.jsx`,
   postProcess: async (files, answers) => {
-    // éventuellement appeler @dxgjs/ai pour améliorer le code généré
+    // optionally call @dxgjs/ai to improve generated code
   }
 });
 ```
 
-Ce plugin, une fois installé dans un projet DXG (`npm i -D @acme/dxg-plugin-foo`), sera découvert au prochain démarrage du CLI et pourra être invoqué via :
+Once installed in a DXG project (`npm i -D @acme/dxg-plugin-foo`), this plugin will be discovered at the next CLI startup and can be invoked via:
 - `dxg add-foo`
 - `dxg generate foo-component`
 
-## Résumé des décisions prises
-- **Découverte basée sur la convention de nommage + champ `dxg-plugin:true`**.
-- **Sandboxing obligatoire** pour garantir la sécurité.
-- **API d’enregistrement clairement séparées** (commands, generators, hooks, AI providers, terminal extensions).
-- **Gestion du cycle de vie** (découverte, chargement, enregistrement, intégration, rechargement).
-- **Compatibilité de version via peerDependencies** et vérification au chargement.
-- **Configuration externe** via `package.json` du projet ou fichiers dédiés.
-- **Bonnes pratiques de sécurité** (principe du moindre privilège, validation, isolation des erreurs).
+## Summary of Decisions Made
+- **Discovery based on naming convention + `dxg-plugin:true` field**.
+- **Mandatory sandboxing** to guarantee security.
+- **Clearly separated registration APIs** (commands, generators, hooks, AI providers, terminal extensions).
+- **Lifecycle management** (discovery, loading, registration, integration, reloading).
+- **Version compatibility via peerDependencies** and verification at load time.
+- **External configuration** via project's `package.json` or dedicated files.
+- **Security best practices** (least privilege, validation, error isolation).
 
-Ces choix assurent un système de plugins extensible, sûr et agréable à utiliser tant pour les développeurs de plugins que pour les consommateurs de DXG.
+These choices ensure an extensible, safe, and pleasant plugin system for both plugin developers and DXG consumers.
 
 ---
 
+---

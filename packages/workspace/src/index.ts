@@ -117,6 +117,9 @@ export async function detectWorkspace(root?: string): Promise<WorkspaceResult> {
 
   // Read each project's package.json
   const projects: WorkspaceProject[] = [];
+  // Map project names to their index in projects array for quick lookup
+  const projectNameToIndex = new Map<string, number>();
+
   for (const projectPath of projectPaths) {
     try {
       const packageJsonPath = join(projectPath, "package.json");
@@ -129,10 +132,12 @@ export async function detectWorkspace(root?: string): Promise<WorkspaceResult> {
         name: packageJson.name,
         version: packageJson.version,
         location: projectPath,
-        workspaceDependencies: [], // We'll fill this later if needed
+        workspaceDependencies: [],
       };
 
+      const projectIndex = projects.length;
       projects.push(project);
+      projectNameToIndex.set(packageJson.name, projectIndex);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       logger.warn(
@@ -141,7 +146,43 @@ export async function detectWorkspace(root?: string): Promise<WorkspaceResult> {
     }
   }
 
-  // TODO: Calculate workspace dependencies by reading each project's dependencies and linking to workspace projects by name.
+  // Calculate workspace dependencies by reading each project's dependencies
+  // and linking to workspace projects by name
+  for (let i = 0; i < projectPaths.length; i++) {
+    const projectPath = projectPaths[i];
+    try {
+      const packageJsonPath = join(projectPath, "package.json");
+      const packageJsonContent = (await readFile(packageJsonPath, {
+        encoding: "utf8",
+      })) as string;
+      const packageJson: PackageJson = JSON.parse(packageJsonContent);
+
+      // Get all dependencies (dependencies, devDependencies, peerDependencies)
+      const dependencies = {
+        ...(packageJson.dependencies ?? {}),
+        ...(packageJson.devDependencies ?? {}),
+        ...(packageJson.peerDependencies ?? {}),
+      };
+
+      // Find which dependencies are workspace projects
+      const workspaceDeps: string[] = [];
+      for (const depName of Object.keys(dependencies)) {
+        if (projectNameToIndex.has(depName)) {
+          workspaceDeps.push(depName);
+        }
+      }
+
+      // Update the project's workspaceDependencies
+      if (i < projects.length) {
+        projects[i].workspaceDependencies = workspaceDeps;
+      }
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        `Failed to read package.json for dependency calculation at ${projectPath}: ${msg}`,
+      );
+    }
+  }
 
   return { root: workspaceRoot, projects };
 }

@@ -15,32 +15,32 @@ program
   .version("0.0.0", "-v, --version")
   .argument(
     "[directory]",
-    "répertoire cible (défaut : répertoire courant)",
+    "target directory (default: current directory)",
     ".",
   )
   .action(async (targetDirRaw) => {
     try {
       const targetDir = join(process.cwd(), targetDirRaw);
 
-      // 1��️��⃣ Détection de l'espace de travail (peut échouer ; on continue)
+      //  Workspace detection (may fail; we continue anyway)
       try {
         await detectWorkspace(targetDir);
       } catch (_) {
-        // Aucun espace de travail trouvé, on continue quand même
+        // No workspace found, we continue anyway
       }
 
-      // 2��️��⃣ Chargement de la configuration (peut retourner des valeurs par défaut)
+      //  Loading configuration (may return default values)
       const config = await loadConfig(targetDir);
 
-      // 3��️��⃣ Collecte des réponses via l'abstraction de prompts
+      //  Collecting responses via the prompt abstraction
       const answers = await prompt(initGenerator.prompts);
-      // Fusion éventuelle avec les valeurs de config (ex. nom du projet)
+      // Potential merge with config values (e.g. project name)
       const finalAnswers = {
         name: answers.name || config.name,
         description: answers.description,
       };
 
-      // 4��️��⃣ Préparer le contexte pour le générateur
+      //  Prepare context for the generator
       const logger = new Logger({ minLevel: "info" });
       // Provide stat and readdir functions (not used by init generator but required by type)
       const { stat, readdir } = await import("@dxgjs/fs");
@@ -50,12 +50,12 @@ program
         templates: { render: (await import("@dxgjs/templates")).render },
       };
 
-      // 5��️��⃣ Exécuter le générateur (qui executera validate → plan → execute → verify → summarize)
+      //  Execute the generator (which will perform validate → plan → execute → verify → summarize)
       await initGenerator.run(finalAnswers, context as any);
 
       // Sortie naturelle (code 0)
     } catch (err) {
-      console.error(`��❌ ${err instanceof Error ? err.message : String(err)}`);
+      console.error(` ${err instanceof Error ? err.message : String(err)}`);
       process.exitCode = 1;
     }
   });
