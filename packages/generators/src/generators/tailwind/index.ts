@@ -267,7 +267,7 @@ export function summarizeTailwind(
     logger.info(` Updated: ${updated.join(", ")}`);
   }
   if (skipped.length) {
-    logger.info(`️  Unchanged: ${skipped.join(", ")}`);
+    logger.info(`Unchanged: ${skipped.join(", ")}`);
   }
 
   logger.info(` Tailwind CSS v4 installed successfully`);

@@ -147,7 +147,7 @@ export function summarizeInit(
     logger.info(` Updated: ${updated.join(", ")}`);
   }
   if (skipped.length) {
-    logger.info(`️  Unchanged: ${skipped.join(", ")}`);
+    logger.info(`Unchanged: ${skipped.join(", ")}`);
   }
   logger.info(
     ` Initialization completed: ${answers.name} (${total} files processed)`,

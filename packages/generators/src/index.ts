@@ -62,16 +62,18 @@ export default ${componentName};
     } catch (error) {
       logger.error(`Failed to generate component: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
-    }
   }
+}
 };
 
 // Import the init generator we just created
 import initGenerator from './generators/init';
 // Import the tailwind generator
 import tailwindGenerator from './generators/tailwind';
+// Import the database generator
+import databaseGenerator from './generators/database';
 
-export { initGenerator, reactComponentGenerator, tailwindGenerator };
+export { initGenerator, reactComponentGenerator, tailwindGenerator, databaseGenerator };
 
 // Default export for convenience (keep existing behavior)
 export default reactComponentGenerator;
