@@ -92,6 +92,7 @@ program
         init: initGenerator,
         tailwind: tailwindGenerator,
         database: databaseGenerator,
+        auth: (await import("@dxgjs/generators")).authGenerator,
       };
 
       const generator = generatorMap[generatorName];
