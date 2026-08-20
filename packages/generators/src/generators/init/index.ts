@@ -109,6 +109,11 @@ export async function executeInit(
       await ctx.fs.writeFile(path, rendered, "utf8");
       result.updated.push(path);
     } else {
+      // Ensure the directory exists
+      const dir = path.split("/").slice(0, -1).join("/");
+      if (dir && !(await ctx.fs.pathExists(dir))) {
+        await ctx.fs.mkdir(dir, { recursive: true });
+      }
       await ctx.fs.writeFile(path, rendered, "utf8");
       result.created.push(path);
     }

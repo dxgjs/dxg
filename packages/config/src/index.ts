@@ -4,9 +4,16 @@ import { Logger } from '@dxgjs/logger';
 
 const logger = new Logger({ minLevel: 'warn' });
 
+/**
+ * Importers/callers: apps/cli/src/index.ts (uses loadConfig to get project config)
+ * Affected API: DXGConfig interface now includes optional description field; loadConfig returns config with description
+ * Data schemas: DXGConfig = { name?: string, version?: string, description?: string }
+ * User's verbatim instruction: Continue with DXG Real-World Usage & Validation Phase - fix build error to allow CLI to use config.description
+ */
 export interface DXGConfig {
   name?: string;
   version?: string;
+  description?: string;
 }
 
 export async function loadConfig(rootPath: string): Promise<DXGConfig> {

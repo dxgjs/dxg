@@ -1,9 +1,8 @@
 import { Logger } from "@dxgjs/logger";
-import type * as FS from "@dxgjs/fs";
 
 export interface GeneratorContext {
   logger: Logger;
-  fs: typeof FS;
+  fs: any;
   templates: {
     render: (template: string, data: Record<string, unknown>) => string;
   };

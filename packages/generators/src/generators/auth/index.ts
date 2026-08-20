@@ -51,6 +51,7 @@ export const authPrompts = [
 export function validateAuth(_answers: Record<string, unknown>): boolean {
   // Validation will happen in the run method; we keep this for interface compliance
   // but actual validation is done in run via checkPreconditions
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return true;
 }
 

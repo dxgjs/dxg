@@ -3,12 +3,13 @@ import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
-import tailwindGenerator, { detectPackageManager } from "./index";
 
-// Mock child_process
+// Mock child_process BEFORE importing modules that use it
 vi.mock("child_process", () => ({
   execSync: vi.fn(),
 }));
+
+import tailwindGenerator, { detectPackageManager } from "./index";
 
 // Import the mocked execSync
 import { execSync } from "child_process";
