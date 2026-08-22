@@ -31,4 +31,8 @@ logs
 # Misc
 .cache
 
+# TypeScript build info
+*.tsbuildinfo
+
+# Playground
 playground/

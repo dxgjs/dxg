@@ -5,5 +5,4 @@ export default {
   clean: true,
   dts: true,
   format: ["esm"],
-  tsBuildInfoFile: ".tsbuildinfo",
 };

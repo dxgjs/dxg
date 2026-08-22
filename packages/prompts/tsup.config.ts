@@ -5,8 +5,4 @@ export default {
   clean: true,
   dts: true,
   format: ["esm"],
-  outExtension: () => ({
-    js: '.mjs',
-  }),
-  tsBuildInfoFile: ".tsbuildinfo",
 };
