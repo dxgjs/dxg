@@ -4,10 +4,11 @@ import { loadConfig } from "@dxgjs/config";
 import { prompt } from "@dxgjs/prompts";
 import { Logger } from "@dxgjs/logger";
 import { join } from "path";
-import { readFile, writeFile, pathExists } from "@dxgjs/fs";
+import { readFile, writeFile, pathExists, stat, readdir, mkdir } from "@dxgjs/fs";
 import { initGenerator } from "@dxgjs/generators";
 import { tailwindGenerator } from "@dxgjs/generators";
 import { databaseGenerator } from "@dxgjs/generators";
+import { render as templatesRender } from "@dxgjs/templates";
 
 const program = new Command();
 
@@ -37,11 +38,10 @@ async function loadConfigSilently(targetDir: string) {
 function prepareContext() {
   const logger = new Logger({ minLevel: "info" });
   // Provide stat and readdir functions (not used by all generators but required by type)
-  const { stat, readdir, mkdir } = require("@dxgjs/fs");
   return {
     logger,
     fs: { readFile, writeFile, pathExists, stat, readdir, mkdir },
-    templates: { render: require("@dxgjs/templates").render },
+    templates: { render: templatesRender },
   };
 }
 
