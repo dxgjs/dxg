@@ -24,6 +24,11 @@ interface PackageJson {
   [key: string]: unknown;
 }
 
+/**
+ * Detect workspace configuration.
+ * @param root - Optional root directory to start searching from.
+ * @returns Promise resolving to workspace information.
+ */
 export async function detectWorkspace(root?: string): Promise<WorkspaceResult> {
   const start = root ?? process.cwd();
   let current = start;
