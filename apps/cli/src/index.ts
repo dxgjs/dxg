@@ -3,7 +3,7 @@ import { detectWorkspace } from "@dxgjs/workspace";
 import { loadConfig } from "@dxgjs/config";
 import { prompt } from "@dxgjs/prompts";
 import { Logger } from "@dxgjs/logger";
-import { join } from "path";
+import { join, dirname } from "path";
 import { readFile, writeFile, pathExists, stat, readdir, mkdir } from "@dxgjs/fs";
 import { initGenerator } from "@dxgjs/generators";
 import { tailwindGenerator } from "@dxgjs/generators";
@@ -56,6 +56,33 @@ async function runInTargetDirectory(targetDir: string, fn: () => Promise<any>) {
   } finally {
     process.chdir(originalDir);
   }
+}
+
+/**
+ * Finds the nearest directory containing a package.json by walking upward from the start directory.
+ * @param startDir - The directory to start searching from.
+ * @returns The absolute path to the directory containing a package.json, or the startDir if none found.
+ */
+async function findProjectRoot(startDir: string): Promise<string> {
+  let current = startDir;
+  while (true) {
+    const packageJsonPath = join(current, "package.json");
+    try {
+      await stat(packageJsonPath);
+      // If we get here, the file exists.
+      return current;
+    } catch {
+      // File does not exist or we cannot access it, continue upward.
+    }
+    const parent = dirname(current);
+    if (parent === current) {
+      // We've reached the filesystem root.
+      break;
+    }
+    current = parent;
+  }
+  // If we didn't find any package.json, return the startDir.
+  return startDir;
 }
 
 /**
@@ -190,10 +217,11 @@ program
 
     try {
       const targetDir = join(process.cwd(), targetDirRaw);
+      const projectRoot = await findProjectRoot(targetDir);
 
       // Shared setup
-      await detectWorkspaceSilently(targetDir);
-      const config = await loadConfigSilently(targetDir);
+      await detectWorkspaceSilently(projectRoot);
+      const config = await loadConfigSilently(projectRoot);
       const context = prepareContext();
 
       // Collect answers for init generator
@@ -208,8 +236,8 @@ program
       // Merge with config
       const finalAnswers = mergeAnswersWithConfig(answers, config);
 
-      // Run generator in target directory
-      await runInTargetDirectory(targetDir, async () => {
+      // Run generator in project root directory
+      await runInTargetDirectory(projectRoot, async () => {
         await initGenerator.run(finalAnswers, context);
       });
 
@@ -236,10 +264,11 @@ program
 
     try {
       const targetDir = join(process.cwd(), targetDirRaw);
+      const projectRoot = await findProjectRoot(targetDir);
 
       // Shared setup
-      await detectWorkspaceSilently(targetDir);
-      const config = await loadConfigSilently(targetDir);
+      await detectWorkspaceSilently(projectRoot);
+      const config = await loadConfigSilently(projectRoot);
       const context = prepareContext();
 
       // Get generator instance
@@ -273,8 +302,8 @@ program
       // Merge with config (for name and description if applicable)
       const finalAnswers = mergeAnswersWithConfig(answers, config);
 
-      // Run generator in target directory
-      await runInTargetDirectory(targetDir, async () => {
+      // Run generator in project root directory
+      await runInTargetDirectory(projectRoot, async () => {
         await generator.run(finalAnswers, context as any);
       });
 
