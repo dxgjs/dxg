@@ -9,6 +9,7 @@ import { initGenerator } from "@dxgjs/generators";
 import { tailwindGenerator } from "@dxgjs/generators";
 import { databaseGenerator } from "@dxgjs/generators";
 import { render as templatesRender } from "@dxgjs/templates";
+import pkg from "../package.json" assert { type: "json" };
 
 const program = new Command();
 
@@ -205,7 +206,7 @@ const answerDefsMap: Record<string, AnswerDef[]> = {
 program
   .name("dxg")
   .description("DXG CLI for generating project scaffolding")
-  .version("0.0.0", "-v, --version")
+  .version(pkg.version, "-v, --version")
   .option("--non-interactive", "Do not prompt for input; fail if required values are missing")
   .argument(
     "[directory]",

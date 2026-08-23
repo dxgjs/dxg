@@ -1,7 +1,8 @@
 {
   "name": "@dxgjs/fs",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Filesystem abstraction layer for DXG",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {

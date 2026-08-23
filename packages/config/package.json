@@ -1,7 +1,8 @@
 {
   "name": "@dxgjs/config",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Configuration loading and merging for DXG",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
