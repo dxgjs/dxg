@@ -2,8 +2,10 @@ import { GeneratorContext, Generator } from "../../types";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { detectPackageManager } from "@dxgjs/fs";
 
 // Get the directory where this module is located
+// DEBUG LINE ADDED
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
@@ -57,31 +59,22 @@ export async function isPrismaInstalled(fs: GeneratorContext['fs']): Promise<boo
     if (!packageJsonExists) return false;
     const content = await fs.readFile("package.json", { encoding: "utf8" });
     const pkg = JSON.parse(content as string);
-    return (
+    console.log("[isPrismaInstalled] pkg.devDependencies:", pkg.devDependencies);
+    console.log("[isPrismaInstalled] pkg.dependencies:", pkg.dependencies);
+    const result = (
       (pkg.devDependencies && pkg.devDependencies.prisma) ||
       (pkg.dependencies && pkg.dependencies.prisma)
     );
+    console.log("[isPrismaInstalled] package.json content:", content);
+    console.log("[isPrismaInstalled] result:", result);
+    return result;
   } catch (error) {
     // If we can't read or parse, assume not installed
+    console.log("[isPrismaInstalled] error:", error);
     return false;
   }
 }
 
-// Detect the package manager being used in the project
-export async function detectPackageManager(fs: GeneratorContext['fs']): Promise<"npm" | "pnpm" | "yarn"> {
-  // Check for lockfiles in order of preference
-  const hasYarnLock = await fs.pathExists("yarn.lock");
-  if (hasYarnLock) return "yarn";
-
-  const hasPnpmlock = await fs.pathExists("pnpm-lock.yaml");
-  if (hasPnpmlock) return "pnpm";
-
-  const hasPackageLock = await fs.pathExists("package-lock.json");
-  if (hasPackageLock) return "npm";
-
-  // Default to npm
-  return "npm";
-}
 
 // Planning function
 export function planDatabase(answers: Record<string, unknown>) {
@@ -118,14 +111,23 @@ export async function executeDatabase(
   // Check if Prisma is already installed
   const prismaInstalled = await isPrismaInstalled(fs);
   if (prismaInstalled) {
+    console.log("[executeDatabase] Prisma is installed, skipping.");
     logger.info(" Prisma already detected. Skipping dependency installation.");
   } else {
+    console.log("[executeDatabase] Prisma is not installed, installing.");
     // Install dependencies
     try {
       // Detect package manager
-      const packageManager = await detectPackageManager(fs);
+      const packageManager = await detectPackageManager(undefined);
       const installCommand = getInstallCommand(packageManager, planToUse.packages, true); // true for devDependency
-      logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
+      console.log("[executeDatabase] packageManager:", packageManager);
+      console.log("[executeDatabase] installCommand:", installCommand);
+      // logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
+      console.log("[executeDatabase] Before execSync call");
+	console.log("TRIGGER: Testing execSync call");
+	execSync("echo 'test'", { stdio: "pipe" });
+console.log("DEBUG: About to call execSync");
+      console.log("[executeDatabase] installCommand:", installCommand);
       execSync(installCommand, { stdio: "inherit" });
     } catch (error) {
       throw new Error(
@@ -218,13 +220,15 @@ export function summarizeDatabase(
 }
 
 // Get the install command for the detected package manager
-function getInstallCommand(packageManager: "npm" | "pnpm" | "yarn", packages: string[], isDevDependency: boolean): string {
+function getInstallCommand(packageManager: "npm" | "pnpm" | "yarn" | "bun", packages: string[], isDevDependency: boolean): string {
   const devFlag = isDevDependency ? "-D" : ""; // Save as dev dependency
   switch (packageManager) {
     case "pnpm":
       return `pnpm add ${devFlag} ${packages.join(" ")}`;
     case "yarn":
       return `yarn add ${devFlag} ${packages.join(" ")}`;
+    case "bun":
+      return `bun add ${devFlag} ${packages.join(" ")}`;
     case "npm":
     default:
       return `npm install ${devFlag} ${packages.join(" ")}`;

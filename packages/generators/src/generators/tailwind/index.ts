@@ -2,6 +2,7 @@ import { GeneratorContext, Generator } from "../../types";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { detectPackageManager } from "@dxgjs/fs";
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
@@ -66,10 +67,7 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
     );
   }
 
-  // 3. Detect package manager (validation only, not failure)
-  // We'll just ensure we can detect one; the fallback to npm is acceptable.
-  // No need to store the booleans; we just call detectPackageManager later.
-}
+  }
 
 /**
  * Check if Tailwind CSS is already installed in package.json
@@ -90,23 +88,6 @@ export async function isTailwindInstalled(fs: GeneratorContext['fs']): Promise<b
   }
 }
 
-/**
- * Detect the package manager being used in the project
- */
-export async function detectPackageManager(fs: GeneratorContext['fs']): Promise<"npm" | "pnpm" | "yarn"> {
-  // Check for lockfiles in order of preference
-  const hasYarnLock = await fs.pathExists("yarn.lock");
-  if (hasYarnLock) return "yarn";
-
-  const hasPnpmlock = await fs.pathExists("pnpm-lock.yaml");
-  if (hasPnpmlock) return "pnpm";
-
-  const hasPackageLock = await fs.pathExists("package-lock.json");
-  if (hasPackageLock) return "npm";
-
-  // Default to npm
-  return "npm";
-}
 
 // Planning function
 export function planTailwind(answers: Record<string, unknown>) {
@@ -157,7 +138,7 @@ export async function executeTailwind(
     // Install dependencies
     try {
       // Detect package manager
-      const packageManager = await detectPackageManager(fs);
+      const packageManager = await detectPackageManager(undefined);
       const installCommand = getInstallCommand(packageManager, planToUse.packages);
       logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
       execSync(installCommand, { stdio: "inherit" });
@@ -276,13 +257,15 @@ export function summarizeTailwind(
 /**
  * Get the install command for the detected package manager
  */
-function getInstallCommand(packageManager: "npm" | "pnpm" | "yarn", packages: string[]): string {
+function getInstallCommand(packageManager: "npm" | "pnpm" | "yarn" | "bun", packages: string[]): string {
   const devFlag = "-D"; // Save as dev dependency
   switch (packageManager) {
     case "pnpm":
       return `pnpm add ${devFlag} ${packages.join(" ")}`;
     case "yarn":
       return `yarn add ${devFlag} ${packages.join(" ")}`;
+    case "bun":
+      return `bun add ${devFlag} ${packages.join(" ")}`;
     case "npm":
     default:
       return `npm install ${devFlag} ${packages.join(" ")}`;

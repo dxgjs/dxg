@@ -8,27 +8,26 @@ vi.mock("@dxgjs/fs", async (importOriginal) => {
   mocked.detectPackageManager = vi.fn();
   return mocked;
 });
+// Mock child_process.execSync to prevent actual command execution
+vi.mock("child_process", () => ({
+  execSync: vi.fn()
+}));
 
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
 import { detectPackageManager } from "@dxgjs/fs";
-import tailwindGenerator from "./index";
+import authGenerator from "./index";
 
-// Mock child_process.execSync to prevent actual command execution
-vi.mock("child_process", () => ({
-  execSync: vi.fn()
-}));
-
-describe("Tailwind Generator", () => {
+describe("Auth Generator", () => {
   let originalCwd: string;
   let tempDir: string;
 
   beforeEach(() => {
     originalCwd = process.cwd();
     // Create a temporary directory
-    tempDir = path.join(os.tmpdir(), `dxg-tailwind-test-${Date.now()}-${Math.random()
+    tempDir = path.join(os.tmpdir(), `dxg-auth-test-${Date.now()}-${Math.random()
       .toString(36)
       .substring(2, 15)}`);
     // Ensure the directory exists
@@ -45,80 +44,52 @@ describe("Tailwind Generator", () => {
     vi.restoreAllMocks();
   });
 
-  test("tailwindGenerator should exist", () => {
-    expect(tailwindGenerator).toBeDefined();
-    expect(tailwindGenerator.name).toBe("tailwind");
-    expect(tailwindGenerator.description).toBe(
-      "Adds Tailwind CSS v4 to a Node/frontend project"
+  test("authGenerator should exist", () => {
+    expect(authGenerator).toBeDefined();
+    expect(authGenerator.name).toBe("auth");
+    expect(authGenerator.description).toBe(
+      "Adds authentication provider configuration"
     );
-    expect(Array.isArray(tailwindGenerator.prompts)).toBe(true);
-    expect(tailwindGenerator.prompts.length).toBe(3);
+    expect(Array.isArray(authGenerator.prompts)).toBe(true);
+    expect(authGenerator.prompts.length).toBe(3);
   });
 
-  test("tailwindGenerator should have correct prompts", () => {
-    const prompts = tailwindGenerator.prompts;
+  test("authGenerator should have correct prompts", () => {
+    const prompts = authGenerator.prompts;
 
-    // First prompt: customiseTailwind
-    expect(prompts[0].name).toBe("customiseTailwind");
-    expect(prompts[0].type).toBe("confirm");
+    // First prompt: provider
+    expect(prompts[0].name).toBe("provider");
+    expect(prompts[0].type).toBe("select");
     expect(prompts[0].message).toBe(
-      "Do you want to customise Tailwind settings (content paths, theme, etc.)? [y/N]"
+      "Choose your authentication provider:"
     );
-    expect(prompts[0].default).toBe(false);
+    expect(prompts[0].default).toBe("better-auth");
+    expect(Array.isArray(prompts[0].choices)).toBe(true);
+    expect(prompts[0].choices.length).toBe(4);
 
-    // Second prompt: addPostcssPlugins
-    expect(prompts[1].name).toBe("addPostcssPlugins");
+    // Second prompt: installDependencies
+    expect(prompts[1].name).toBe("installDependencies");
     expect(prompts[1].type).toBe("confirm");
     expect(prompts[1].message).toBe(
-      "Do you want to add additional PostCSS plugins (e.g., for minification)? [y/N]"
+      "Do you want to install dependencies?"
     );
-    expect(prompts[1].default).toBe(false);
+    expect(prompts[1].default).toBe(true);
 
-    // Third prompt: installAutoprefixer
-    expect(prompts[2].name).toBe("installAutoprefixer");
+    // Third prompt: generateExampleConfig
+    expect(prompts[2].name).toBe("generateExampleConfig");
     expect(prompts[2].type).toBe("confirm");
     expect(prompts[2].message).toBe(
-      "Do you need to support legacy browsers (IE11, older Android)? [y/N]"
+      "Do you want to generate example configuration files?"
     );
-    expect(prompts[2].default).toBe(false);
+    expect(prompts[2].default).toBe(true);
   });
 
-  test("tailwindGenerator should validate correctly", () => {
-    // Since validateTailwind always returns true, any answers should pass
-    expect(tailwindGenerator.prompts).toBeDefined();
+  test("authGenerator should validate correctly", () => {
+    // Since validateAuth always returns true, any answers should pass
+    expect(authGenerator.prompts).toBeDefined();
   });
 
   describe("Validation", () => {
-    test("should throw if Node.js version < 18", async () => {
-      // Mock process.versions.node to simulate an old version
-      const originalNodeVersion = process.versions.node;
-      Object.defineProperty(process.versions, "node", {
-        value: "16.0.0",
-        configurable: true,
-      });
-      try {
-        const context = {
-          logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } as unknown as Logger,
-          fs: fs,
-          templates: { render: vi.fn().mockReturnValue("") },
-        };
-        await tailwindGenerator.run(
-          { customiseTailwind: false, addPostcssPlugins: false, installAutoprefixer: false },
-          context
-        );
-        expect(false).toBe(true); // Should not reach here
-      } catch (error: unknown) {
-        expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toContain("Node.js version");
-      } finally {
-        // Restore original node version
-        Object.defineProperty(process.versions, "node", {
-          value: originalNodeVersion,
-          configurable: true,
-        });
-      }
-    });
-
     test("should throw if package.json missing", async () => {
       // Ensure no package.json in the temporary directory
       const context = {
@@ -127,8 +98,8 @@ describe("Tailwind Generator", () => {
         templates: { render: vi.fn().mockReturnValue("") },
       };
       await expect(
-        tailwindGenerator.run(
-          { customiseTailwind: false, addPostcssPlugins: false, installAutoprefixer: false },
+        authGenerator.run(
+          { provider: "better-auth", installDependencies: true, generateExampleConfig: true },
           context
         )
       ).rejects.toThrow("package.json not found");
@@ -146,8 +117,6 @@ describe("Tailwind Generator", () => {
         warn: vi.fn(),
       } as unknown as Logger;
 
-      // Spy on fs.readFile to see what paths are being read
-      const readFileSpy = vi.spyOn(fs, "readFile");
       // Mock templates.render to replace placeholders
       const renderSpy = vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
         return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
@@ -161,55 +130,43 @@ describe("Tailwind Generator", () => {
         templates: { render: renderSpy },
       };
 
+      // Spy on fs.readFile to see what paths are being read
+      let readFileSpy: ReturnType<typeof vi.spyOn>;
+
       const answers = {
-        customiseTailwind: true,
-        addPostcssPlugins: true,
-        installAutoprefixer: false,
+        provider: "better-auth",
+        installDependencies: true,
+        generateExampleConfig: true,
       };
 
       try {
-        await tailwindGenerator.run(answers, context);
+        readFileSpy = vi.spyOn(fs, "readFile");
+        await authGenerator.run(answers, context);
 
         // Verify that the template files were read
         expect(readFileSpy).toHaveBeenCalledWith(
-          expect.stringContaining("tailwind.config.tmpl"),
-          { encoding: "utf8" }
-        );
-        expect(readFileSpy).toHaveBeenCalledWith(
-          expect.stringContaining("postcss.config.tmpl"),
+          expect.stringContaining("auth.config.tmpl"),
           { encoding: "utf8" }
         );
 
-        // Verify that the rendered content was written to the config files
-        // Check the actual files created
-        const tailwindConfig = await fs.readFile("tailwind.config.cjs", "utf8");
-        const postcssConfig = await fs.readFile("postcss.config.cjs", "utf8");
-
-        expect(tailwindConfig).toContain("@type {import('tailwindcss').Config}");
-        expect(tailwindConfig).toContain("module.exports = {");
-        expect(postcssConfig).toContain("module.exports = {");
-        expect(postcssConfig).toContain("plugins:");
+        // Verify that the rendered content was written to the config file
+        // Check the actual file created
+        const authConfig = await fs.readFile("auth.config.ts", "utf8");
+        expect(authConfig).toContain("export const authConfig");
 
         // Verify that the template string passed to render was the one from the .tmpl file
         const renderCalls = renderSpy.mock.calls;
         const templateUsed = renderCalls[0][0]; // first argument of first call
-        expect(templateUsed).toContain("@type {import('tailwindcss').Config}");
-        expect(templateUsed).toContain("module.exports = {");
-
-        const templateUsed2 = renderCalls[1][0];
-        expect(templateUsed2).toContain("module.exports = {");
-        expect(templateUsed2).toContain("plugins:");
+        expect(templateUsed).toContain("export const authConfig");
       } finally {
         readFileSpy.mockRestore();
       }
-    }, 30000);
+    });
   });
 
-  test("tailwindGenerator should run successfully", async () => {
+  test("authGenerator should run successfully", async () => {
     // Create a package.json so that validation passes
     await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
-    // Create the src directory
-    await fs.mkdir("src", { recursive: true });
 
     const mockLogger = {
       info: vi.fn(),
@@ -217,8 +174,16 @@ describe("Tailwind Generator", () => {
       warn: vi.fn(),
     } as unknown as Logger;
 
-    // Mock templates.render to return a simple string
-    const renderSpy = vi.fn().mockReturnValue("");
+    // Mock templates.render to replace placeholders
+    const renderSpy = vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+      return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+        return (data[key] ?? '') as string;
+      });
+    });
+    // Get the execSync mock
+    const execSyncMock = vi.spyOn(require("child_process"), "execSync");
+    // Spy on fs.readFile to see what paths are being read
+    let readFileSpy: ReturnType<typeof vi.spyOn>;
 
     const context = {
       logger: mockLogger,
@@ -227,51 +192,53 @@ describe("Tailwind Generator", () => {
     };
 
     const answers = {
-      customiseTailwind: false,
-      addPostcssPlugins: false,
-      installAutoprefixer: false,
+      provider: "better-auth",
+      installDependencies: true,
+      generateExampleConfig: true,
     };
 
     try {
-      await tailwindGenerator.run(answers, context);
+      readFileSpy = vi.spyOn(fs, "readFile");
+      await authGenerator.run(answers, context);
 
-      // Verify that execSync was called with install command
-      // Note: we cannot directly spy on execSync because it's mocked in the generator file.
-      // The generator file mocks child_process.execSync globally via vi.mock.
-      // We'll rely on the fact that the generator runs without error as success.
-      // For more precise testing, we could check that a dependency was added to package.json,
-      // but that's beyond scope.
+      // Verify that the template files were read
+      expect(readFileSpy).toHaveBeenCalledWith(
+        expect.stringContaining("auth.config.ts.tmpl"),
+        { encoding: "utf8" }
+      );
 
-      // Verify that templater.render was called for config files (if they were to be created)
-      // Since all options are false, no config files should be created
-      expect(renderSpy).not.toHaveBeenCalled();
+      // Verify that the rendered content was written to the config file
+      // Check the actual file created
+      const authConfig = await fs.readFile("auth.config.ts", "utf8");
+      expect(authConfig).toContain("export const authConfig");
 
-      // Verify that fs.writeFile was called for CSS entrypoint
-      // Check that the CSS file was created and contains the directives
-      const cssContent = await fs.readFile("src/index.css", "utf8");
-      expect(cssContent).toContain("@tailwind base;");
-      expect(cssContent).toContain("@tailwind components;");
-      expect(cssContent).toContain("@tailwind utilities;");
+      // Verify that the template string passed to render was the one from the .tmpl file
+      const renderCall = renderSpy.mock.calls[0];
+      const templateUsed = renderCall[0]; // first argument of first call
+      expect(templateUsed).toContain("auth.config.ts.tmpl");
+
+      // Verify that execSync was called for package installation
+      expect(execSyncMock).toHaveBeenCalled();
     } finally {
-      // No need to restore execSync because it's a mock function that is reset by vi.mock between tests
+      // Restore spies
       renderSpy.mockRestore();
+      execSyncMock.mockRestore();
+      readFileSpy.mockRestore();
     }
-  }, 30000);
+  });
 
   describe("Idempotence", () => {
-    test("second run should not duplicate CSS directives", async () => {
-      // Create a package.json with tailwind dependencies already installed
+    test("second run should not duplicate config file", async () => {
+      // Create a package.json with auth dependency already installed
       await fs.writeFile(
         "package.json",
-        '{"devDependencies":{"tailwindcss":"^3.0.0","postcss":"^8.0.0"}}',
+        '{"devDependencies":{"better-auth":"^1.0.0"}}',
         "utf8"
       );
-      // Create the src directory
-      await fs.mkdir("src", { recursive: true });
-      // Create a CSS file that already has the directives
+      // Create a config file that already exists
       await fs.writeFile(
-        "src/index.css",
-        `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n/* custom */`,
+        "auth.config.ts",
+        `export const authConfig = {\n  provider: "better-auth"\n};`,
         "utf8"
       );
 
@@ -281,44 +248,46 @@ describe("Tailwind Generator", () => {
         warn: vi.fn(),
       } as unknown as Logger;
 
+      const renderSpy = vi.fn().mockReturnValue("");
       const context = {
         logger: mockLogger,
         fs: fs,
-        templates: { render: vi.fn().mockReturnValue("") },
+        templates: { render: renderSpy },
       };
 
       const answers = {
-        customiseTailwind: false,
-        addPostcssPlugins: false,
-        installAutoprefixer: false,
+        provider: "better-auth",
+        installDependencies: true, // This should now be skipped because dep is already installed
+        generateExampleConfig: true,
       };
 
-      // Spy on fs.writeFile to see if it's called for the CSS file
+      // Spy on fs.writeFile to see if it's called for the config file
       const writeFileSpy = vi.spyOn(fs, "writeFile");
       // Spy on execSync to ensure it's not called
       const execSyncMock = vi.spyOn(require("child_process"), "execSync");
 
       // First run
-      await tailwindGenerator.run(answers, context);
+      await authGenerator.run(answers, context);
       // Second run
-      await tailwindGenerator.run(answers, context);
+      await authGenerator.run(answers, context);
 
-      // Verify that writeFile was not called for CSS entrypoint (since it should be skipped)
+      // Verify that writeFile was not called for config file (since it should be skipped)
       const writeFileCalls = writeFileSpy.mock.calls.filter(
-        (call) => call[0] === "src/index.css"
+        (call) => call[0] === "auth.config.ts"
       );
       expect(writeFileCalls.length).toBe(0);
 
       // Verify that execSync was not called (since dependencies are already installed)
       expect(execSyncMock).not.toHaveBeenCalled();
 
-      // Also, the CSS content should remain unchanged
-      const cssContent = await fs.readFile("src/index.css", "utf8");
-      expect(cssContent).toBe(
-        `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n/* custom */`
+      // Also, the config content should remain unchanged
+      const configContent = await fs.readFile("auth.config.ts", "utf8");
+      expect(configContent).toBe(
+        `export const authConfig = {\n  provider: "better-auth"\n};`
       );
 
       writeFileSpy.mockRestore();
+      renderSpy.mockRestore();
     });
   });
 

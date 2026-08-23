@@ -2,6 +2,7 @@ import { GeneratorContext, Generator } from "../../types";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
+import { detectPackageManager } from "@dxgjs/fs";
 
 console.log("[auth/index.ts] module loaded");
 
@@ -103,21 +104,6 @@ export async function isAuthInstalled(fs: GeneratorContext['fs'], provider: stri
   }
 }
 
-// Detect the package manager being used in the project
-export async function detectPackageManager(fs: GeneratorContext['fs']): Promise<"npm" | "pnpm" | "yarn"> {
-  // Check for lockfiles in order of preference
-  const hasYarnLock = await fs.pathExists("yarn.lock");
-  if (hasYarnLock) return "yarn";
-
-  const hasPnpmlock = await fs.pathExists("pnpm-lock.yaml");
-  if (hasPnpmlock) return "pnpm";
-
-  const hasPackageLock = await fs.pathExists("package-lock.json");
-  if (hasPackageLock) return "npm";
-
-  // Default to npm
-  return "npm";
-}
 
 // Planning function
 export function planAuth(answers: Record<string, unknown>) {
@@ -194,7 +180,7 @@ export async function executeAuth(
     // Install dependencies
     try {
       // Detect package manager
-      const packageManager = await detectPackageManager(fs);
+      const packageManager = await detectPackageManager(undefined);
       const installCommand = getInstallCommand(packageManager, planToUse.packages, true); // true for devDependency
       logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
       execSync(installCommand, { stdio: "inherit" });
@@ -282,13 +268,15 @@ export function summarizeAuth(
 }
 
 // Get the install command for the detected package manager
-function getInstallCommand(packageManager: "npm" | "pnpm" | "yarn", packages: string[], isDevDependency: boolean): string {
+function getInstallCommand(packageManager: "npm" | "pnpm" | "yarn" | "bun", packages: string[], isDevDependency: boolean): string {
   const devFlag = isDevDependency ? "-D" : ""; // Save as dev dependency
   switch (packageManager) {
     case "pnpm":
       return `pnpm add ${devFlag} ${packages.join(" ")}`;
     case "yarn":
       return `yarn add ${devFlag} ${packages.join(" ")}`;
+    case "bun":
+      return `bun add ${devFlag} ${packages.join(" ")}`;
     case "npm":
     default:
       return `npm install ${devFlag} ${packages.join(" ")}`;

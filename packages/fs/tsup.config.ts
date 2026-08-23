@@ -5,4 +5,5 @@ export default {
   clean: true,
   dts: true,
   format: ["esm"],
+  external: ["package-manager-detector/**"],
 };

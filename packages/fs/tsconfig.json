@@ -2,8 +2,7 @@
   "extends": "@dxgjs/typescript-config/base.json",
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "src",
-    "incremental": false
+    "rootDir": "src"
   },
   "include": ["src"]
 }
