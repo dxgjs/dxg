@@ -1,193 +1,97 @@
-import { readFile, stat } from "@dxgjs/fs";
-import { join, dirname } from "path";
-import { Logger } from "@dxgjs/logger";
+import { stat } from "@dxgjs/fs";
+  import { detectPackageManager as detectPackageManagerFs } from "@dxgjs/fs";
+  import {
+    getPackageInfo,
+  } from "./package-info";
+  import {
+    detectWorkspace,
+  } from "./workspace";
+  import {
+    detectLanguage,
+  } from "./language";
+  import {
+    detectFramework,
+  } from "./framework";
+  import {
+    detectStyling,
+  } from "./styling";
+  import {
+    detectCapabilities,
+  } from "./capabilities";
+  import type { ProjectAwareness } from "./types";
 
-const logger = new Logger({ minLevel: "info" });
+  /**
+   * Detect project awareness for a given project path.
+   * @param projectPath - Absolute path to the project directory.
+   * @returns Promise resolving to project awareness information.
+   */
+  export async function detectProjectAwareness(projectPath: string): Promise<ProjectAwareness> {
+    // Normalize the project path
+    const projectRoot = await stat(projectPath).then(() => projectPath).catch(() => {
+      throw new Error(`Project path does not exist: ${projectPath}`);
+    });
 
-export interface WorkspaceProject {
-  name: string;
-  version?: string;
-  location: string; // absolute path to the project directory
-  workspaceDependencies: string[]; // list of workspace project names
-}
-
-export interface WorkspaceResult {
-  root: string; // absolute path to the workspace root
-  projects: WorkspaceProject[];
-}
-
-interface PackageJson {
-  name: string;
-  version?: string;
-  private: boolean;
-  workspaces?: string[] | { packages?: string[] };
-  [key: string]: unknown;
-}
-
-/**
- * Detect workspace configuration.
- * @param root - Optional root directory to start searching from.
- * @returns Promise resolving to workspace information.
- */
-export async function detectWorkspace(root?: string): Promise<WorkspaceResult> {
-  const start = root ?? process.cwd();
-  let current = start;
-
-  // Look for workspace definition files
-  const workspaceFiles = [
-    "pnpm-workspace.yaml",
-    "turbo.json",
-    "nx.json",
-    "lerna.json",
-  ];
-  let workspaceRoot = null;
-
-  while (true) {
-    for (const file of workspaceFiles) {
-      try {
-        await stat(join(current, file));
-        workspaceRoot = current;
-        break;
-      } catch {
-        // File not found, continue
-      }
-    }
-    if (workspaceRoot) break;
-
-    const parent = dirname(current);
-    if (parent === current) {
-      // Reached the filesystem root
-      break;
-    }
-    current = parent;
-  }
-
-  if (!workspaceRoot) {
-    throw new Error(
-      "No workspace root found. Looked for pnpm-workspace.yaml, turbo.json, nx.json, lerna.json",
-    );
-  }
-
-  // Read the root package.json
-  const rootPackageJsonPath = join(workspaceRoot, "package.json");
-  let rootPackageJson: PackageJson;
-  try {
-    const rootPackageJsonContent = (await readFile(rootPackageJsonPath, {
-      encoding: "utf8",
-    })) as string;
-    rootPackageJson = JSON.parse(rootPackageJsonContent);
-    // Simple validation: check for required fields
-    if (
-      typeof rootPackageJson.name !== "string" ||
-      typeof rootPackageJson.private !== "boolean"
-    ) {
-      logger.warn(
-        `Root package.json at ${rootPackageJsonPath} is missing required fields: name (string) and private (boolean)`,
-      );
-    }
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    throw new Error(
-      `Failed to read or parse root package.json at ${rootPackageJsonPath}: ${msg}`,
-      { cause: error }
-    );
-  }
-
-  // Determine workspace packages from the root package.json
-  let workspacePackages: string[] = [];
-  if (Array.isArray(rootPackageJson.workspaces)) {
-    workspacePackages = rootPackageJson.workspaces;
-  } else if (
-    rootPackageJson.workspaces &&
-    typeof rootPackageJson.workspaces === 'object' &&
-    'packages' in rootPackageJson.workspaces &&
-    Array.isArray((rootPackageJson.workspaces as { packages?: unknown }).packages)
-  ) {
-    workspacePackages = (rootPackageJson.workspaces as { packages?: string[] }).packages || [];
-  }
-
-  // Always include the root package (current directory)
-  // If no workspaces defined in package.json, we still include the root as '.'
-  // If workspaces are defined, we still include the root package
-  workspacePackages.unshift(".");
-
-  // Normalize workspace package patterns to absolute paths
-  const projectPaths: string[] = [];
-  for (const pattern of workspacePackages) {
-    // For simplicity, we assume the pattern is a relative path or a glob.
-    // We only support direct directory names for now (no globbing).
-    const projectPath = join(workspaceRoot, pattern);
-    projectPaths.push(projectPath);
-  }
-
-  // Read each project's package.json
-  const projects: WorkspaceProject[] = [];
-  // Map project names to their index in projects array for quick lookup
-  const projectNameToIndex = new Map<string, number>();
-
-  for (const projectPath of projectPaths) {
+    // Detect workspace root
+    let workspaceRoot: string;
     try {
-      const packageJsonPath = join(projectPath, "package.json");
-      const packageJsonContent = (await readFile(packageJsonPath, {
-        encoding: "utf8",
-      })) as string;
-      const packageJson: PackageJson = JSON.parse(packageJsonContent);
-
-      const project: WorkspaceProject = {
-        name: packageJson.name,
-        version: packageJson.version,
-        location: projectPath,
-        workspaceDependencies: [],
-      };
-
-      const projectIndex = projects.length;
-      projects.push(project);
-      projectNameToIndex.set(packageJson.name, projectIndex);
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      logger.warn(
-        `Failed to read package.json for project at ${projectPath}: ${msg}`,
-      );
+      const workspaceResult = await detectWorkspace(projectRoot);
+      workspaceRoot = workspaceResult.root;
+    } catch {
+      // If no workspace found, treat the project root as the workspace root
+      workspaceRoot = projectRoot;
     }
-  }
 
-  // Calculate workspace dependencies by reading each project's dependencies
-  // and linking to workspace projects by name
-  for (let i = 0; i < projectPaths.length; i++) {
-    const projectPath = projectPaths[i];
+    // Read package.json once
+    const packageJson = await getPackageInfo(projectRoot);
+
+    // Detect package manager (using the fs package's function, but preserving old behavior)
+    let packageManager: string;
     try {
-      const packageJsonPath = join(projectPath, "package.json");
-      const packageJsonContent = (await readFile(packageJsonPath, {
-        encoding: "utf8",
-      })) as string;
-      const packageJson: PackageJson = JSON.parse(packageJsonContent);
-
-      // Get all dependencies (dependencies, devDependencies, peerDependencies)
-      const dependencies = {
-        ...(packageJson.dependencies ?? {}),
-        ...(packageJson.devDependencies ?? {}),
-        ...(packageJson.peerDependencies ?? {}),
-      };
-
-      // Find which dependencies are workspace projects
-      const workspaceDeps: string[] = [];
-      for (const depName of Object.keys(dependencies)) {
-        if (projectNameToIndex.has(depName)) {
-          workspaceDeps.push(depName);
-        }
+      const pm = await detectPackageManagerFs(projectRoot);
+      // Map bun to unknown to preserve old behavior (old did not support bun)
+      if (pm === "bun") {
+        packageManager = "unknown";
+      } else {
+        packageManager = pm;
       }
-
-      // Update the project's workspaceDependencies
-      if (i < projects.length) {
-        projects[i].workspaceDependencies = workspaceDeps;
-      }
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      logger.warn(
-        `Failed to read package.json for dependency calculation at ${projectPath}: ${msg}`,
-      );
+    } catch {
+      // If detection fails (e.g., no lockfile and no fallback), return unknown to match old behavior
+      packageManager = "unknown";
     }
+
+    // Detect language
+    const language = await detectLanguage(projectRoot);
+
+    // Detect framework
+    const framework = await detectFramework(projectRoot, packageJson);
+
+    // Detect styling (Tailwind)
+    const styling = await detectStyling(projectRoot, packageJson);
+
+    // Detect capabilities
+    const capabilities = await detectCapabilities(projectRoot, packageJson);
+
+    return {
+      projectRoot,
+      workspaceRoot,
+      framework,
+      language,
+      packageManager,
+      styling,
+      capabilities,
+    };
   }
 
-  return { root: workspaceRoot, projects };
-}
+  // Re-export detectWorkspace to maintain the existing API
+  export { detectWorkspace } from "./workspace";
+
+  // Re-export types to maintain the existing API
+  export type {
+    WorkspaceProject,
+    WorkspaceResult,
+    FrameworkInfo,
+    LanguageInfo,
+    StylingInfo,
+    CapabilityInfo,
+    ProjectAwareness,
+  } from "./types";

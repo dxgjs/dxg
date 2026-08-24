@@ -21,6 +21,7 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "dependencies": {
+    "fast-glob": "^3.3.3",
     "package-manager-detector": "^1.8.0"
   },
   "devDependencies": {

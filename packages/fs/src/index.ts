@@ -1,4 +1,5 @@
 import { readFile, readFileSync } from "./readFile";
+import { glob, globSync } from "./glob";
 import { writeFile, writeFileSync } from "./writeFile";
 import { readdir, readdirSync } from "./readdir";
 import { stat, statSync } from "./stat";
@@ -18,6 +19,7 @@ export { mkdir, mkdirSync };
 export { rm, rmSync };
 export { copyFile, copyFileSync };
 export { appendFile, appendFileSync };
+export { glob, globSync };
 
 export async function pathExists(filePath: string): Promise<boolean> {
   try {
