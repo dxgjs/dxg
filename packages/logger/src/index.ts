@@ -1,8 +1,8 @@
 import { format } from './formatter';
 import { ConsoleTransport } from './transports/console';
-import { LoggerOptions, Transport, LogLevel, LogEntry } from './types';
+import { LoggerOptions, Transport, type LogLevel, LogEntry } from './types';
 
-export class Logger {
+class Logger {
   private minLevel: LogLevel;
   private transports: Transport[];
   private formatter: (entry: LogEntry) => string;
@@ -88,9 +88,12 @@ export class Logger {
 }
 
 
-export function createLogger(options: LoggerOptions = {}): Logger {
+function createLogger(options: LoggerOptions = {}): Logger {
   return new Logger(options);
 }
 
-// Default export for convenience
+// Export LogLevel for use in other packages (like CLI)
+export { Logger, createLogger };
+export type { LogLevel };
+// Default export for convenience (note: LogLevel is a type and not included in default export)
 export default { Logger, createLogger };
