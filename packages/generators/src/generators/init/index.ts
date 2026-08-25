@@ -89,32 +89,77 @@ export async function executeInit(
   answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planInit>,
-): Promise<{ created: string[]; updated: string[]; skipped: string[] }> {
+): Promise<{ created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] }> {
   const planToUse = plan ?? planInit(answers);
-  const result: { created: string[]; updated: string[]; skipped: string[] } = {
+  const result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = {
     created: [],
     updated: [],
     skipped: [],
+    conflicts: [],
   };
 
   for (const { path, data, template } of planToUse) {
     const rendered = await ctx.templates.render(template, data);
     const exists = await ctx.fs.pathExists(path);
+
     if (exists) {
+      // Check if it's a file or directory
+      const stats = await ctx.fs.stat(path);
+      const isDirectory = stats.isDirectory();
+
+      if (isDirectory) {
+        // Directory collision - expected path is occupied by a directory
+        result.conflicts.push({ path, existsAs: 'directory' });
+        continue;
+      }
+
+      // It's a file, check content
       const current = await ctx.fs.readFile(path, "utf8");
       if (current === rendered) {
         result.skipped.push(path);
         continue;
       }
-      await ctx.fs.writeFile(path, rendered, "utf8");
-      result.updated.push(path);
-    } else {
-      // Ensure the directory exists
-      const dir = path.split("/").slice(0, -1).join("/");
-      if (dir && !(await ctx.fs.pathExists(dir))) {
-        await ctx.fs.mkdir(dir, { recursive: true });
+
+      // File exists with different content - conflict
+      if (ctx.dryRun) {
+        // In dry-run mode, report as conflict (would need user interaction or force to resolve)
+        result.conflicts.push({ path, existsAs: 'file' });
+        continue;
       }
-      await ctx.fs.writeFile(path, rendered, "utf8");
+
+      if (ctx.force) {
+        // Force overwrite
+        await ctx.fs.writeFile(path, rendered, "utf8");
+        result.updated.push(path);
+        continue;
+      }
+
+      // Without force, treat as conflict
+      result.conflicts.push({ path, existsAs: 'file' });
+      continue;
+    } else {
+      // Path doesn't exist, check if parent directory would be a file collision
+      const dir = path.split("/").slice(0, -1).join("/");
+      if (dir) {
+        const dirExists = await ctx.fs.pathExists(dir);
+        if (dirExists) {
+          const dirStats = await ctx.fs.stat(dir);
+          if (dirStats.isFile()) {
+            // Parent path is occupied by a file
+            result.conflicts.push({ path: dir, existsAs: 'file' });
+            continue;
+          }
+        }
+      }
+
+      // Safe to create
+      if (!ctx.dryRun) {
+        // Ensure the directory exists
+        if (dir && !(await ctx.fs.pathExists(dir))) {
+          await ctx.fs.mkdir(dir, { recursive: true });
+        }
+        await ctx.fs.writeFile(path, rendered, "utf8");
+      }
       result.created.push(path);
     }
   }
@@ -139,12 +184,11 @@ export async function verifyInit(
 // Summarize function
 export function summarizeInit(
   answers: Record<string, unknown>,
-  result: { created: string[]; updated: string[]; skipped: string[] },
+  result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
   ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
-  const { created, updated, skipped } = result;
-  const total = created.length + updated.length + skipped.length;
+  const { created, updated, skipped, conflicts } = result;
   if (created.length) {
     logger.info(` Created: ${created.join(", ")}`);
   }
@@ -154,6 +198,11 @@ export function summarizeInit(
   if (skipped.length) {
     logger.info(`Unchanged: ${skipped.join(", ")}`);
   }
+  if (conflicts.length) {
+    const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
+    logger.warn(` Conflicts: ${conflictDetails}`);
+  }
+  const total = created.length + updated.length + skipped.length + conflicts.length;
   logger.info(
     ` Initialization completed: ${answers.name} (${total} files processed)`,
   );
@@ -181,8 +230,10 @@ export const initGenerator: Generator = {
     // Execute
     const execResult = await executeInit(answers, ctx, plan);
 
-    // Verify
-    await verifyInit(answers, ctx, plan);
+    // Verify (skip in dry-run mode)
+    if (!ctx.dryRun) {
+      await verifyInit(answers, ctx, plan);
+    }
 
     // Summarize
     summarizeInit(answers, execResult, ctx);

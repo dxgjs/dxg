@@ -6,6 +6,10 @@ export interface GeneratorContext {
   templates: {
     render: (template: string, data: Record<string, unknown>) => string;
   };
+  /** Whether to run in dry-run mode (no filesystem changes) */
+  dryRun?: boolean;
+  /** Whether to force overwrite conflicting files */
+  force?: boolean;
 }
 
 export interface GeneratorPrompt {

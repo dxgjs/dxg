@@ -4,7 +4,6 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { detectPackageManager } from "@dxgjs/fs";
 
-console.log("[auth/index.ts] module loaded");
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
@@ -162,32 +161,41 @@ export async function executeAuth(
   answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planAuth>,
-): Promise<{ created: string[]; updated: string[]; skipped: string[] }> {
+): Promise<{ created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] }> {
   const { logger, fs } = ctx;
   const planToUse = plan ?? planAuth(answers);
-  const result: { created: string[]; updated: string[]; skipped: string[] } = {
+  const result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = {
     created: [],
     updated: [],
     skipped: [],
+    conflicts: [],
   };
 
-  // Check if auth dependency is already installed
+  // Check if auth dependency is already installed (skip in dry-run)
   const provider = answers.provider as string;
-  const authInstalled = await isAuthInstalled(fs, provider);
-  if (authInstalled) {
-    logger.info(` ${provider} already detected. Skipping dependency installation.`);
-  } else if (answers.installDependencies) {
-    // Install dependencies
-    try {
-      // Detect package manager
-      const packageManager = await detectPackageManager(undefined);
-      const installCommand = getInstallCommand(packageManager, planToUse.packages, true); // true for devDependency
-      logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
-      execSync(installCommand, { stdio: "inherit" });
-    } catch (error) {
-      throw new Error(
-        `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`
-      );
+  if (!ctx.dryRun) {
+    const authInstalled = await isAuthInstalled(fs, provider);
+    if (authInstalled) {
+      logger.info(` ${provider} already detected. Skipping dependency installation.`);
+    } else if (answers.installDependencies) {
+      // Install dependencies
+      try {
+        // Detect package manager
+        const packageManager = await detectPackageManager(undefined);
+        const installCommand = getInstallCommand(packageManager, planToUse.packages, true); // true for devDependency
+        logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
+        execSync(installCommand, { stdio: "inherit" });
+      } catch (error) {
+        throw new Error(
+          `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+  } else {
+    // In dry-run mode, just check if installation would be needed
+    const authInstalled = await isAuthInstalled(fs, provider);
+    if (!authInstalled && answers.installDependencies) {
+      logger.info("[auth] Dry-run: Would install dependencies");
     }
   }
 
@@ -205,21 +213,65 @@ export async function executeAuth(
 
     const rendered = ctx.templates.render(template, data);
     const exists = await fs.pathExists(path);
+
     if (exists) {
+      // Check if it's a file or directory
+      const stats = await fs.stat(path);
+      const isDirectory = stats.isDirectory();
+
+      if (isDirectory) {
+        // Directory collision - expected path is occupied by a directory
+        result.conflicts.push({ path, existsAs: 'directory' });
+        continue;
+      }
+
+      // It's a file, check content
       const current = (await fs.readFile(path, { encoding: "utf8" })) as string;
       if (current === rendered) {
         result.skipped.push(path);
         continue;
       }
-      await fs.writeFile(path, rendered, "utf8");
-      result.updated.push(path);
-    } else {
-      // Ensure the directory exists
-      const dir = path.split("/").slice(0, -1).join("/");
-      if (dir && !(await fs.pathExists(dir))) {
-        await fs.mkdir(dir, { recursive: true });
+
+      // File exists with different content - handle based on dryRun and force flags
+      if (ctx.dryRun) {
+        // In dry-run mode, report as conflict (would need user interaction or force to resolve)
+        result.conflicts.push({ path, existsAs: 'file' });
+        continue;
       }
-      await fs.writeFile(path, rendered, "utf8");
+
+      if (ctx.force) {
+        // Force overwrite
+        await fs.writeFile(path, rendered, "utf8");
+        result.updated.push(path);
+        continue;
+      }
+
+      // Without force, treat as conflict
+      result.conflicts.push({ path, existsAs: 'file' });
+      continue;
+    } else {
+      // Path doesn't exist, check if parent directory would be a file collision
+      const dir = path.split("/").slice(0, -1).join("/");
+      if (dir) {
+        const dirExists = await fs.pathExists(dir);
+        if (dirExists) {
+          const dirStats = await fs.stat(dir);
+          if (dirStats.isFile()) {
+            // Parent path is occupied by a file
+            result.conflicts.push({ path: dir, existsAs: 'file' });
+            continue;
+          }
+        }
+      }
+
+      // Safe to create
+      if (!ctx.dryRun) {
+        // Ensure the directory exists
+        if (dir && !(await fs.pathExists(dir))) {
+          await fs.mkdir(dir, { recursive: true });
+        }
+        await fs.writeFile(path, rendered, "utf8");
+      }
       result.created.push(path);
     }
   }
@@ -248,11 +300,11 @@ export async function verifyAuth(
 // Summarize function
 export function summarizeAuth(
   _answers: Record<string, unknown>,
-  result: { created: string[]; updated: string[]; skipped: string[] },
+  result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
   ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
-  const { created, updated, skipped } = result;
+  const { created, updated, skipped, conflicts } = result;
 
   if (created.length) {
     logger.info(` Created: ${created.join(", ")}`);
@@ -262,6 +314,10 @@ export function summarizeAuth(
   }
   if (skipped.length) {
     logger.info(` Unchanged: ${skipped.join(", ")}`);
+  }
+  if (conflicts.length) {
+    const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
+    logger.warn(` Conflicts: ${conflictDetails}`);
   }
 
   logger.info(` Auth generator completed successfully`);
@@ -308,8 +364,10 @@ export const authGenerator: Generator = {
     // Execute
     const execResult = await executeAuth(answers, ctx, plan);
 
-    // Verify
-    await verifyAuth(answers, ctx, plan);
+    // Verify (skip in dry-run mode)
+    if (!ctx.dryRun) {
+      await verifyAuth(answers, ctx, plan);
+    }
 
     // Summarize
     summarizeAuth(answers, execResult, ctx);

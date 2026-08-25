@@ -99,13 +99,14 @@ export async function executeDatabase(
   answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planDatabase>,
-): Promise<{ created: string[]; updated: string[]; skipped: string[] }> {
+): Promise<{ created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] }> {
   const { logger, fs } = ctx;
   const planToUse = plan ?? planDatabase(answers);
-  const result: { created: string[]; updated: string[]; skipped: string[] } = {
+  const result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = {
     created: [],
     updated: [],
     skipped: [],
+    conflicts: [],
   };
 
   // Check if Prisma is already installed
@@ -124,10 +125,7 @@ export async function executeDatabase(
       console.log("[executeDatabase] installCommand:", installCommand);
       // logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
       console.log("[executeDatabase] Before execSync call");
-	console.log("TRIGGER: Testing execSync call");
-	execSync("echo 'test'", { stdio: "pipe" });
-console.log("DEBUG: About to call execSync");
-      console.log("[executeDatabase] installCommand:", installCommand);
+		      console.log("[executeDatabase] installCommand:", installCommand);
       execSync(installCommand, { stdio: "inherit" });
     } catch (error) {
       throw new Error(
@@ -150,21 +148,65 @@ console.log("DEBUG: About to call execSync");
 
     const rendered = ctx.templates.render(template, data);
     const exists = await fs.pathExists(path);
+
     if (exists) {
+      // Check if it's a file or directory
+      const stats = await fs.stat(path);
+      const isDirectory = stats.isDirectory();
+
+      if (isDirectory) {
+        // Directory collision - expected path is occupied by a directory
+        result.conflicts.push({ path, existsAs: 'directory' });
+        continue;
+      }
+
+      // It's a file, check content
       const current = (await fs.readFile(path, { encoding: "utf8" })) as string;
       if (current === rendered) {
         result.skipped.push(path);
         continue;
       }
-      await fs.writeFile(path, rendered, "utf8");
-      result.updated.push(path);
-    } else {
-      // Ensure the directory exists
-      const dir = path.split("/").slice(0, -1).join("/");
-      if (dir && !(await fs.pathExists(dir))) {
-        await fs.mkdir(dir, { recursive: true });
+
+      // File exists with different content - handle based on dryRun and force flags
+      if (ctx.dryRun) {
+        // In dry-run mode, report as conflict (would need user interaction or force to resolve)
+        result.conflicts.push({ path, existsAs: 'file' });
+        continue;
       }
-      await fs.writeFile(path, rendered, "utf8");
+
+      if (ctx.force) {
+        // Force overwrite
+        await fs.writeFile(path, rendered, "utf8");
+        result.updated.push(path);
+        continue;
+      }
+
+      // Without force, treat as conflict
+      result.conflicts.push({ path, existsAs: 'file' });
+      continue;
+    } else {
+      // Path doesn't exist, check if parent directory would be a file collision
+      const dir = path.split("/").slice(0, -1).join("/");
+      if (dir) {
+        const dirExists = await fs.pathExists(dir);
+        if (dirExists) {
+          const dirStats = await fs.stat(dir);
+          if (dirStats.isFile()) {
+            // Parent path is occupied by a file
+            result.conflicts.push({ path: dir, existsAs: 'file' });
+            continue;
+          }
+        }
+      }
+
+      // Safe to create
+      if (!ctx.dryRun) {
+        // Ensure the directory exists
+        if (dir && !(await fs.pathExists(dir))) {
+          await fs.mkdir(dir, { recursive: true });
+        }
+        await fs.writeFile(path, rendered, "utf8");
+      }
       result.created.push(path);
     }
   }
@@ -200,11 +242,11 @@ export async function verifyDatabase(
 // Summarize function
 export function summarizeDatabase(
   _answers: Record<string, unknown>,
-  result: { created: string[]; updated: string[]; skipped: string[] },
+  result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
   ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
-  const { created, updated, skipped } = result;
+  const { created, updated, skipped, conflicts } = result;
 
   if (created.length) {
     logger.info(` Created: ${created.join(", ")}`);
@@ -214,6 +256,10 @@ export function summarizeDatabase(
   }
   if (skipped.length) {
     logger.info(` Unchanged: ${skipped.join(", ")}`);
+  }
+  if (conflicts.length) {
+    const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
+    logger.warn(` Conflicts: ${conflictDetails}`);
   }
 
   logger.info(` Database generator completed successfully`);
@@ -260,8 +306,10 @@ export const databaseGenerator: Generator = {
     // Execute
     const execResult = await executeDatabase(answers, ctx, plan);
 
-    // Verify
-    await verifyDatabase(answers, ctx, plan);
+    // Verify (skip in dry-run mode)
+    if (!ctx.dryRun) {
+      await verifyDatabase(answers, ctx, plan);
+    }
 
     // Summarize
     summarizeDatabase(answers, execResult, ctx);

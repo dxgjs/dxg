@@ -36,13 +36,15 @@ async function loadConfigSilently(targetDir: string) {
 /**
  * Prepares the generator context with logger, fs, and templates
  */
-function prepareContext() {
+function prepareContext(options: any) {
   const logger = new Logger({ minLevel: "info" });
   // Provide stat and readdir functions (not used by all generators but required by type)
   return {
     logger,
     fs: { readFile, writeFile, pathExists, stat, readdir, mkdir },
     templates: { render: templatesRender },
+    dryRun: options.dryRun ?? false,
+    force: options.force ?? false,
   };
 }
 
@@ -208,6 +210,8 @@ program
   .description("DXG CLI for generating project scaffolding")
   .version(pkg.version, "-v, --version")
   .option("--non-interactive", "Do not prompt for input; fail if required values are missing")
+  .option("--dry-run", "Perform a dry run without making any changes")
+  .option("--force", "Force overwrite of conflicting files")
   .argument(
     "[directory]",
     "target directory (default: current directory)",
@@ -223,7 +227,7 @@ program
       // Shared setup
       await detectWorkspaceSilently(projectRoot);
       const config = await loadConfigSilently(projectRoot);
-      const context = prepareContext();
+      const context = prepareContext(options);
 
       // Collect answers for init generator
       const answers = await collectAnswersForGenerator(
@@ -260,6 +264,8 @@ program
   .option("--autoprefixer", "support legacy browsers (IE11, older Android)")
   .option("--install-deps", "install dependencies after generation")
   .option("--generate-config", "generate example configuration file")
+  .option("--dry-run", "Perform a dry run without making any changes")
+  .option("--force", "Force overwrite of conflicting files")
   .action(async (generatorName, targetDirRaw, options: any) => {
     const nonInteractive = options.parent?.nonInteractive ?? false;
 
@@ -270,7 +276,7 @@ program
       // Shared setup
       await detectWorkspaceSilently(projectRoot);
       const config = await loadConfigSilently(projectRoot);
-      const context = prepareContext();
+      const context = prepareContext(options);
 
       // Get generator instance
       const generatorMap: Record<string, any> = {

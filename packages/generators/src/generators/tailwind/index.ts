@@ -121,13 +121,14 @@ export async function executeTailwind(
   answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planTailwind>,
-): Promise<{ created: string[]; updated: string[]; skipped: string[] }> {
+): Promise<{ created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] }> {
   const { logger, fs } = ctx;
   const planToUse = plan ?? planTailwind(answers);
-  const result: { created: string[]; updated: string[]; skipped: string[] } = {
+  const result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = {
     created: [],
     updated: [],
     skipped: [],
+    conflicts: [],
   };
 
   // Check if Tailwind is already installed
@@ -180,10 +181,11 @@ export async function executeTailwind(
   // Handle CSS entrypoint
   const cssEntrypoint = await determineCssEntrypoint(ctx);
   if (cssEntrypoint) {
-    const cssResult = await updateCssEntrypoint(fs, cssEntrypoint);
+    const cssResult: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = await updateCssEntrypoint(fs, cssEntrypoint, ctx);
     if (cssResult.created) result.created.push(...cssResult.created);
     if (cssResult.updated) result.updated.push(...cssResult.updated);
     if (cssResult.skipped) result.skipped.push(...cssResult.skipped);
+    if (cssResult.conflicts) result.conflicts.push(...cssResult.conflicts);
   }
 
   return result;
@@ -235,11 +237,11 @@ export async function verifyTailwind(
 // Summarize function
 export function summarizeTailwind(
   _answers: Record<string, unknown>,
-  result: { created: string[]; updated: string[]; skipped: string[] },
+  result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
   ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
-  const { created, updated, skipped } = result;
+  const { created, updated, skipped, conflicts } = result;
 
   if (created.length) {
     logger.info(` Created: ${created.join(", ")}`);
@@ -249,6 +251,10 @@ export function summarizeTailwind(
   }
   if (skipped.length) {
     logger.info(`Unchanged: ${skipped.join(", ")}`);
+  }
+  if (conflicts.length) {
+    const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
+    logger.warn(` Conflicts: ${conflictDetails}`);
   }
 
   logger.info(` Tailwind CSS v4 installed successfully`);
@@ -389,31 +395,59 @@ async function determineCssEntrypoint(ctx: GeneratorContext): Promise<string | n
  */
 async function updateCssEntrypoint(
   fs: GeneratorContext['fs'],
-  cssEntrypoint: string
-): Promise<{ created: string[]; updated: string[]; skipped: string[] }> {
-  const result: { created: string[]; updated: string[]; skipped: string[] } = {
+  cssEntrypoint: string,
+  ctx: GeneratorContext
+): Promise<{ created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] }> {
+  const result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = {
     created: [],
     updated: [],
     skipped: [],
+    conflicts: [],
   };
 
   const exists = await fs.pathExists(cssEntrypoint);
   const tailwindDirectives = `\n@tailwind base;\n@tailwind components;\n@tailwind utilities;\n`;
 
   if (!exists) {
-    // Create the directory if it doesn't exist
+    // Check if parent directory would be a file collision
     const dir = cssEntrypoint.split("/").slice(0, -1).join("/");
-    if (dir && !(await fs.pathExists(dir))) {
-      await fs.mkdir(dir, { recursive: true });
+    if (dir) {
+      const dirExists = await fs.pathExists(dir);
+      if (dirExists) {
+        const dirStats = await fs.stat(dir);
+        if (dirStats.isFile()) {
+          // Parent path is occupied by a file
+          result.conflicts.push({ path: dir, existsAs: 'file' });
+          return result;
+        }
+      }
     }
 
-    // Create the file with Tailwind directives
-    await fs.writeFile(cssEntrypoint, tailwindDirectives, "utf8");
+    // Safe to create
+    if (!ctx.dryRun) {
+      // Create the directory if it doesn't exist
+      if (dir && !(await fs.pathExists(dir))) {
+        await fs.mkdir(dir, { recursive: true });
+      }
+
+      // Create the file with Tailwind directives
+      await fs.writeFile(cssEntrypoint, tailwindDirectives, "utf8");
+    }
     result.created.push(cssEntrypoint);
     return result;
   }
 
-  // File exists, check if it already contains the directives
+  // Path exists, check if it's a file or directory
+  const stats = await fs.stat(cssEntrypoint);
+  const isDirectory = stats.isDirectory();
+
+  if (isDirectory) {
+    // Directory collision - expected path is occupied by a directory
+    result.conflicts.push({ path: cssEntrypoint, existsAs: 'directory' });
+    return result;
+  }
+
+  // It's a file, check if it already contains the directives
   const content = (await fs.readFile(cssEntrypoint, { encoding: "utf8" })) as string;
   const hasBase = content.includes("@tailwind base;");
   const hasComponents = content.includes("@tailwind components;");
@@ -424,19 +458,31 @@ async function updateCssEntrypoint(
     return result;
   }
 
-  // Need to add missing directives
-  let newContent = content;
-  if (!newContent.endsWith("\n")) {
-    newContent += "\n";
+  // File exists but doesn't have all directives - handle based on dryRun and force flags
+  if (ctx.dryRun) {
+    // In dry-run mode, report as conflict (would need user interaction or force to resolve)
+    result.conflicts.push({ path: cssEntrypoint, existsAs: 'file' });
+    return result;
   }
 
-  if (!hasBase) newContent += "@tailwind base;\n";
-  if (!hasComponents) newContent += "@tailwind components;\n";
-  if (!hasUtilities) newContent += "@tailwind utilities;\n";
+  if (ctx.force) {
+    // Force overwrite - add missing directives
+    let newContent = content;
+    if (!newContent.endsWith("\n")) {
+      newContent += "\n";
+    }
 
-  await fs.writeFile(cssEntrypoint, newContent, "utf8");
-  result.updated.push(cssEntrypoint);
+    if (!hasBase) newContent += "@tailwind base;\n";
+    if (!hasComponents) newContent += "@tailwind components;\n";
+    if (!hasUtilities) newContent += "@tailwind utilities;\n";
 
+    await fs.writeFile(cssEntrypoint, newContent, "utf8");
+    result.updated.push(cssEntrypoint);
+    return result;
+  }
+
+  // Without force, treat as conflict
+  result.conflicts.push({ path: cssEntrypoint, existsAs: 'file' });
   return result;
 }
 
@@ -465,8 +511,10 @@ export const tailwindGenerator: Generator = {
     // Execute
     const execResult = await executeTailwind(answers, ctx, plan);
 
-    // Verify
-    await verifyTailwind(answers, ctx, plan);
+    // Verify (skip in dry-run mode)
+    if (!ctx.dryRun) {
+      await verifyTailwind(answers, ctx, plan);
+    }
 
     // Summarize
     summarizeTailwind(answers, execResult, ctx);
