@@ -135,7 +135,7 @@ export async function executeTailwind(
   const tailwindInstalled = await isTailwindInstalled(fs);
   if (tailwindInstalled) {
     logger.info(" Tailwind CSS already detected. Skipping dependency installation.");
-  } else {
+  } else if (!ctx.dryRun) {
     // Install dependencies
     try {
       // Detect package manager
@@ -148,6 +148,9 @@ export async function executeTailwind(
         `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`
       );
     }
+  } else {
+    // In dry-run mode, log that we would install dependencies
+    logger.info("[tailwind] Dry-run: Would install dependencies");
   }
 
   // Handle config files
@@ -170,10 +173,14 @@ export async function executeTailwind(
         result.skipped.push(path);
         continue;
       }
-      await fs.writeFile(path, rendered, "utf8");
+      if (!ctx.dryRun) {
+        await fs.writeFile(path, rendered, "utf8");
+      }
       result.updated.push(path);
     } else {
-      await fs.writeFile(path, rendered, "utf8");
+      if (!ctx.dryRun) {
+        await fs.writeFile(path, rendered, "utf8");
+      }
       result.created.push(path);
     }
   }

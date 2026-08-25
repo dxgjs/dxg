@@ -1,14 +1,14 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
+
 // Mock @dxgjs/fs FIRST, before any imports that might use it
 vi.mock("@dxgjs/fs", async (importOriginal) => {
   const original = await importOriginal();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mocked: any = { ...(original as any) };
-  mocked.detectPackageManager = vi.fn();
-  return mocked;
+  return {
+    ...original,
+    detectPackageManager: vi.fn(),
+  };
 });
-
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
@@ -375,6 +375,54 @@ describe("Tailwind Generator", () => {
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("npm");
       expect(detectPackageManager).toHaveBeenCalledWith(undefined);
+    });
+  });
+  describe("Dry-run mode", () => {
+    test("does not install dependencies or write files", async () => {
+      // Create a package.json so that validation passes
+      await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
+      // Create the src directory for CSS entrypoint
+      await fs.mkdir("src", { recursive: true });
+
+      const mockLogger = {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+      } as unknown as Logger;
+
+      // Mock templates.render to return a simple string
+      const renderSpy = vi.fn().mockReturnValue("");
+      // Mock detectPackageManager to return a value (though it shouldn't be called for installation in dry-run)
+      const detectPackageManagerMock = vi.spyOn(require("@dxgjs/fs"), "detectPackageManager");
+      detectPackageManagerMock.mockResolvedValue("npm");
+      // Mock execSync to ensure it's not called
+      const execSyncMock = vi.spyOn(require("child_process"), "execSync");
+      // Mock fs.writeFile to ensure it's not called for files
+      const writeFileSpy = vi.spyOn(fs, "writeFile");
+
+      const context = {
+        logger: mockLogger,
+        fs: fs,
+        templates: { render: renderSpy },
+        dryRun: true, // Set dryRun to true
+      };
+
+      const answers = {
+        customiseTailwind: false,
+        addPostcssPlugins: false,
+        installAutoprefixer: false,
+      };
+
+      await tailwindGenerator.run(answers, context);
+
+      // Verify that execSync was not called (dependency installation)
+      expect(execSyncMock).not.toHaveBeenCalled();
+
+      // Verify that fs.writeFile was not called for files
+      expect(writeFileSpy).not.toHaveBeenCalled();
+
+      // Verify that the logger logged the dry-run message
+      expect(mockLogger.info).toHaveBeenCalledWith("[tailwind] Dry-run: Would install dependencies");
     });
   });
 });

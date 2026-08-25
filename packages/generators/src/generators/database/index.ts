@@ -114,7 +114,7 @@ export async function executeDatabase(
   if (prismaInstalled) {
     console.log("[executeDatabase] Prisma is installed, skipping.");
     logger.info(" Prisma already detected. Skipping dependency installation.");
-  } else {
+  } else if (!ctx.dryRun) {
     console.log("[executeDatabase] Prisma is not installed, installing.");
     // Install dependencies
     try {
@@ -132,6 +132,10 @@ export async function executeDatabase(
         `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`
       );
   }
+  } else {
+    // In dry-run mode, log that we would install dependencies
+    console.log("[executeDatabase] Prisma is not installed, but dry-run: skipping installation")
+    logger.info("[database] Dry-run: Would install dependencies")
   }
 
   // Handle schema file
