@@ -1,7 +1,8 @@
-import { describe, test, expect, beforeEach } from "vitest";
+import { describe, test, expect, beforeEach, vi } from "vitest";
 import { Terminal } from "./src/index";
 import { Text } from "./src/components/Text";
 import { ansi } from "./src/ansi";
+import * as semantic from "./src/semantic";
 
 describe("Terminal", () => {
   let terminal: Terminal;
@@ -116,5 +117,90 @@ describe("ANSI Helpers", () => {
     const colored = ansi.red("test");
     expect(ansi.strip(colored)).toBe("test");
     expect(ansi.strip("plain")).toBe("plain");
+  });
+});
+
+describe("Semantic Utilities", () => {
+  test("should provide semantic color primitives", () => {
+    expect(semantic.success("test")).toContain("\x1b[32m"); // green
+    expect(semantic.error("test")).toContain("\x1b[31m"); // red
+    expect(semantic.warning("test")).toContain("\x1b[33m"); // yellow
+    expect(semantic.info("test")).toContain("\x1b[34m"); // blue
+    expect(semantic.muted("test")).toContain("\x1b[90m"); // gray (bright black)
+    expect(semantic.accent("test")).toContain("\x1b[35m"); // magenta
+  });
+
+  test("should provide symbol vocabulary", () => {
+    // Step indicators
+    expect(semantic.symbols.stepActive).toContain("◆");
+    expect(semantic.symbols.stepCompleted).toContain("◇");
+    expect(semantic.symbols.stepCancelled).toContain("■");
+
+    // Selection indicators
+    expect(semantic.symbols.selectActive).toContain("●");
+    expect(semantic.symbols.selectInactive).toContain("○");
+
+    // Status indicators
+    expect(semantic.symbols.statusSuccess).toContain("✓");
+    expect(semantic.symbols.statusError).toContain("✕");
+    expect(semantic.symbols.statusWarning).toContain("!");
+    expect(semantic.symbols.statusInfo).toContain("•");
+
+    // Structural elements
+    expect(semantic.symbols.barVertical).toContain("│");
+    expect(semantic.symbols.barHorizontal).toContain("─");
+    expect(semantic.symbols.boxTopLeft).toContain("┌");
+    expect(semantic.symbols.boxTopRight).toContain("┐");
+    expect(semantic.symbols.boxBottomLeft).toContain("└");
+    expect(semantic.symbols.boxBottomRight).toContain("┘");
+  });
+
+  test("should format step indicators", () => {
+    const active = semantic.step("Installing dependencies", "active");
+    const completed = semantic.step("Installing dependencies", "completed");
+    const cancelled = semantic.step("Installing dependencies", "cancelled");
+
+    expect(active).toMatch(/◆/);
+    expect(active).toMatch(/Installing dependencies/);
+    expect(completed).toMatch(/◇/);
+    expect(completed).toMatch(/Installing dependencies/);
+    expect(cancelled).toMatch(/■/);
+    expect(cancelled).toMatch(/Installing dependencies/);
+  });
+
+  test("should format status messages", () => {
+    expect(semantic.successMessage("Operation completed")).toMatch(/✓/);
+    expect(semantic.successMessage("Operation completed")).toMatch(/Operation completed/);
+    expect(semantic.errorMessage("Operation failed")).toMatch(/✕/);
+    expect(semantic.errorMessage("Operation failed")).toMatch(/Operation failed/);
+    expect(semantic.warningMessage("Warning message")).toMatch(/!/);
+    expect(semantic.warningMessage("Warning message")).toMatch(/Warning message/);
+    expect(semantic.infoMessage("Info message")).toMatch(/•/);
+    expect(semantic.infoMessage("Info message")).toMatch(/Info message/);
+  });
+
+  test("should create visual separators", () => {
+    const sep = semantic.separator(5);
+    expect(sep).toContain("─"); // Contains the bar character
+    // Check that it has 5 bar characters (after removing ANSI codes)
+    const plainSep = ansi.strip(sep);
+    expect(plainSep).toBe("─────");
+  });
+
+  test("should create boxed content", () => {
+    const boxed = semantic.box("Hello\nWorld", "Test Box");
+    expect(boxed).toContain("┌");
+    expect(boxed).toContain("┐");
+    expect(boxed).toContain("└");
+    expect(boxed).toContain("┘");
+    expect(boxed).toContain("Test Box");
+    expect(boxed).toContain("Hello");
+    expect(boxed).toContain("World");
+
+    // Check that it strips to expected plain text
+    const plainBoxed = ansi.strip(boxed);
+    expect(plainBoxed).toContain("Test Box");
+    expect(plainBoxed).toContain("Hello");
+    expect(plainBoxed).toContain("World");
   });
 });

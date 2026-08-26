@@ -1,5 +1,7 @@
-import { text, confirm, select } from '@clack/prompts';
+import { text, confirm, select, intro, outro, note, isCancel, cancel, spinner } from '@clack/prompts';
 import { Logger } from '@dxgjs/logger';
+// Import terminal utilities but rename to avoid unused variable warnings
+import * as term from '@dxgjs/terminal';
 
 const logger = new Logger({ minLevel: 'warn' });
 
@@ -12,6 +14,9 @@ export interface PromptQuestion {
   validate?: (input: unknown) => boolean | string;
 }
 
+/**
+ * DXG-enhanced prompt function with consistent styling
+ */
 export async function prompt<T extends Record<string, unknown>>(
   questions: PromptQuestion[]
 ): Promise<T> {
@@ -77,3 +82,80 @@ export async function prompt<T extends Record<string, unknown>>(
 
   return answers as T;
 }
+
+/**
+ * DXG intro message with styling
+ */
+export const dxgIntro = (message: string): void => {
+  intro(
+    `${term.successMessage('DXG')} ${term.accent(message)}`
+  );
+};
+
+/**
+ * DXG outro message with styling
+ */
+export const dxgOutro = (message: string): void => {
+  outro(
+    `${term.successMessage('DXG')} ${term.accent(message)}`
+  );
+};
+
+/**
+ * DXG note message with styling
+ */
+export const dxgNote = (message: string): void => {
+  note(term.infoMessage(message));
+};
+
+/**
+ * DXG select prompt - returns value or undefined if cancelled
+ */
+export const dxgSelect = async <T>(
+  options: Parameters<typeof select>[0]
+): Promise<T | undefined> => {
+  const result = await select(options);
+
+  if (isCancel(result)) {
+    return undefined;
+  }
+
+  return result as T;
+};
+
+/**
+ * DXG confirm prompt - returns boolean or undefined if cancelled
+ */
+export const dxgConfirm = async (
+  options: Parameters<typeof confirm>[0]
+): Promise<boolean | undefined> => {
+  const result = await confirm(options);
+
+  if (isCancel(result)) {
+    return undefined;
+  }
+
+  return result as boolean;
+};
+
+/**
+ * DXG text prompt - returns string or undefined if cancelled
+ */
+export const dxgText = async (
+  options: Parameters<typeof text>[0]
+): Promise<string | undefined> => {
+  const result = await text(options);
+
+  if (isCancel(result)) {
+    return undefined;
+  }
+
+  return result as string;
+};
+
+export function createSpinner() {
+  return spinner();
+}
+
+// Re-export the utility functions from @clack/prompts
+export { isCancel, cancel };

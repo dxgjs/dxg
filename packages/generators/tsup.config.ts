@@ -1,3 +1,5 @@
+import { copy } from "esbuild-plugin-copy";
+
 export default {
   entry: ["src/index.ts"],
   splitting: false,
@@ -5,4 +7,12 @@ export default {
   clean: true,
   dts: true,
   format: ["esm"],
+  esbuildPlugins: [
+    copy({
+      assets: {
+        from: ["./src/**/*.tmpl"],
+        to: ["./"],
+      },
+    }),
+  ],
 };

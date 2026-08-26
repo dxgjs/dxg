@@ -107,21 +107,15 @@ export async function executeDatabase(
   // Check if Prisma is already installed
   const prismaInstalled = await isPrismaInstalled(fs);
   if (prismaInstalled) {
-    console.log("[executeDatabase] Prisma is installed, skipping.");
-    logger.info(" Prisma already detected. Skipping dependency installation.");
+        logger.info(" Prisma already detected. Skipping dependency installation.");
   } else if (!ctx.dryRun) {
-    console.log("[executeDatabase] Prisma is not installed, installing.");
-    // Install dependencies
+        // Install dependencies
     try {
       // Detect package manager
       const packageManager = await detectPackageManager(undefined);
       const installCommand = getInstallCommand(packageManager, planToUse.packages, true); // true for devDependency
-      console.log("[executeDatabase] packageManager:", packageManager);
-      console.log("[executeDatabase] installCommand:", installCommand);
       // logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
-      console.log("[executeDatabase] Before execSync call");
-		      console.log("[executeDatabase] installCommand:", installCommand);
-      execSync(installCommand, { stdio: "inherit" });
+      		            execSync(installCommand, { stdio: "inherit" });
     } catch (error) {
       throw new Error(
         `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
@@ -130,8 +124,7 @@ export async function executeDatabase(
   }
   } else {
     // In dry-run mode, log that we would install dependencies
-    console.log("[executeDatabase] Prisma is not installed, but dry-run: skipping installation")
-    logger.info("[database] Dry-run: Would install dependencies")
+        logger.info("[database] Dry-run: Would install dependencies")
   }
 
   // Handle schema file

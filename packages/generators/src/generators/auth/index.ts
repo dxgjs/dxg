@@ -67,11 +67,9 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
 
 // Check if auth dependency is already installed in package.json
 export async function isAuthInstalled(fs: GeneratorContext['fs'], provider: string): Promise<boolean> {
-  console.log(`[isAuthInstalled] called with provider: ${provider}`);
   try {
     const packageJsonExists = await fs.pathExists("package.json");
     if (!packageJsonExists) {
-      console.log(`[isAuthInstalled] package.json not found`);
       return false;
     }
     const content = await fs.readFile("package.json", { encoding: "utf8" });
@@ -87,17 +85,14 @@ export async function isAuthInstalled(fs: GeneratorContext['fs'], provider: stri
 
     const packageName = providerPackages[provider];
     if (!packageName) {
-      console.log(`[isAuthInstalled] unknown provider: ${provider}`);
       return false;
     }
 
     const result = (pkg.devDependencies && pkg.devDependencies[packageName]) ||
       (pkg.dependencies && pkg.dependencies[packageName]);
-    console.log(`[isAuthInstalled] returning ${result}`);
     return !!result;
-  } catch (error) {
+  } catch {
     // If we can't read or parse, assume not installed
-    console.log(`[isAuthInstalled] error: ${error}`);
     return false;
   }
 }
