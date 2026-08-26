@@ -13,10 +13,10 @@ export async function detectLanguage(projectRoot: string): Promise<LanguageInfo>
     await stat(tsconfigPath);
     // Try to read the version from tsconfig if possible, but we don't have a standard way.
     // We'll just leave version undefined.
-    return { name: "TypeScript" };
+    return { name: "typescript", detected: true };
   } catch {
     // No tsconfig, check for jsconfig or just assume JavaScript if there are .js files?
     // We'll keep it simple: if no tsconfig, assume JavaScript.
-    return { name: "JavaScript" };
+    return { name: "javascript", detected: true };
   }
 }

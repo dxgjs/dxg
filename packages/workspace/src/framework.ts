@@ -10,7 +10,20 @@ import { stat, glob } from "@dxgjs/fs";
    * @returns FrameworkInfo
    */
   export async function detectFramework(projectRoot: string, packageJson: PackageJson): Promise<FrameworkInfo> {
-    // Check for Next.js
+    // Check for Next.js via dependency first
+    const dependencies = {
+      ...(packageJson.dependencies ?? {}),
+      ...(packageJson.devDependencies ?? {}),
+      ...(packageJson.peerDependencies ?? {}),
+    };
+    const nextVersionRaw = dependencies.next ?? undefined;
+    // Strip version prefix (^, ~, >, <, =, etc.) to get clean version number
+    const nextVersion = nextVersionRaw?.replace(/^[~^><=]+/, '') ?? undefined;
+    if (nextVersion) {
+      return { name: "next", detected: true, version: nextVersion };
+    }
+
+    // Check for Next.js via config files
     const nextConfigMatches = await glob("next.config.*", { cwd: projectRoot });
     for (const configPath of nextConfigMatches) {
       try {
@@ -50,13 +63,13 @@ import { stat, glob } from "@dxgjs/fs";
         }
 
         if (nextAppRouter) {
-          return { name: "next-app" };
+          return { name: "next", detected: true, version: nextVersion };
         } else if (nextPagesRouter) {
-          return { name: "next-pages" };
+          return { name: "next", detected: true, version: nextVersion };
         } else {
-          // Default to next-pages if we have a Next.js config but no app/pages?
-          // We'll assume next-pages for safety.
-          return { name: "next-pages" };
+          // Default to next if we have a Next.js config but no app/pages?
+          // We'll assume next for safety.
+          return { name: "next", detected: true, version: nextVersion };
         }
       } catch {
         // Config not found, continue
@@ -68,7 +81,7 @@ import { stat, glob } from "@dxgjs/fs";
     for (const configPath of viteConfigMatches) {
       try {
         await stat(configPath);
-        return { name: "vite" };
+        return { name: "vite", detected: true };
       } catch {
         // Config not found, continue
       }
@@ -79,22 +92,17 @@ import { stat, glob } from "@dxgjs/fs";
     for (const configPath of astroConfigMatches) {
       try {
         await stat(configPath);
-        return { name: "astro" };
+        return { name: "astro", detected: true };
       } catch {
         // Config not found, continue
       }
     }
 
     // Check for React Router via dependencies
-    const dependencies = {
-      ...(packageJson.dependencies ?? {}),
-      ...(packageJson.devDependencies ?? {}),
-      ...(packageJson.peerDependencies ?? {}),
-    };
     if (dependencies["react-router"] || dependencies["react-router-dom"]) {
-      return { name: "react-router" };
+      return { name: "react-router", detected: true };
     }
 
     // If none of the above, return unknown
-    return { name: "unknown" };
+    return { name: "unknown", detected: false };
   }

@@ -55,6 +55,7 @@ import { stat, glob } from "@dxgjs/fs";
     }
 
     return {
+      name: detected ? "tailwindcss" : "",
       detected,
       version,
       configFile,

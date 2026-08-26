@@ -11,24 +11,30 @@ export interface WorkspaceResult {
 }
 
 export interface FrameworkInfo {
-  name: "next-app" | "next-pages" | "vite" | "astro" | "react-router" | "unknown";
+  name: "next-app" | "next-pages" | "next" | "vite" | "astro" | "react-router" | "unknown";
+  detected: boolean;
   version?: string;
 }
 
 export interface LanguageInfo {
-  name: "TypeScript" | "JavaScript";
+  name: "typescript" | "javascript";
+  detected: boolean;
   version?: string;
 }
 
 export interface StylingInfo {
+  name: string;
   detected: boolean;
   version: "v3" | "v4" | null;
   configFile: string | null;
 }
 
 export interface CapabilityInfo {
-  prisma: boolean;
-  authentication: boolean;
+  hasTests: boolean;
+  hasLinting: boolean;
+  hasFormatter: boolean;
+  hasCI: boolean;
+  hasDocker: boolean;
 }
 
 export interface PackageJson {
@@ -39,6 +45,7 @@ export interface PackageJson {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
   peerDependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
   [key: string]: unknown;
 }
 

@@ -1,8 +1,18 @@
 import { Logger } from "@dxgjs/logger";
+type FS = typeof import("@dxgjs/fs");
+
+export interface FSInterface {
+  pathExists: FS["pathExists"];
+  readFile: FS["readFile"];
+  writeFile: FS["writeFile"];
+  stat: FS["stat"];
+  mkdir: FS["mkdir"];
+  readdir: FS["readdir"];
+}
 
 export interface GeneratorContext {
   logger: Logger;
-  fs: any;
+  fs: FSInterface;
   templates: {
     render: (template: string, data: Record<string, unknown>) => string;
   };

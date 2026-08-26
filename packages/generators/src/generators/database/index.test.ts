@@ -4,10 +4,10 @@ import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 // Mock @dxgjs/fs FIRST, before any imports that might use it
 vi.mock("@dxgjs/fs", async (importOriginal) => {
   const original = await importOriginal();
-  return {
-    ...original,
-    detectPackageManager: vi.fn(),
-  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mocked: any = { ...(original as any) };
+  mocked.detectPackageManager = vi.fn();
+  return mocked;
 });
 // Mock child_process.execSync to prevent actual command execution
 vi.mock("child_process", () => ({
@@ -19,6 +19,7 @@ import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
 import { detectPackageManager } from "@dxgjs/fs";
+const mockedDetectPackageManager = detectPackageManager as ReturnType<typeof vi.fn>;
 import databaseGenerator from "./index";
 
 describe("Database Generator", () => {
@@ -65,11 +66,12 @@ describe("Database Generator", () => {
       "Choose your database provider:"
     );
     expect(prompts[0].default).toBe("sqlite");
-    expect(Array.isArray(prompts[0].choices)).toBe(true);
-    expect(prompts[0].choices.length).toBe(3);
+    const choices = prompts[0].choices;
+    expect(Array.isArray(choices)).toBe(true);
+    expect(choices!.length).toBe(3);
 
     // Check choices
-    const choiceValues = prompts[0].choices.map(c => c.value);
+    const choiceValues = choices!.map(c => c.value);
     expect(choiceValues).toContain("sqlite");
     expect(choiceValues).toContain("postgresql");
     expect(choiceValues).toContain("mysql");
@@ -100,7 +102,7 @@ describe("Database Generator", () => {
   describe("Template usage", () => {
     test("should read template files for schema generation", async () => {
       // Create a package.json so that validation passes
-      await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
+      await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
 
       const mockLogger = {
         info: vi.fn(),
@@ -111,7 +113,7 @@ describe("Database Generator", () => {
       // Spy on fs.readFile to see what paths are being read
       let readFileSpy: ReturnType<typeof vi.spyOn> = vi.spyOn(fs, "readFile");
       // Mock templates.render to replace placeholders
-      let renderSpy: ReturnType<typeof vi.fn> = vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+      let renderSpy = vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
         return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
           return (data[key] ?? '') as string;
         });
@@ -138,7 +140,7 @@ describe("Database Generator", () => {
 
         // Verify that the rendered content was written to the schema file
         // Check the actual file created
-        const schemaContent = await fs.readFile("prisma/schema.prisma", "utf8");
+        const schemaContent = await fs.readFile("prisma/schema.prisma", { encoding: "utf8" });
         expect(schemaContent).toContain('provider = "sqlite"');
 
         // Verify that the template string passed to render was the one from the .tmpl file
@@ -154,7 +156,7 @@ describe("Database Generator", () => {
 
   test("databaseGenerator should run successfully", async () => {
   // Create a package.json so that validation passes
-  await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
+  await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
 
   const mockLogger = {
     info: vi.fn(),
@@ -196,7 +198,7 @@ describe("Database Generator", () => {
 
     // Verify that the rendered content was written to the schema file
     // Check the actual file created
-    const schemaContent = await fs.readFile("prisma/schema.prisma", "utf8");
+    const schemaContent = await fs.readFile("prisma/schema.prisma", { encoding: "utf8" });
     expect(schemaContent).toContain('provider = "sqlite"');
 
     // Verify that the template string passed to render was the one from the .tmpl file
@@ -224,14 +226,14 @@ describe("Database Generator", () => {
       await fs.writeFile(
         "package.json",
         '{"devDependencies":{"prisma":"^5.0.0"}}',
-        "utf8"
+        { encoding: "utf8" }
       );
       // Create a schema file that already exists
       await fs.mkdir("prisma", { recursive: true });
       await fs.writeFile(
         "prisma/schema.prisma",
         `datasource db {\n  provider = "sqlite"\n  url      = "file:./dev.db"\n}\n\ngenerator client {\n  provider = "prisma-client-js"\n}`,
-        "utf8"
+        { encoding: "utf8" }
       );
 
       const mockLogger = {
@@ -277,9 +279,9 @@ describe("Database Generator", () => {
       expect(execSyncMock).not.toHaveBeenCalled();
 
       // Also, the schema content should remain unchanged
-      const schemaContent = await fs.readFile("prisma/schema.prisma", "utf8");
+      const schemaContent = await fs.readFile("prisma/schema.prisma", { encoding: "utf8" });
       expect(schemaContent).toBe(
-        `datasource db {\n  provider = "sqlite"\n}\n\ngenerator client {\n  provider = "prisma-client-js"\n}`
+        `datasource db {\n  provider = "sqlite"\n  url      = "file:./dev.db"\n}\n\ngenerator client {\n  provider = "prisma-client-js"\n}`
       );
 
       writeFileSpy.mockRestore();
@@ -291,7 +293,7 @@ describe("Database Generator", () => {
   describe("Package manager detection", () => {
     test("should detect packageManager field in package.json", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("pnpm");
+      mockedDetectPackageManager.mockResolvedValueOnce("pnpm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("pnpm");
@@ -300,7 +302,7 @@ describe("Database Generator", () => {
 
     test("should detect yarn when yarn.lock exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("yarn");
+      mockedDetectPackageManager.mockResolvedValueOnce("yarn");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("yarn");
@@ -309,7 +311,7 @@ describe("Database Generator", () => {
 
     test("should detect pnpm when pnpm-lock.yaml exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("pnpm");
+      mockedDetectPackageManager.mockResolvedValueOnce("pnpm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("pnpm");
@@ -318,7 +320,7 @@ describe("Database Generator", () => {
 
     test("should detect bun when bun.lockb exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("bun");
+      mockedDetectPackageManager.mockResolvedValueOnce("bun");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("bun");
@@ -327,7 +329,7 @@ describe("Database Generator", () => {
 
     test("should detect npm when package-lock.json exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("npm");
+      mockedDetectPackageManager.mockResolvedValueOnce("npm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("npm");
@@ -336,7 +338,7 @@ describe("Database Generator", () => {
 
     test("should default to npm when no lockfile exists and no packageManager field", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("npm");
+      mockedDetectPackageManager.mockResolvedValueOnce("npm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("npm");
@@ -345,7 +347,7 @@ describe("Database Generator", () => {
   describe("Dry-run mode", () => {
     test("does not install dependencies", async () => {
       // Create a package.json so that validation passes
-      await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
+      await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
   
       const mockLogger = {
         info: vi.fn(),
@@ -382,7 +384,7 @@ describe("Database Generator", () => {
 describe("Dry-run mode", () => {
   test("does not install dependencies", async () => {
     // Create a package.json so that validation passes
-    await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
 
     const mockLogger = {
       info: vi.fn(),

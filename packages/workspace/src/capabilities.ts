@@ -7,49 +7,86 @@ import { stat } from "@dxgjs/fs";
   const logger = new Logger({ minLevel: "info" });
 
   /**
-   * Detect capabilities (Prisma and authentication).
+   * Detect capabilities (tests, linting, formatting, CI, Docker).
    * @param projectRoot - Absolute path to the project directory.
    * @param packageJson - The parsed package.json object (to avoid reading it again).
    * @returns CapabilityInfo
    */
   export async function detectCapabilities(projectRoot: string, packageJson: PackageJson): Promise<CapabilityInfo> {
-    let prisma = false;
-    let authentication = false;
+    let hasTests = false;
+    let hasLinting = false;
+    let hasFormatter = false;
+    let hasCI = false;
+    let hasDocker = false;
 
     try {
-      const dependencies = {
-        ...(packageJson.dependencies ?? {}),
-        ...(packageJson.devDependencies ?? {}),
-        ...(packageJson.peerDependencies ?? {}),
-      };
+      const scripts = packageJson.scripts ?? {};
 
-      // Check for Prisma
-      if (dependencies["prisma"]) {
-        prisma = true;
+      // Check for test capabilities (based on script presence only)
+      if (scripts.test) {
+        hasTests = true;
+      }
+
+      // Check for linting capabilities (based on script presence only)
+      if (scripts.lint) {
+        hasLinting = true;
+      }
+
+      // Check for formatting capabilities (based on script presence only)
+      if (scripts.format) {
+        hasFormatter = true;
+      }
+
+      // Check for CI capabilities
+      if (scripts.ci) {
+        hasCI = true;
       } else {
-        // Also check for prisma schema file
+        // Check for common CI configuration files
+        const ciFileList = [".gitlab-ci.yml", ".travis.yml", "azure-pipelines.yml"];
+        for (const file of ciFileList) {
+          try {
+            await stat(join(projectRoot, file));
+            hasCI = true;
+            break;
+          } catch {
+            // Ignore and continue
+          }
+        }
+        // Also check for GitHub actions directory
         try {
-          await stat(join(projectRoot, "prisma", "schema.prisma"));
-          prisma = true;
+          await stat(join(projectRoot, ".github/workflows"));
+          hasCI = true;
+        } catch {
+          // Ignore
+        }
+        // Check for circleci directory
+        try {
+          await stat(join(projectRoot, "circleci"));
+          hasCI = true;
         } catch {
           // Ignore
         }
       }
 
-      // Check for authentication packages
-      const authPackages = [
-        "better-auth",
-        "auth.js",
-        "@auth/core",
-        "lucia",
-        "@clerk/clerk-react",
-        "@clerk/clerk-sdk",
-        "@clerk/nextjs",
-      ];
-      for (const authPackage of authPackages) {
-        if (dependencies[authPackage]) {
-          authentication = true;
-          break;
+      // Check for Docker capabilities
+      try {
+        await stat(join(projectRoot, "Dockerfile"));
+        hasDocker = true;
+      } catch {
+        // Ignore, check for docker-compose
+      }
+      if (!hasDocker) {
+        try {
+          await stat(join(projectRoot, "docker-compose.yml"));
+          hasDocker = true;
+        } catch {
+          // Ignore
+        }
+        try {
+          await stat(join(projectRoot, "docker-compose.yaml"));
+          hasDocker = true;
+        } catch {
+          // Ignore
         }
       }
     } catch (error) {
@@ -60,7 +97,10 @@ import { stat } from "@dxgjs/fs";
     }
 
     return {
-      prisma,
-      authentication,
+      hasTests,
+      hasLinting,
+      hasFormatter,
+      hasCI,
+      hasDocker,
     };
   }
