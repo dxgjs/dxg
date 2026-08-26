@@ -296,7 +296,7 @@ export const databaseGenerator: Generator = {
     await checkPreconditions(ctx);
 
     // Validate (interface compliance)
-    if (!validateDatabase(answers)) {
+    if (!validateDatabase()) {
       throw new Error("Invalid responses for database generator");
     }
 

@@ -13,6 +13,7 @@ import {
   mkdir,
 } from "@dxgjs/fs";
 import { initGenerator, type Generator } from "@dxgjs/generators";
+import type { DXGConfig } from "@dxgjs/config";
 import { tailwindGenerator } from "@dxgjs/generators";
 import { databaseGenerator } from "@dxgjs/generators";
 import { render as templatesRender } from "@dxgjs/templates";
@@ -107,7 +108,7 @@ async function findProjectRoot(startDir: string): Promise<string> {
 /**
  * Merges answers with config values for name and description
  */
-function mergeAnswersWithConfig(answers: Record<string, unknown>, config: Record<string, unknown>) {
+function mergeAnswersWithConfig(answers: Record<string, unknown>, config: DXGConfig) {
   const finalAnswers = { ...answers };
   if (answers.name === undefined && config.name !== undefined) {
     finalAnswers.name = config.name;
@@ -343,7 +344,7 @@ program
   .option("--verbose", "Enable verbose logging")
   .option("--quiet", "Suppress non-essential output")
   .action(async (generatorName, targetDirRaw, options: CommanderOptions) => {
-    const nonInteractive = options.parent?.nonInteractive ?? false;
+    const nonInteractive = options.nonInteractive ?? false;
 
     try {
       const targetDir = join(process.cwd(), targetDirRaw);

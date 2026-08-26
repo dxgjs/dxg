@@ -202,6 +202,7 @@ export async function executeTailwind(
 
 // Verification function
 export async function verifyTailwind(
+  answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planTailwind>,
 ): Promise<void> {
@@ -310,7 +311,7 @@ async function determineCssEntrypoint(ctx: GeneratorContext): Promise<string | n
     return null;
   }
 
-  const dependencies = { ...packageJson.dependencies, ...packageJson.devDependencies };
+  const dependencies = { ...(packageJson && typeof packageJson.dependencies === 'object' ? packageJson.dependencies : {}), ...(packageJson && typeof packageJson.devDependencies === 'object' ? packageJson.devDependencies : {}) } as Record<string, unknown>;
 
   // Check for Next.js
   if (dependencies.next) {
@@ -520,7 +521,7 @@ export const tailwindGenerator: Generator = {
 
     // Verify (skip in dry-run mode)
     if (!ctx.dryRun) {
-      await verifyTailwind(ctx, plan);
+      await verifyTailwind(answers, ctx, plan);
     }
 
     // Summarize

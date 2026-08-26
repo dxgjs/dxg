@@ -282,11 +282,12 @@ export async function executeAuth(
 
 // Verification function
 export async function verifyAuth(
+  answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planAuth>,
 ): Promise<void> {
   const { fs } = ctx;
-  const planToUse = plan ?? planAuth(_answers);
+  const planToUse = plan ?? planAuth(answers);
 
   // Verify that the config files exist if they were supposed to be created
   for (const { path } of planToUse.filesToCreate) {
@@ -353,7 +354,7 @@ export const authGenerator: Generator = {
     await checkPreconditions(ctx);
 
     // Validate (interface compliance)
-    if (!validateAuth(answers)) {
+    if (!validateAuth()) {
       throw new Error("Invalid responses for auth generator");
     }
 
@@ -365,7 +366,7 @@ export const authGenerator: Generator = {
 
     // Verify (skip in dry-run mode)
     if (!ctx.dryRun) {
-      await verifyAuth(ctx, plan);
+      await verifyAuth(answers, ctx, plan);
     }
 
     // Summarize

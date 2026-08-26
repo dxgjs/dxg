@@ -6,8 +6,10 @@ import tailwindGenerator from './generators/tailwind';
 import databaseGenerator from './generators/database';
 // Import the auth generator
 import authGenerator from './generators/auth';
+// Import the Generator type
+import type { Generator } from './types';
 
-export { initGenerator, tailwindGenerator, databaseGenerator, authGenerator };
+export { initGenerator, tailwindGenerator, databaseGenerator, authGenerator, Generator };
 
 // Default export for convenience (keep existing behavior)
 export default initGenerator;
