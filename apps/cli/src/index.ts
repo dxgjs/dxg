@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { detectWorkspace } from "@dxgjs/workspace";
 import { loadConfig } from "@dxgjs/config";
-import { prompt } from "@dxgjs/prompts";
+import { prompt, type PromptQuestion } from "@dxgjs/prompts";
 import { Logger, type LogLevel } from "@dxgjs/logger";
 import { join, dirname } from "path";
 import {
@@ -12,7 +12,7 @@ import {
   readdir,
   mkdir,
 } from "@dxgjs/fs";
-import { initGenerator } from "@dxgjs/generators";
+import { initGenerator, type Generator } from "@dxgjs/generators";
 import { tailwindGenerator } from "@dxgjs/generators";
 import { databaseGenerator } from "@dxgjs/generators";
 import { render as templatesRender } from "@dxgjs/templates";
@@ -29,7 +29,7 @@ const program = new Command();
 async function detectWorkspaceSilently(targetDir: string): Promise<void> {
   try {
     await detectWorkspace(targetDir);
-  } catch (_) {
+  } catch {
     // No workspace found, we continue anyway
   }
 }
@@ -44,7 +44,7 @@ async function loadConfigSilently(targetDir: string) {
 /**
  * Prepares the generator context with logger, fs, and templates
  */
-function prepareContext(options: any) {
+function prepareContext(options: CommanderOptions) {
   // Determine log level based on verbosity options
   let minLevel: LogLevel = "info";
   if (options.verbose) {
@@ -67,7 +67,7 @@ function prepareContext(options: any) {
 /**
  * Runs a function in the target directory and returns to original directory
  */
-async function runInTargetDirectory(targetDir: string, fn: () => Promise<any>) {
+async function runInTargetDirectory<T>(targetDir: string, fn: () => Promise<T>): Promise<T> {
   const originalDir = process.cwd();
   try {
     process.chdir(targetDir);
@@ -107,7 +107,7 @@ async function findProjectRoot(startDir: string): Promise<string> {
 /**
  * Merges answers with config values for name and description
  */
-function mergeAnswersWithConfig(answers: any, config: any) {
+function mergeAnswersWithConfig(answers: Record<string, unknown>, config: Record<string, unknown>) {
   const finalAnswers = { ...answers };
   if (answers.name === undefined && config.name !== undefined) {
     finalAnswers.name = config.name;
@@ -128,6 +128,15 @@ interface AnswerDef {
   type?: "boolean" | "string";
 }
 
+interface CommanderOptions {
+  verbose: boolean;
+  quiet: boolean;
+  dryRun: boolean;
+  force: boolean;
+  nonInteractive: boolean;
+  [key: string]: unknown; // For any other Commander options
+}
+
 /**
  * Collects answers for a generator from CLI options, environment variables, or prompts
  * @param generatorName Name of the generator (for error messages)
@@ -138,9 +147,9 @@ interface AnswerDef {
  */
 async function collectAnswersForGenerator(
   generatorName: string,
-  options: any,
+  options: CommanderOptions,
   nonInteractive: boolean,
-  prompts: any[],
+  prompts: PromptQuestion[],
   answerDefs: AnswerDef[],
 ): Promise<Record<string, unknown>> {
   const answers: Record<string, unknown> = {};
@@ -273,7 +282,7 @@ program
   .option("--verbose", "Enable verbose logging")
   .option("--quiet", "Suppress non-essential output")
   .argument("[directory]", "target directory (default: current directory)", ".")
-  .action(async (targetDirRaw: string, options: any) => {
+  .action(async (targetDirRaw: string, options: CommanderOptions) => {
     const nonInteractive = options.nonInteractive;
 
     try {
@@ -333,7 +342,7 @@ program
   .option("--force", "Force overwrite of conflicting files")
   .option("--verbose", "Enable verbose logging")
   .option("--quiet", "Suppress non-essential output")
-  .action(async (generatorName, targetDirRaw, options: any) => {
+  .action(async (generatorName, targetDirRaw, options: CommanderOptions) => {
     const nonInteractive = options.parent?.nonInteractive ?? false;
 
     try {
@@ -346,7 +355,7 @@ program
       const context = prepareContext(options);
 
       // Get generator instance
-      const generatorMap: Record<string, any> = {
+      const generatorMap: Record<string, Generator> = {
         init: initGenerator,
         tailwind: tailwindGenerator,
         database: databaseGenerator,
@@ -380,7 +389,7 @@ program
 
       // Run generator in project root directory
       await runInTargetDirectory(projectRoot, async () => {
-        await generator.run(finalAnswers, context as any);
+        await generator.run(finalAnswers, context);
       });
 
       // Natural exit (code 0)

@@ -48,10 +48,9 @@ export const authPrompts = [
 }[];
 
 // Validation function
-export function validateAuth(_answers: Record<string, unknown>): boolean {
+export function validateAuth(): boolean {
   // Validation will happen in the run method; we keep this for interface compliance
   // but actual validation is done in run via checkPreconditions
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   return true;
 }
 
@@ -187,7 +186,8 @@ export async function executeAuth(
         execSync(installCommand, { stdio: "inherit" });
       } catch (error) {
         throw new Error(
-          `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`
+          `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
         );
       }
     }
@@ -207,7 +207,8 @@ export async function executeAuth(
       template = (await fs.readFile(templatePath, { encoding: "utf8" })) as string;
     } catch (error) {
       throw new Error(
-        `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
 
@@ -281,7 +282,6 @@ export async function executeAuth(
 
 // Verification function
 export async function verifyAuth(
-  _answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planAuth>,
 ): Promise<void> {
@@ -299,7 +299,6 @@ export async function verifyAuth(
 
 // Summarize function
 export function summarizeAuth(
-  _answers: Record<string, unknown>,
   result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
   ctx: GeneratorContext,
 ): void {
@@ -366,11 +365,11 @@ export const authGenerator: Generator = {
 
     // Verify (skip in dry-run mode)
     if (!ctx.dryRun) {
-      await verifyAuth(answers, ctx, plan);
+      await verifyAuth(ctx, plan);
     }
 
     // Summarize
-    summarizeAuth(answers, execResult, ctx);
+    summarizeAuth(execResult, ctx);
   },
 };
 

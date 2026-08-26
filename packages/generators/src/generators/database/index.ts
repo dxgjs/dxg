@@ -35,7 +35,7 @@ export const databasePrompts = [
 }[];
 
 // Validation function
-export function validateDatabase(_answers: Record<string, unknown>): boolean {
+export function validateDatabase(): boolean {
   // Validation will happen in the run method; we keep this for interface compliance
   // but actual validation is done in run via checkPreconditions
   return true;
@@ -64,7 +64,7 @@ export async function isPrismaInstalled(fs: GeneratorContext['fs']): Promise<boo
       (pkg.dependencies && pkg.dependencies.prisma)
     );
     return result;
-  } catch (error) {
+  } catch {
     // If we can't read or parse, assume not installed
     return false;
   }
@@ -124,7 +124,8 @@ export async function executeDatabase(
       execSync(installCommand, { stdio: "inherit" });
     } catch (error) {
       throw new Error(
-        `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
   }
   } else {
@@ -141,7 +142,8 @@ export async function executeDatabase(
       template = (await fs.readFile(templatePath, { encoding: "utf8" })) as string;
     } catch (error) {
       throw new Error(
-        `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
 
@@ -240,7 +242,6 @@ export async function verifyDatabase(
 
 // Summarize function
 export function summarizeDatabase(
-  _answers: Record<string, unknown>,
   result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
   ctx: GeneratorContext,
 ): void {
@@ -311,7 +312,7 @@ export const databaseGenerator: Generator = {
     }
 
     // Summarize
-    summarizeDatabase(answers, execResult, ctx);
+    summarizeDatabase(execResult, ctx);
   },
 };
 

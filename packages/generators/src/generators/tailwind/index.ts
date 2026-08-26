@@ -42,7 +42,7 @@ export const tailwindPrompts = [
 }[];
 
 // Validation function
-export function validateTailwind(_answers: Record<string, unknown>): boolean {
+export function validateTailwind(): boolean {
   // Validation will happen in the run method; we keep this for interface compliance
   // but actual validation is done in run via checkPreconditions
   return true;
@@ -82,7 +82,7 @@ export async function isTailwindInstalled(fs: GeneratorContext['fs']): Promise<b
       (pkg.dependencies && pkg.dependencies.tailwindcss) ||
       (pkg.devDependencies && pkg.devDependencies.tailwindcss)
     );
-  } catch (error) {
+  } catch {
     // If we can't read or parse, assume not installed
     return false;
   }
@@ -145,7 +145,8 @@ export async function executeTailwind(
       execSync(installCommand, { stdio: "inherit" });
     } catch (error) {
       throw new Error(
-        `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
   } else {
@@ -161,7 +162,8 @@ export async function executeTailwind(
       template = (await fs.readFile(templatePath, { encoding: "utf8" })) as string;
     } catch (error) {
       throw new Error(
-        `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`
+        `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error }
       );
     }
 
@@ -200,7 +202,6 @@ export async function executeTailwind(
 
 // Verification function
 export async function verifyTailwind(
-  answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planTailwind>,
 ): Promise<void> {
@@ -243,7 +244,6 @@ export async function verifyTailwind(
 
 // Summarize function
 export function summarizeTailwind(
-  _answers: Record<string, unknown>,
   result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
   ctx: GeneratorContext,
 ): void {
@@ -302,10 +302,10 @@ async function determineCssEntrypoint(ctx: GeneratorContext): Promise<string | n
     return null;
   }
 
-  let packageJson: Record<string, any> = {};
+  let packageJson: Record<string, unknown>;
   try {
     packageJson = JSON.parse(packageJsonContent);
-  } catch (error) {
+  } catch {
     ctx.logger.warn("Could not parse package.json");
     return null;
   }
@@ -508,7 +508,7 @@ export const tailwindGenerator: Generator = {
     await checkPreconditions(ctx);
 
     // Validate (interface compliance)
-    if (!validateTailwind(answers)) {
+    if (!validateTailwind()) {
       throw new Error("Invalid responses for tailwind generator");
     }
 
@@ -520,11 +520,11 @@ export const tailwindGenerator: Generator = {
 
     // Verify (skip in dry-run mode)
     if (!ctx.dryRun) {
-      await verifyTailwind(answers, ctx, plan);
+      await verifyTailwind(ctx, plan);
     }
 
     // Summarize
-    summarizeTailwind(answers, execResult, ctx);
+    summarizeTailwind(execResult, ctx);
   },
 };
 

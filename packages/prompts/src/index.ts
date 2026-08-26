@@ -56,9 +56,9 @@ export async function prompt<T extends Record<string, unknown>>(
           const selectOptions = {
             message: q.message,
             options: choices?.map(o => ({ label: o.name, value: o.value })) ?? [],
-          } as Parameters<typeof select>[0];
+          } as Parameters<typeof select>[0] & { initialValue?: string };
           if (defaultValue !== undefined) {
-            (selectOptions as any).initialValue = defaultValue;
+            selectOptions.initialValue = defaultValue;
           }
           result = await select(selectOptions);
           break;

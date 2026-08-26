@@ -94,9 +94,8 @@ export async function loadConfig(rootPath: string): Promise<DXGConfig> {
       logger.warn(`dxg.config.json did not parse to an object. Using default configuration.`);
       return defaultConfig;
     }
-  } catch (_) {
+  } catch {
     // json not found or file read error, try js
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
   }
 
   // Try js
@@ -104,7 +103,7 @@ export async function loadConfig(rootPath: string): Promise<DXGConfig> {
   try {
     // Use dynamic import to support both ES and CJS
     const mod = await import(jsPath);
-    let parsed: unknown = mod.default ?? mod;
+    const parsed: unknown = mod.default ?? mod;
 
     // Handle case where the module is a function or other non-object
     if (typeof parsed !== 'object' || parsed === null) {
