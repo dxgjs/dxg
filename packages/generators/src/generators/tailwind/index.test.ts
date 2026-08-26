@@ -4,16 +4,17 @@ import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 // Mock @dxgjs/fs FIRST, before any imports that might use it
 vi.mock("@dxgjs/fs", async (importOriginal) => {
   const original = await importOriginal();
-  return {
-    ...original,
-    detectPackageManager: vi.fn(),
-  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mocked: any = { ...(original as any) };
+  mocked.detectPackageManager = vi.fn();
+  return mocked;
 });
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
 import { detectPackageManager } from "@dxgjs/fs";
+const mockedDetectPackageManager = detectPackageManager as ReturnType<typeof vi.fn>;
 import tailwindGenerator from "./index";
 
 // Mock child_process.execSync to prevent actual command execution
@@ -325,7 +326,7 @@ describe("Tailwind Generator", () => {
   describe("Package manager detection", () => {
     test("should detect packageManager field in package.json", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("pnpm");
+      mockedDetectPackageManager.mockResolvedValueOnce("pnpm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("pnpm");
@@ -334,7 +335,7 @@ describe("Tailwind Generator", () => {
 
     test("should detect yarn when yarn.lock exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("yarn");
+      mockedDetectPackageManager.mockResolvedValueOnce("yarn");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("yarn");
@@ -343,7 +344,7 @@ describe("Tailwind Generator", () => {
 
     test("should detect pnpm when pnpm-lock.yaml exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("pnpm");
+      mockedDetectPackageManager.mockResolvedValueOnce("pnpm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("pnpm");
@@ -352,7 +353,7 @@ describe("Tailwind Generator", () => {
 
     test("should detect bun when bun.lockb exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("bun");
+      mockedDetectPackageManager.mockResolvedValueOnce("bun");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("bun");
@@ -361,7 +362,7 @@ describe("Tailwind Generator", () => {
 
     test("should detect npm when package-lock.json exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("npm");
+      mockedDetectPackageManager.mockResolvedValueOnce("npm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("npm");
@@ -370,7 +371,7 @@ describe("Tailwind Generator", () => {
 
     test("should default to npm when no lockfile exists and no packageManager field", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("npm");
+      mockedDetectPackageManager.mockResolvedValueOnce("npm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("npm");

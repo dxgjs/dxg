@@ -17,7 +17,9 @@ import {
   copyFile,
   copyFileSync,
   appendFile,
-  appendFileSync
+  appendFileSync,
+  glob,
+  globSync
 } from './src/index';
 import {
   join,
@@ -230,5 +232,82 @@ describe('FS Abstraction Layer', () => {
     mkdirSync(dirPath, { recursive: true });
     const exists = pathExistsSync(dirPath);
     expect(exists).toBe(true);
+  });
+
+  test('should glob files async', async () => {
+    // Create test files
+    await writeFile(join(TEST_DIR, 'test1.txt'), 'content1', { encoding: 'utf8' });
+    await writeFile(join(TEST_DIR, 'test2.txt'), 'content2', { encoding: 'utf8' });
+    await writeFile(join(TEST_DIR, 'other.js'), 'console.log("hello");', { encoding: 'utf8' });
+
+    // Create subdirectory with files
+    await mkdir(join(TEST_DIR, 'subdir'), { recursive: true });
+    await writeFile(join(TEST_DIR, 'subdir', 'test3.txt'), 'content3', { encoding: 'utf8' });
+
+    // Test glob pattern for txt files
+    const txtFiles = await glob('*.txt', { cwd: TEST_DIR });
+    expect(txtFiles).toHaveLength(2);
+    expect(txtFiles.map(f => path.basename(f))).toContain('test1.txt');
+    expect(txtFiles.map(f => path.basename(f))).toContain('test2.txt');
+
+    // Test glob pattern for all files in subdir
+    const subdirFiles = await glob('subdir/*.txt', { cwd: TEST_DIR });
+    expect(subdirFiles).toHaveLength(1);
+    expect(subdirFiles[0]).toMatch(/subdir[\\/]test3\.txt$/);
+
+    // Test glob with array of patterns
+    const jsAndTxtFiles = await glob(['*.txt', '*.js'], { cwd: TEST_DIR });
+    expect(jsAndTxtFiles).toHaveLength(3); // 2 txt + 1 js
+
+    // Test glob with no matches
+    const noMatches = await glob('*.nonexistent', { cwd: TEST_DIR });
+    expect(noMatches).toHaveLength(0);
+  });
+
+  test('should glob files synchronously', () => {
+    // Create test files
+    writeFileSync(join(TEST_DIR, 'test1.txt'), 'content1', { encoding: 'utf8' });
+    writeFileSync(join(TEST_DIR, 'test2.txt'), 'content2', { encoding: 'utf8' });
+    writeFileSync(join(TEST_DIR, 'other.js'), 'console.log("hello");', { encoding: 'utf8' });
+
+    // Create subdirectory with files
+    mkdirSync(join(TEST_DIR, 'subdir'), { recursive: true });
+    writeFileSync(join(TEST_DIR, 'subdir', 'test3.txt'), 'content3', { encoding: 'utf8' });
+
+    // Test glob pattern for txt files
+    const txtFiles = globSync('*.txt', { cwd: TEST_DIR });
+    expect(txtFiles).toHaveLength(2);
+    expect(txtFiles.map(f => path.basename(f))).toContain('test1.txt');
+    expect(txtFiles.map(f => path.basename(f))).toContain('test2.txt');
+
+    // Test glob pattern for all files in subdir
+    const subdirFiles = globSync('subdir/*.txt', { cwd: TEST_DIR });
+    expect(subdirFiles).toHaveLength(1);
+    expect(subdirFiles[0]).toMatch(/subdir[\\/]test3\.txt$/);
+
+    // Test glob with array of patterns
+    const jsAndTxtFiles = globSync(['*.txt', '*.js'], { cwd: TEST_DIR });
+    expect(jsAndTxtFiles).toHaveLength(3); // 2 txt + 1 js
+
+    // Test glob with no matches
+    const noMatches = globSync('*.nonexistent', { cwd: TEST_DIR });
+    expect(noMatches).toHaveLength(0);
+  });
+
+  test('should glob with options', async () => {
+    // Create test files
+    await writeFile(join(TEST_DIR, 'test.txt'), 'content', { encoding: 'utf8' });
+    await writeFile(join(TEST_DIR, '.hidden'), 'hidden content', { encoding: 'utf8' });
+
+    // By default, dot files should not be matched
+    let files = await glob('*', { cwd: TEST_DIR });
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatch(/test\.txt$/);
+
+    // With dot: true, dot files should be matched
+    files = await glob('*', { cwd: TEST_DIR, dot: true });
+    expect(files).toHaveLength(2);
+    expect(files.map(f => path.basename(f))).toContain('test.txt');
+    expect(files.map(f => path.basename(f))).toContain('.hidden');
   });
 });

@@ -3,12 +3,12 @@ import * as fsSync from 'fs';
 
 type WriteFileOptions = Parameters<typeof fs.writeFile>[2];
 
-export async function writeFile(
+export function writeFile(
   filePath: Parameters<typeof fs.writeFile>[0],
   data: Parameters<typeof fs.writeFile>[1],
   options?: WriteFileOptions
-): Promise<ReturnType<typeof fs.writeFile>> {
-  return await fs.writeFile(filePath, data, options);
+): ReturnType<typeof fs.writeFile> {
+  return fs.writeFile(filePath, data, options);
 }
 
 export function writeFileSync(

@@ -59,18 +59,13 @@ export async function isPrismaInstalled(fs: GeneratorContext['fs']): Promise<boo
     if (!packageJsonExists) return false;
     const content = await fs.readFile("package.json", { encoding: "utf8" });
     const pkg = JSON.parse(content as string);
-    console.log("[isPrismaInstalled] pkg.devDependencies:", pkg.devDependencies);
-    console.log("[isPrismaInstalled] pkg.dependencies:", pkg.dependencies);
     const result = (
       (pkg.devDependencies && pkg.devDependencies.prisma) ||
       (pkg.dependencies && pkg.dependencies.prisma)
     );
-    console.log("[isPrismaInstalled] package.json content:", content);
-    console.log("[isPrismaInstalled] result:", result);
     return result;
   } catch (error) {
     // If we can't read or parse, assume not installed
-    console.log("[isPrismaInstalled] error:", error);
     return false;
   }
 }

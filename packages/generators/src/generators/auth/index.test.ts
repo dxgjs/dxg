@@ -18,6 +18,8 @@ import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
 import { detectPackageManager } from "@dxgjs/fs";
+// Cast detectPackageManager to a mock type so we can use mockResolvedValueOnce
+const mockedDetectPackageManager = detectPackageManager as ReturnType<typeof vi.fn>;
 import authGenerator from "./index";
 
 describe("Auth Generator", () => {
@@ -64,8 +66,9 @@ describe("Auth Generator", () => {
       "Choose your authentication provider:"
     );
     expect(prompts[0].default).toBe("better-auth");
-    expect(Array.isArray(prompts[0].choices)).toBe(true);
-    expect(prompts[0].choices.length).toBe(4);
+    const choices = prompts[0].choices;
+    expect(Array.isArray(choices)).toBe(true);
+    expect(choices!.length).toBe(4);
 
     // Second prompt: installDependencies
     expect(prompts[1].name).toBe("installDependencies");
@@ -109,7 +112,7 @@ describe("Auth Generator", () => {
   describe("Template usage", () => {
     test("should read template files for config generation", async () => {
       // Create a package.json so that validation passes
-      await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
+      await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
 
       const mockLogger = {
         info: vi.fn(),
@@ -151,7 +154,7 @@ describe("Auth Generator", () => {
 
         // Verify that the rendered content was written to the config file
         // Check the actual file created
-        const authConfig = await fs.readFile("auth.config.ts", "utf8");
+        const authConfig = await fs.readFile("auth.config.ts", { encoding: "utf8" });
         expect(authConfig).toContain("export const authConfig");
 
         // Verify that the template string passed to render was the one from the .tmpl file
@@ -166,7 +169,7 @@ describe("Auth Generator", () => {
 
   test("authGenerator should run successfully", async () => {
     // Create a package.json so that validation passes
-    await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
 
     const mockLogger = {
       info: vi.fn(),
@@ -209,7 +212,7 @@ describe("Auth Generator", () => {
 
       // Verify that the rendered content was written to the config file
       // Check the actual file created
-      const authConfig = await fs.readFile("auth.config.ts", "utf8");
+      const authConfig = await fs.readFile("auth.config.ts", { encoding: "utf8" });
       expect(authConfig).toContain("export const authConfig");
 
       // Verify that the template string passed to render was the one from the .tmpl file
@@ -233,13 +236,13 @@ describe("Auth Generator", () => {
       await fs.writeFile(
         "package.json",
         '{"devDependencies":{"better-auth":"^1.0.0"}}',
-        "utf8"
+        { encoding: "utf8" }
       );
       // Create a config file that already exists
       await fs.writeFile(
         "auth.config.ts",
         `export const authConfig = {\n  provider: "better-auth"\n};`,
-        "utf8"
+        { encoding: "utf8" }
       );
 
       const mockLogger = {
@@ -281,7 +284,7 @@ describe("Auth Generator", () => {
       expect(execSyncMock).not.toHaveBeenCalled();
 
       // Also, the config content should remain unchanged
-      const configContent = await fs.readFile("auth.config.ts", "utf8");
+      const configContent = await fs.readFile("auth.config.ts", { encoding: "utf8" });
       expect(configContent).toBe(
         `export const authConfig = {\n  provider: "better-auth"\n};`
       );
@@ -294,7 +297,7 @@ describe("Auth Generator", () => {
   describe("Package manager detection", () => {
     test("should detect packageManager field in package.json", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("pnpm");
+      mockedDetectPackageManager.mockResolvedValueOnce("pnpm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("pnpm");
@@ -303,7 +306,7 @@ describe("Auth Generator", () => {
 
     test("should detect yarn when yarn.lock exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("yarn");
+      mockedDetectPackageManager.mockResolvedValueOnce("yarn");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("yarn");
@@ -312,7 +315,7 @@ describe("Auth Generator", () => {
 
     test("should detect pnpm when pnpm-lock.yaml exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("pnpm");
+      mockedDetectPackageManager.mockResolvedValueOnce("pnpm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("pnpm");
@@ -321,7 +324,7 @@ describe("Auth Generator", () => {
 
     test("should detect bun when bun.lockb exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("bun");
+      mockedDetectPackageManager.mockResolvedValueOnce("bun");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("bun");
@@ -330,7 +333,7 @@ describe("Auth Generator", () => {
 
     test("should detect npm when package-lock.json exists (and no packageManager field)", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("npm");
+      mockedDetectPackageManager.mockResolvedValueOnce("npm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("npm");
@@ -339,7 +342,7 @@ describe("Auth Generator", () => {
 
     test("should default to npm when no lockfile exists and no packageManager field", async () => {
       // Mock the detectPackageManager function to return a specific result
-      detectPackageManager.mockResolvedValueOnce("npm");
+      mockedDetectPackageManager.mockResolvedValueOnce("npm");
 
       const packageManager = await detectPackageManager(undefined);
       expect(packageManager).toBe("npm");

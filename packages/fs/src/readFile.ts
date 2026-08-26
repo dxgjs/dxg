@@ -3,11 +3,11 @@ import * as fsSync from 'fs';
 
 type ReadFileOptions = Parameters<typeof fs.readFile>[1];
 
-export async function readFile(
+export function readFile(
   filePath: Parameters<typeof fs.readFile>[0],
   options?: ReadFileOptions
-): Promise<ReturnType<typeof fs.readFile>> {
-  return await fs.readFile(filePath, options);
+): ReturnType<typeof fs.readFile> {
+  return fs.readFile(filePath, options);
 }
 
 export function readFileSync(
