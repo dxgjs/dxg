@@ -1,7 +1,17 @@
 import { Command } from "commander";
 import { detectWorkspace } from "@dxgjs/workspace";
 import { loadConfig } from "@dxgjs/config";
-import { prompt, type PromptQuestion } from "@dxgjs/prompts";
+import {
+  prompt,
+  type PromptQuestion,
+  intro,
+  outro,
+  note,
+  select,
+  isCancel,
+  cancel,
+  spinner,
+} from "@dxgjs/prompts";
 import { Logger, type LogLevel } from "@dxgjs/logger";
 import { join, dirname } from "path";
 import {
@@ -17,6 +27,7 @@ import type { DXGConfig } from "@dxgjs/config";
 import { tailwindGenerator } from "@dxgjs/generators";
 import { databaseGenerator } from "@dxgjs/generators";
 import { render as templatesRender } from "@dxgjs/templates";
+import * as term from "@dxgjs/terminal";
 import { DXGError, formatDXGError } from "./errors";
 import pkg from "../package.json" with { type: "json" };
 
@@ -68,7 +79,10 @@ function prepareContext(options: CommanderOptions) {
 /**
  * Runs a function in the target directory and returns to original directory
  */
-async function runInTargetDirectory<T>(targetDir: string, fn: () => Promise<T>): Promise<T> {
+async function runInTargetDirectory<T>(
+  targetDir: string,
+  fn: () => Promise<T>,
+): Promise<T> {
   const originalDir = process.cwd();
   try {
     process.chdir(targetDir);
@@ -108,7 +122,10 @@ async function findProjectRoot(startDir: string): Promise<string> {
 /**
  * Merges answers with config values for name and description
  */
-function mergeAnswersWithConfig(answers: Record<string, unknown>, config: DXGConfig) {
+function mergeAnswersWithConfig(
+  answers: Record<string, unknown>,
+  config: DXGConfig,
+) {
   const finalAnswers = { ...answers };
   if (answers.name === undefined && config.name !== undefined) {
     finalAnswers.name = config.name;
@@ -269,6 +286,127 @@ const answerDefsMap: Record<string, AnswerDef[]> = {
   auth: authAnswerDefs,
 };
 
+/**
+ * Runs the UX showcase demo
+ */
+async function runUxDemo(options: { nonInteractive: boolean; quiet: boolean }) {
+  const { nonInteractive, quiet } = options;
+
+  // Handle non-interactive mode
+  if (nonInteractive) {
+    if (!quiet) {
+      // Using console.log for simple message in non-interactive mode
+      // In a real implementation, we would use the logger if available
+      console.log(
+        "Running in non-interactive mode - skipping interactive demo",
+      );
+    }
+    return;
+  }
+
+  // Show DXG-branded intro
+  intro(term.bgCyan(term.black(`DXG UX Showcase CLI v${pkg.version}`)));
+
+  // Step 1: Select database layer architecture
+  const architectureChoice = await select({
+    message: "Select your database layer architecture:",
+    options: [
+      {
+        label: "Prisma + Kysely Combo",
+        value: "prisma-kysely",
+        hint: "Best of both worlds: Prisma migrations + Kysely performance",
+      },
+      {
+        label: "Prisma Only",
+        value: "prisma-only",
+        hint: "Traditional and simple setup",
+      },
+    ],
+  });
+
+  // Handle cancellation using Clack's native cancel
+  if (isCancel(architectureChoice)) {
+    cancel("Demo cancelled");
+    return;
+  }
+
+  // Step 2: Conditional second select based on architecture
+  let databaseChoice;
+  if (architectureChoice === "prisma-kysely") {
+    databaseChoice = await select({
+      message: "Which database dialect are you using in Prisma?",
+      options: [
+        {
+          label: "PostgreSQL",
+          value: "postgresql",
+          hint: "Supabase, Neon, CockroachDB, etc.",
+        },
+        {
+          label: "MySQL",
+          value: "mysql",
+          hint: "PlanetScale, MariaDB, etc.",
+        },
+        {
+          label: "SQLite",
+          value: "sqlite",
+          hint: "Local file, Turso, etc.",
+        },
+      ],
+    });
+  } else if (architectureChoice === "prisma-only") {
+    databaseChoice = await select({
+      message: "Which database provider is configured in your schema.prisma?",
+      options: [
+        { label: "postgresql", value: "postgresql" },
+        { label: "mysql", value: "mysql" },
+        { label: "sqlite", value: "sqlite" },
+      ],
+    });
+  }
+
+  // Handle cancellation using Clack's native cancel
+  if (isCancel(databaseChoice)) {
+    cancel("Demo cancelled");
+    return;
+  }
+
+  // Step 1: Configuring project files and schema
+  const s = spinner();
+  s.start("Configuring project files and schema...");
+  await new Promise((resolve) => setTimeout(resolve, 1500)); // 1.5 seconds
+  s.stop("Configured project files and schema successfully.");
+
+  // Step 2: Installing required dependencies
+  s.start("Installing required dependencies...");
+  await new Promise((resolve) => setTimeout(resolve, 2000)); // 2 seconds
+  s.stop("Dependencies installed.");
+
+  // Step 3: Running database type generation (only for Prisma + Kysely)
+  if (architectureChoice === "prisma-kysely") {
+    s.start("Running database type generation...");
+    await new Promise((resolve) => setTimeout(resolve, 1500)); // 1.5 seconds
+    s.stop("Database types generated.");
+  }
+
+  // Step 4: Generating Better Auth configuration
+  s.start("Generating Better Auth configuration...");
+  await new Promise((resolve) => setTimeout(resolve, 1000)); // 1 second
+  s.stop("Better Auth configuration generated.");
+
+  // Show structured informational note
+  note(
+    `1. Your schema.prisma has been updated.\n2. auth.ts is ready with ${databaseChoice} configurations.`,
+    "What to do next?",
+  );
+
+  // Show branded success outro
+  outro(
+    term.green(
+      `Success! Better Auth is now fully configured. Run ${term.bold("npx auth@latest generate")} to complete the setup.`,
+    ),
+  );
+}
+
 // Default command (no subcommand) - runs init generator
 program
   .name("dxg")
@@ -313,6 +451,32 @@ program
       });
 
       // Natural exit (code 0)
+    } catch (err) {
+      console.error(formatDXGError(err));
+      process.exitCode = 1;
+    }
+  });
+
+// Demo command - showcases DXG terminal UX
+program
+  .command("showcase <demoType>")
+  .description("Run DXG demonstrations and showcases")
+  .option(
+    "--non-interactive",
+    "Do not prompt for input; fail if required values are missing",
+  )
+  .option("--quiet", "Suppress non-essential output")
+  .action(async (demoType, options: CommanderOptions) => {
+    // Access options correctly using the pattern that works for non-conflicting options
+    const nonInteractive = (options["nonInteractive"] ?? false) as boolean;
+    const quiet = (options["quiet"] ?? false) as boolean;
+
+    try {
+      if (demoType === "ux") {
+        await runUxDemo({ nonInteractive, quiet });
+      } else {
+        throw new Error(`Unknown demo type: ${demoType}`);
+      }
     } catch (err) {
       console.error(formatDXGError(err));
       process.exitCode = 1;

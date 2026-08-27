@@ -22,7 +22,6 @@
   },
   "dependencies": {
     "@clack/prompts": "^1.7.0",
-    "@dxgjs/logger": "workspace:*",
     "@dxgjs/terminal": "workspace:*"
   },
   "devDependencies": {
