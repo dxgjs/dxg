@@ -18,6 +18,7 @@ import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
+import { execSync } from "child_process";
 import { detectPackageManager } from "@dxgjs/fs";
 const mockedDetectPackageManager = detectPackageManager as ReturnType<typeof vi.fn>;
 import databaseGenerator from "./index";
@@ -186,7 +187,8 @@ describe("Database Generator", () => {
     // Spy on fs.readFile to see what paths are being read
     const readFileSpy = vi.spyOn(fs, "readFile");
     // Initialize the execSync mock BEFORE running the generator
-    const execSyncMock = vi.spyOn(require("child_process"), "execSync");
+    // (uses the top-level vi.mock("child_process") instance)
+    const execSyncMock = vi.mocked(execSync);
 
     await databaseGenerator.run(answers, context);
 
@@ -356,10 +358,10 @@ describe("Database Generator", () => {
       } as unknown as Logger;
   
       // Mock detectPackageManager to return a value (though it shouldn't be called for installation in dry-run)
-      const detectPackageManagerMock = vi.spyOn(require("@dxgjs/fs"), "detectPackageManager");
-      detectPackageManagerMock.mockResolvedValue("npm");
-      // Mock execSync to ensure it's not called
-      const execSyncMock = vi.spyOn(require("child_process"), "execSync");
+      mockedDetectPackageManager.mockResolvedValue("npm");
+      // execSync comes from the top-level vi.mock("child_process") instance
+      const execSyncMock = vi.mocked(execSync);
+      execSyncMock.mockClear();
   
       const context = {
         logger: mockLogger,
@@ -381,42 +383,5 @@ describe("Database Generator", () => {
       expect(mockLogger.info).toHaveBeenCalledWith("[database] Dry-run: Would install dependencies");
     });
   });
-describe("Dry-run mode", () => {
-  test("does not install dependencies", async () => {
-    // Create a package.json so that validation passes
-    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
-
-    const mockLogger = {
-      info: vi.fn(),
-      error: vi.fn(),
-      warn: vi.fn(),
-    } as unknown as Logger;
-
-    // Mock detectPackageManager to return a value (though it shouldn't be called for installation in dry-run)
-    const detectPackageManagerMock = vi.spyOn(require("@dxgjs/fs"), "detectPackageManager");
-    detectPackageManagerMock.mockResolvedValue("npm");
-    // Mock execSync to ensure it's not called
-    const execSyncMock = vi.spyOn(require("child_process"), "execSync");
-
-    const context = {
-      logger: mockLogger,
-      fs: fs,
-      templates: { render: vi.fn().mockReturnValue("") },
-      dryRun: true, // Set dryRun to true
-    };
-
-    const answers = {
-      provider: "sqlite",
-    };
-
-    await databaseGenerator.run(answers, context);
-
-    // Verify that execSync was not called (dependency installation)
-    expect(execSyncMock).not.toHaveBeenCalled();
-
-    // Verify that the logger logged the dry-run message
-    expect(mockLogger.info).toHaveBeenCalledWith("[database] Dry-run: Would install dependencies");
-  });
-});
   });
 });

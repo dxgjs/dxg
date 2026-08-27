@@ -1,16 +1,26 @@
 import { GeneratorContext, Generator } from "../../types";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { dirname, join, sep } from "path";
 import { detectPackageManager } from "@dxgjs/fs";
 
 // Get the directory where this module is located
-// DEBUG LINE ADDED
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Determine if we're in a bundled context (where __dirname points to dist/)
+// In bundled context, we need to adjust the path to point to generators/database/templates/
+const isBundled = __dirname.endsWith(`${sep}dist`) || __dirname.endsWith("/dist");
+let templateBasePath;
+if (isBundled) {
+  // In bundle, templates are under generators/<generator-name>/templates/
+  templateBasePath = join(__dirname, "generators", "database", "templates");
+} else {
+  // In source, templates are under the generator's directory
+  templateBasePath = join(__dirname, "templates");
+}
 // Template file paths
-const schemaTemplatePath = join(__dirname, "schema.prisma.tmpl");
+const schemaTemplatePath = join(templateBasePath, "schema.prisma.tmpl");
 
 // Prompt questions for the database generator
 export const databasePrompts = [
@@ -114,7 +124,7 @@ export async function executeDatabase(
       // Detect package manager
       const packageManager = await detectPackageManager(undefined);
       const installCommand = getInstallCommand(packageManager, planToUse.packages, true); // true for devDependency
-      // logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
+      logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
       		            execSync(installCommand, { stdio: "inherit" });
     } catch (error) {
       throw new Error(

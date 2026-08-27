@@ -1,6 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
-
 // Mock @dxgjs/fs FIRST, before any imports that might use it
 vi.mock("@dxgjs/fs", async (importOriginal) => {
   const original = await importOriginal();
@@ -13,13 +12,16 @@ import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
+import { execSync } from "child_process";
 import { detectPackageManager } from "@dxgjs/fs";
-const mockedDetectPackageManager = detectPackageManager as ReturnType<typeof vi.fn>;
+const mockedDetectPackageManager = detectPackageManager as ReturnType<
+  typeof vi.fn
+>;
 import tailwindGenerator from "./index";
 
 // Mock child_process.execSync to prevent actual command execution
 vi.mock("child_process", () => ({
-  execSync: vi.fn()
+  execSync: vi.fn(),
 }));
 
 describe("Tailwind Generator", () => {
@@ -29,9 +31,12 @@ describe("Tailwind Generator", () => {
   beforeEach(() => {
     originalCwd = process.cwd();
     // Create a temporary directory
-    tempDir = path.join(os.tmpdir(), `dxg-tailwind-test-${Date.now()}-${Math.random()
-      .toString(36)
-      .substring(2, 15)}`);
+    tempDir = path.join(
+      os.tmpdir(),
+      `dxg-tailwind-test-${Date.now()}-${Math.random()
+        .toString(36)
+        .substring(2, 15)}`,
+    );
     // Ensure the directory exists
     fs.mkdirSync(tempDir, { recursive: true });
     // Change to the temporary directory
@@ -50,7 +55,7 @@ describe("Tailwind Generator", () => {
     expect(tailwindGenerator).toBeDefined();
     expect(tailwindGenerator.name).toBe("tailwind");
     expect(tailwindGenerator.description).toBe(
-      "Adds Tailwind CSS v4 to a Node/frontend project"
+      "Adds Tailwind CSS v4 to a Node/frontend project",
     );
     expect(Array.isArray(tailwindGenerator.prompts)).toBe(true);
     expect(tailwindGenerator.prompts.length).toBe(3);
@@ -63,7 +68,7 @@ describe("Tailwind Generator", () => {
     expect(prompts[0].name).toBe("customiseTailwind");
     expect(prompts[0].type).toBe("confirm");
     expect(prompts[0].message).toBe(
-      "Do you want to customise Tailwind settings (content paths, theme, etc.)? [y/N]"
+      "Do you want to customise Tailwind settings (content paths, theme, etc.)? [y/N]",
     );
     expect(prompts[0].default).toBe(false);
 
@@ -71,7 +76,7 @@ describe("Tailwind Generator", () => {
     expect(prompts[1].name).toBe("addPostcssPlugins");
     expect(prompts[1].type).toBe("confirm");
     expect(prompts[1].message).toBe(
-      "Do you want to add additional PostCSS plugins (e.g., for minification)? [y/N]"
+      "Do you want to add additional PostCSS plugins (e.g., for minification)? [y/N]",
     );
     expect(prompts[1].default).toBe(false);
 
@@ -79,7 +84,7 @@ describe("Tailwind Generator", () => {
     expect(prompts[2].name).toBe("installAutoprefixer");
     expect(prompts[2].type).toBe("confirm");
     expect(prompts[2].message).toBe(
-      "Do you need to support legacy browsers (IE11, older Android)? [y/N]"
+      "Do you need to support legacy browsers (IE11, older Android)? [y/N]",
     );
     expect(prompts[2].default).toBe(false);
   });
@@ -99,13 +104,21 @@ describe("Tailwind Generator", () => {
       });
       try {
         const context = {
-          logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } as unknown as Logger,
+          logger: {
+            info: vi.fn(),
+            error: vi.fn(),
+            warn: vi.fn(),
+          } as unknown as Logger,
           fs: fs,
           templates: { render: vi.fn().mockReturnValue("") },
         };
         await tailwindGenerator.run(
-          { customiseTailwind: false, addPostcssPlugins: false, installAutoprefixer: false },
-          context
+          {
+            customiseTailwind: false,
+            addPostcssPlugins: false,
+            installAutoprefixer: false,
+          },
+          context,
         );
         expect(false).toBe(true); // Should not reach here
       } catch (error: unknown) {
@@ -123,15 +136,23 @@ describe("Tailwind Generator", () => {
     test("should throw if package.json missing", async () => {
       // Ensure no package.json in the temporary directory
       const context = {
-        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn() } as unknown as Logger,
+        logger: {
+          info: vi.fn(),
+          error: vi.fn(),
+          warn: vi.fn(),
+        } as unknown as Logger,
         fs: fs,
         templates: { render: vi.fn().mockReturnValue("") },
       };
       await expect(
         tailwindGenerator.run(
-          { customiseTailwind: false, addPostcssPlugins: false, installAutoprefixer: false },
-          context
-        )
+          {
+            customiseTailwind: false,
+            addPostcssPlugins: false,
+            installAutoprefixer: false,
+          },
+          context,
+        ),
       ).rejects.toThrow("package.json not found");
     });
   });
@@ -150,11 +171,15 @@ describe("Tailwind Generator", () => {
       // Spy on fs.readFile to see what paths are being read
       const readFileSpy = vi.spyOn(fs, "readFile");
       // Mock templates.render to replace placeholders
-      const renderSpy = vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
-        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-          return (data[key] ?? '') as string;
-        });
-      });
+      const renderSpy = vi
+        .fn()
+        .mockImplementation(
+          (template: string, data: Record<string, unknown>) => {
+            return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+              return (data[key] ?? "") as string;
+            });
+          },
+        );
 
       const context = {
         logger: mockLogger,
@@ -174,19 +199,21 @@ describe("Tailwind Generator", () => {
         // Verify that the template files were read
         expect(readFileSpy).toHaveBeenCalledWith(
           expect.stringContaining("tailwind.config.tmpl"),
-          { encoding: "utf8" }
+          { encoding: "utf8" },
         );
         expect(readFileSpy).toHaveBeenCalledWith(
           expect.stringContaining("postcss.config.tmpl"),
-          { encoding: "utf8" }
+          { encoding: "utf8" },
         );
 
         // Verify that the rendered content was written to the config files
         // Check the actual files created
-        const tailwindConfig = await fs.readFile("tailwind.config.cjs", "utf8");
-        const postcssConfig = await fs.readFile("postcss.config.cjs", "utf8");
+        const tailwindConfig = await fs.readFile("tailwind.config.js", "utf8");
+        const postcssConfig = await fs.readFile("postcss.config.js", "utf8");
 
-        expect(tailwindConfig).toContain("@type {import('tailwindcss').Config}");
+        expect(tailwindConfig).toContain(
+          "@type {import('tailwindcss').Config}",
+        );
         expect(tailwindConfig).toContain("module.exports = {");
         expect(postcssConfig).toContain("module.exports = {");
         expect(postcssConfig).toContain("plugins:");
@@ -265,7 +292,7 @@ describe("Tailwind Generator", () => {
       await fs.writeFile(
         "package.json",
         '{"devDependencies":{"tailwindcss":"^3.0.0","postcss":"^8.0.0"}}',
-        "utf8"
+        "utf8",
       );
       // Create the src directory
       await fs.mkdir("src", { recursive: true });
@@ -273,7 +300,7 @@ describe("Tailwind Generator", () => {
       await fs.writeFile(
         "src/index.css",
         `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n/* custom */`,
-        "utf8"
+        "utf8",
       );
 
       const mockLogger = {
@@ -306,7 +333,7 @@ describe("Tailwind Generator", () => {
 
       // Verify that writeFile was not called for CSS entrypoint (since it should be skipped)
       const writeFileCalls = writeFileSpy.mock.calls.filter(
-        (call) => call[0] === "src/index.css"
+        (call) => call[0] === "src/index.css",
       );
       expect(writeFileCalls.length).toBe(0);
 
@@ -316,7 +343,7 @@ describe("Tailwind Generator", () => {
       // Also, the CSS content should remain unchanged
       const cssContent = await fs.readFile("src/index.css", "utf8");
       expect(cssContent).toBe(
-        `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n/* custom */`
+        `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n/* custom */`,
       );
 
       writeFileSpy.mockRestore();
@@ -393,11 +420,11 @@ describe("Tailwind Generator", () => {
 
       // Mock templates.render to return a simple string
       const renderSpy = vi.fn().mockReturnValue("");
-      // Mock detectPackageManager to return a value (though it shouldn't be called for installation in dry-run)
-      const detectPackageManagerMock = vi.spyOn(require("@dxgjs/fs"), "detectPackageManager");
-      detectPackageManagerMock.mockResolvedValue("npm");
-      // Mock execSync to ensure it's not called
-      const execSyncMock = vi.spyOn(require("child_process"), "execSync");
+      // detectPackageManager mock comes from the top-level vi.mock("@dxgjs/fs")
+      mockedDetectPackageManager.mockResolvedValue("npm");
+      // execSync comes from the top-level vi.mock("child_process") instance
+      const execSyncMock = vi.mocked(execSync);
+      execSyncMock.mockClear();
       // Mock fs.writeFile to ensure it's not called for files
       const writeFileSpy = vi.spyOn(fs, "writeFile");
 
@@ -423,7 +450,9 @@ describe("Tailwind Generator", () => {
       expect(writeFileSpy).not.toHaveBeenCalled();
 
       // Verify that the logger logged the dry-run message
-      expect(mockLogger.info).toHaveBeenCalledWith("[tailwind] Dry-run: Would install dependencies");
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        "[tailwind] Dry-run: Would install dependencies",
+      );
     });
   });
 });

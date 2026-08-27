@@ -1,35 +1,49 @@
 import { GeneratorContext, Generator } from "../../types";
 import { execSync } from "child_process";
 import { fileURLToPath } from "url";
-import { dirname, join } from "path";
+import { dirname, join, sep } from "path";
 import { detectPackageManager } from "@dxgjs/fs";
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Determine if we're in a bundled context (where __dirname points to dist/)
+// In bundled context, we need to adjust the path to point to generators/tailwind/templates/
+const isBundled = __dirname.endsWith(`${sep}dist`) || __dirname.endsWith("/dist");
+let templateBasePath;
+if (isBundled) {
+  // In bundle, templates are under generators/<generator-name>/templates/
+  templateBasePath = join(__dirname, "generators", "tailwind", "templates");
+} else {
+  // In source, templates are under the generator's directory
+  templateBasePath = join(__dirname, "templates");
+}
 // Template file paths
-const tailwindConfigTemplatePath = join(__dirname, "tailwind.config.tmpl");
-const postcssConfigTemplatePath = join(__dirname, "postcss.config.tmpl");
+const tailwindConfigTemplatePath = join(templateBasePath, "tailwind.config.tmpl");
+const postcssConfigTemplatePath = join(templateBasePath, "postcss.config.tmpl");
 
 // Prompt questions for the tailwind generator
 export const tailwindPrompts = [
   {
     type: "confirm" as const,
     name: "customiseTailwind",
-    message: "Do you want to customise Tailwind settings (content paths, theme, etc.)? [y/N]",
+    message:
+      "Do you want to customise Tailwind settings (content paths, theme, etc.)? [y/N]",
     default: false,
   },
   {
     type: "confirm" as const,
     name: "addPostcssPlugins",
-    message: "Do you want to add additional PostCSS plugins (e.g., for minification)? [y/N]",
+    message:
+      "Do you want to add additional PostCSS plugins (e.g., for minification)? [y/N]",
     default: false,
   },
   {
     type: "confirm" as const,
     name: "installAutoprefixer",
-    message: "Do you need to support legacy browsers (IE11, older Android)? [y/N]",
+    message:
+      "Do you need to support legacy browsers (IE11, older Android)? [y/N]",
     default: false,
   },
 ] satisfies {
@@ -55,7 +69,7 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
   const major = parseInt(nodeVersion.split(".")[0], 10);
   if (major < 18) {
     throw new Error(
-      `Node.js version ${nodeVersion} is not supported. Please use Node.js >= 18.`
+      `Node.js version ${nodeVersion} is not supported. Please use Node.js >= 18.`,
     );
   }
 
@@ -63,16 +77,17 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
   const packageJsonExists = await ctx.fs.pathExists("package.json");
   if (!packageJsonExists) {
     throw new Error(
-      "package.json not found. Please initialize your project (e.g., npm init) before running dxg add tailwind."
+      "package.json not found. Please initialize your project (e.g., npm init) before running dxg add tailwind.",
     );
   }
-
-  }
+}
 
 /**
  * Check if Tailwind CSS is already installed in package.json
  */
-export async function isTailwindInstalled(fs: GeneratorContext['fs']): Promise<boolean> {
+export async function isTailwindInstalled(
+  fs: GeneratorContext["fs"],
+): Promise<boolean> {
   try {
     const packageJsonExists = await fs.pathExists("package.json");
     if (!packageJsonExists) return false;
@@ -87,7 +102,6 @@ export async function isTailwindInstalled(fs: GeneratorContext['fs']): Promise<b
     return false;
   }
 }
-
 
 // Planning function
 export function planTailwind(answers: Record<string, unknown>) {
@@ -107,10 +121,18 @@ export function planTailwind(answers: Record<string, unknown>) {
   // Determine config files to create
   const configFiles = [];
   if (answers.customiseTailwind) {
-    configFiles.push({ path: "tailwind.config.cjs", templatePath: tailwindConfigTemplatePath, data });
+    configFiles.push({
+      path: "tailwind.config.js",
+      templatePath: tailwindConfigTemplatePath,
+      data,
+    });
   }
   if (answers.addPostcssPlugins) {
-    configFiles.push({ path: "postcss.config.cjs", templatePath: postcssConfigTemplatePath, data });
+    configFiles.push({
+      path: "postcss.config.js",
+      templatePath: postcssConfigTemplatePath,
+      data,
+    });
   }
 
   return { data, packages, configFiles };
@@ -121,10 +143,20 @@ export async function executeTailwind(
   answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planTailwind>,
-): Promise<{ created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] }> {
+): Promise<{
+  created: string[];
+  updated: string[];
+  skipped: string[];
+  conflicts: { path: string; existsAs: "file" | "directory" }[];
+}> {
   const { logger, fs } = ctx;
   const planToUse = plan ?? planTailwind(answers);
-  const result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = {
+  const result: {
+    created: string[];
+    updated: string[];
+    skipped: string[];
+    conflicts: { path: string; existsAs: "file" | "directory" }[];
+  } = {
     created: [],
     updated: [],
     skipped: [],
@@ -134,19 +166,24 @@ export async function executeTailwind(
   // Check if Tailwind is already installed
   const tailwindInstalled = await isTailwindInstalled(fs);
   if (tailwindInstalled) {
-    logger.info(" Tailwind CSS already detected. Skipping dependency installation.");
+    logger.info(
+      " Tailwind CSS already detected. Skipping dependency installation.",
+    );
   } else if (!ctx.dryRun) {
     // Install dependencies
     try {
       // Detect package manager
       const packageManager = await detectPackageManager(undefined);
-      const installCommand = getInstallCommand(packageManager, planToUse.packages);
+      const installCommand = getInstallCommand(
+        packageManager,
+        planToUse.packages,
+      );
       logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
       execSync(installCommand, { stdio: "inherit" });
     } catch (error) {
       throw new Error(
         `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error }
+        { cause: error },
       );
     }
   } else {
@@ -159,11 +196,13 @@ export async function executeTailwind(
     // Read the template file with utf8 encoding to get a string directly
     let template: string;
     try {
-      template = (await fs.readFile(templatePath, { encoding: "utf8" })) as string;
+      template = (await fs.readFile(templatePath, {
+        encoding: "utf8",
+      })) as string;
     } catch (error) {
       throw new Error(
         `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error }
+        { cause: error },
       );
     }
 
@@ -190,7 +229,12 @@ export async function executeTailwind(
   // Handle CSS entrypoint
   const cssEntrypoint = await determineCssEntrypoint(ctx);
   if (cssEntrypoint) {
-    const cssResult: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = await updateCssEntrypoint(fs, cssEntrypoint, ctx);
+    const cssResult: {
+      created: string[];
+      updated: string[];
+      skipped: string[];
+      conflicts: { path: string; existsAs: "file" | "directory" }[];
+    } = await updateCssEntrypoint(fs, cssEntrypoint, ctx);
     if (cssResult.created) result.created.push(...cssResult.created);
     if (cssResult.updated) result.updated.push(...cssResult.updated);
     if (cssResult.skipped) result.skipped.push(...cssResult.skipped);
@@ -231,21 +275,30 @@ export async function verifyTailwind(
       throw new Error(`CSS entrypoint not found: ${cssEntrypoint}`);
     }
 
-    const content = (await fs.readFile(cssEntrypoint, { encoding: "utf8" })) as string;
+    const content = (await fs.readFile(cssEntrypoint, {
+      encoding: "utf8",
+    })) as string;
     const hasTailwindDirectives =
       content.includes("@tailwind base;") &&
       content.includes("@tailwind components;") &&
       content.includes("@tailwind utilities;");
 
     if (!hasTailwindDirectives) {
-      throw new Error(`CSS entrypoint missing Tailwind directives: ${cssEntrypoint}`);
+      throw new Error(
+        `CSS entrypoint missing Tailwind directives: ${cssEntrypoint}`,
+      );
     }
   }
 }
 
 // Summarize function
 export function summarizeTailwind(
-  result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
+  result: {
+    created: string[];
+    updated: string[];
+    skipped: string[];
+    conflicts: { path: string; existsAs: "file" | "directory" }[];
+  },
   ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
@@ -261,7 +314,9 @@ export function summarizeTailwind(
     logger.info(`Unchanged: ${skipped.join(", ")}`);
   }
   if (conflicts.length) {
-    const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
+    const conflictDetails = conflicts
+      .map((c) => `${c.path} (${c.existsAs})`)
+      .join(", ");
     logger.warn(` Conflicts: ${conflictDetails}`);
   }
 
@@ -271,7 +326,10 @@ export function summarizeTailwind(
 /**
  * Get the install command for the detected package manager
  */
-function getInstallCommand(packageManager: "npm" | "pnpm" | "yarn" | "bun", packages: string[]): string {
+function getInstallCommand(
+  packageManager: "npm" | "pnpm" | "yarn" | "bun",
+  packages: string[],
+): string {
   const devFlag = "-D"; // Save as dev dependency
   switch (packageManager) {
     case "pnpm":
@@ -289,17 +347,23 @@ function getInstallCommand(packageManager: "npm" | "pnpm" | "yarn" | "bun", pack
 /**
  * Determine the CSS entrypoint based on project framework
  */
-async function determineCssEntrypoint(ctx: GeneratorContext): Promise<string | null> {
+async function determineCssEntrypoint(
+  ctx: GeneratorContext,
+): Promise<string | null> {
   // Framework detection based on dependencies and file structure
   const packageJsonExists = await ctx.fs.pathExists("package.json");
   if (!packageJsonExists) return null;
 
   let packageJsonContent: string;
   try {
-    const fileContent = await ctx.fs.readFile("package.json", { encoding: "utf8" });
+    const fileContent = await ctx.fs.readFile("package.json", {
+      encoding: "utf8",
+    });
     packageJsonContent = fileContent as string;
   } catch (error) {
-    ctx.logger.warn(`Could not read package.json for framework detection: ${error}`);
+    ctx.logger.warn(
+      `Could not read package.json for framework detection: ${error}`,
+    );
     return null;
   }
 
@@ -311,7 +375,14 @@ async function determineCssEntrypoint(ctx: GeneratorContext): Promise<string | n
     return null;
   }
 
-  const dependencies = { ...(packageJson && typeof packageJson.dependencies === 'object' ? packageJson.dependencies : {}), ...(packageJson && typeof packageJson.devDependencies === 'object' ? packageJson.devDependencies : {}) } as Record<string, unknown>;
+  const dependencies = {
+    ...(packageJson && typeof packageJson.dependencies === "object"
+      ? packageJson.dependencies
+      : {}),
+    ...(packageJson && typeof packageJson.devDependencies === "object"
+      ? packageJson.devDependencies
+      : {}),
+  } as Record<string, unknown>;
 
   // Check for Next.js
   if (dependencies.next) {
@@ -385,7 +456,7 @@ async function determineCssEntrypoint(ctx: GeneratorContext): Promise<string | n
     "src/main.css",
     "public/styles.css",
     "styles/globals.css",
-    "app/globals.css"
+    "app/globals.css",
   ];
 
   for (const path of commonCssPaths) {
@@ -402,11 +473,21 @@ async function determineCssEntrypoint(ctx: GeneratorContext): Promise<string | n
  * Update the CSS entrypoint to include Tailwind directives
  */
 async function updateCssEntrypoint(
-  fs: GeneratorContext['fs'],
+  fs: GeneratorContext["fs"],
   cssEntrypoint: string,
-  ctx: GeneratorContext
-): Promise<{ created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] }> {
-  const result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = {
+  ctx: GeneratorContext,
+): Promise<{
+  created: string[];
+  updated: string[];
+  skipped: string[];
+  conflicts: { path: string; existsAs: "file" | "directory" }[];
+}> {
+  const result: {
+    created: string[];
+    updated: string[];
+    skipped: string[];
+    conflicts: { path: string; existsAs: "file" | "directory" }[];
+  } = {
     created: [],
     updated: [],
     skipped: [],
@@ -425,7 +506,7 @@ async function updateCssEntrypoint(
         const dirStats = await fs.stat(dir);
         if (dirStats.isFile()) {
           // Parent path is occupied by a file
-          result.conflicts.push({ path: dir, existsAs: 'file' });
+          result.conflicts.push({ path: dir, existsAs: "file" });
           return result;
         }
       }
@@ -451,12 +532,14 @@ async function updateCssEntrypoint(
 
   if (isDirectory) {
     // Directory collision - expected path is occupied by a directory
-    result.conflicts.push({ path: cssEntrypoint, existsAs: 'directory' });
+    result.conflicts.push({ path: cssEntrypoint, existsAs: "directory" });
     return result;
   }
 
   // It's a file, check if it already contains the directives
-  const content = (await fs.readFile(cssEntrypoint, { encoding: "utf8" })) as string;
+  const content = (await fs.readFile(cssEntrypoint, {
+    encoding: "utf8",
+  })) as string;
   const hasBase = content.includes("@tailwind base;");
   const hasComponents = content.includes("@tailwind components;");
   const hasUtilities = content.includes("@tailwind utilities;");
@@ -469,7 +552,7 @@ async function updateCssEntrypoint(
   // File exists but doesn't have all directives - handle based on dryRun and force flags
   if (ctx.dryRun) {
     // In dry-run mode, report as conflict (would need user interaction or force to resolve)
-    result.conflicts.push({ path: cssEntrypoint, existsAs: 'file' });
+    result.conflicts.push({ path: cssEntrypoint, existsAs: "file" });
     return result;
   }
 
@@ -490,7 +573,7 @@ async function updateCssEntrypoint(
   }
 
   // Without force, treat as conflict
-  result.conflicts.push({ path: cssEntrypoint, existsAs: 'file' });
+  result.conflicts.push({ path: cssEntrypoint, existsAs: "file" });
   return result;
 }
 
