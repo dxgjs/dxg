@@ -34,8 +34,8 @@
     "@dxgjs/logger": "workspace:*",
     "@dxgjs/prompts": "workspace:*",
     "@dxgjs/templates": "workspace:*",
-    "@dxgjs/terminal": "workspace:*",
     "@dxgjs/workspace": "workspace:*",
+    "picocolors": "^1.1.1",
     "commander": "^15.0.0"
   },
   "devDependencies": {

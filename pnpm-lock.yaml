@@ -44,15 +44,15 @@ importers:
       '@dxgjs/templates':
         specifier: workspace:*
         version: link:../../packages/templates
-      '@dxgjs/terminal':
-        specifier: workspace:*
-        version: link:../../packages/terminal
       '@dxgjs/workspace':
         specifier: workspace:*
         version: link:../../packages/workspace
       commander:
         specifier: ^15.0.0
         version: 15.0.0
+      picocolors:
+        specifier: ^1.1.1
+        version: 1.1.1
     devDependencies:
       '@dxgjs/eslint-config':
         specifier: workspace:*
@@ -219,9 +219,6 @@ importers:
       '@clack/prompts':
         specifier: ^1.7.0
         version: 1.7.0
-      '@dxgjs/terminal':
-        specifier: workspace:*
-        version: link:../terminal
     devDependencies:
       '@dxgjs/eslint-config':
         specifier: workspace:*
@@ -250,34 +247,6 @@ importers:
       '@dxgjs/fs':
         specifier: workspace:*
         version: link:../fs
-    devDependencies:
-      '@dxgjs/eslint-config':
-        specifier: workspace:*
-        version: link:../../tooling/eslint-config
-      '@dxgjs/typescript-config':
-        specifier: workspace:*
-        version: link:../../tooling/typescript-config
-      '@types/node':
-        specifier: ^26.2.0
-        version: 26.2.0
-      eslint:
-        specifier: ^10.8.1
-        version: 10.8.1(supports-color@7.2.0)
-      tsup:
-        specifier: ^8.5.1
-        version: 8.5.1(postcss@8.5.26)(supports-color@7.2.0)(typescript@5.9.3)(yaml@2.9.0)
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.10
-        version: 4.1.11(@types/node@26.2.0)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.27.7)(yaml@2.9.0))
-
-  packages/terminal:
-    dependencies:
-      picocolors:
-        specifier: ^1.1.1
-        version: 1.1.1
     devDependencies:
       '@dxgjs/eslint-config':
         specifier: workspace:*

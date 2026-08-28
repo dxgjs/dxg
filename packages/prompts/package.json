@@ -21,8 +21,7 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "dependencies": {
-    "@clack/prompts": "^1.7.0",
-    "@dxgjs/terminal": "workspace:*"
+    "@clack/prompts": "^1.7.0"
   },
   "devDependencies": {
     "@dxgjs/eslint-config": "workspace:*",

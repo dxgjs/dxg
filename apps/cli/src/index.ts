@@ -27,7 +27,7 @@ import type { DXGConfig } from "@dxgjs/config";
 import { tailwindGenerator } from "@dxgjs/generators";
 import { databaseGenerator } from "@dxgjs/generators";
 import { render as templatesRender } from "@dxgjs/templates";
-import * as term from "@dxgjs/terminal";
+import pc from "picocolors";
 import { DXGError, formatDXGError } from "./errors";
 import pkg from "../package.json" with { type: "json" };
 
@@ -305,7 +305,7 @@ async function runUxDemo(options: { nonInteractive: boolean; quiet: boolean }) {
   }
 
   // Show DXG-branded intro
-  intro(term.bgCyan(term.black(`DXG UX Showcase CLI v${pkg.version}`)));
+  intro(pc.bgCyan(pc.black(`DXG UX Showcase CLI v${pkg.version}`)));
 
   // Step 1: Select database layer architecture
   const architectureChoice = await select({
@@ -401,8 +401,8 @@ async function runUxDemo(options: { nonInteractive: boolean; quiet: boolean }) {
 
   // Show branded success outro
   outro(
-    term.green(
-      `Success! Better Auth is now fully configured. Run ${term.bold("npx auth@latest generate")} to complete the setup.`,
+    pc.green(
+      `Success! Better Auth is now fully configured. Run ${pc.bold("npx auth@latest generate")} to complete the setup.`,
     ),
   );
 }
