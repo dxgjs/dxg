@@ -1,103 +1,123 @@
-import { describe, test, expect, beforeEach, afterEach } from "vitest";
-import { Logger } from "./src/index";
+import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
+import { Logger, LogLevel } from "./src/index";
 
-// Mock transport to capture log output
-class MockTransport {
-  writes: string[] = [];
-
-  write(message: string) {
-    this.writes.push(message);
-  }
-
-  clear() {
-    this.writes = [];
-  }
-}
-
-describe("Logger", () => {
-  let logger: Logger;
-  let mockTransport: MockTransport;
+describe("Logger (minimal contract)", () => {
+  let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    mockTransport = new MockTransport();
-    logger = new Logger({
-      minLevel: "info",
-      transports: [mockTransport],
-      formatter: (entry) => JSON.stringify(entry),
-    });
+    // Spy on process.stdout.write to capture output
+    stdoutWriteSpy = vi.spyOn(process.stdout, "write").mockImplementation();
   });
 
   afterEach(() => {
-    mockTransport.clear();
+    stdoutWriteSpy.mockRestore();
   });
 
-  test("should log info messages", () => {
-    logger.info("Test message");
-    expect(mockTransport.writes.length).toBe(1);
-    const logEntry = JSON.parse(mockTransport.writes[0]);
-    expect(logEntry.level).toBe("info");
-    expect(logEntry.message).toBe("Test message");
-    // Timestamp should be a valid ISO string
-    expect(new Date(logEntry.timestamp)).toBeInstanceOf(Date);
+  const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, '');
+
+  const getLastLog = (): string => {
+    const calls = stdoutWriteSpy.mock.calls;
+    return calls.length > 0 ? stripAnsi(calls[calls.length - 1][0]) : "";
+  };
+
+  const getAllLogs = (): string[] => {
+    return stdoutWriteSpy.mock.calls.map(call => stripAnsi(call[0]));
+  };
+
+  test("default minLevel = 'info' hides debug", () => {
+    const logger = new Logger();
+    logger.debug("debug message");
+    logger.info("info message");
+    logger.warn("warn message");
+    logger.error("error message");
+
+    expect(stdoutWriteSpy).toHaveBeenCalledTimes(3); // info, warn, error
+    const logs = getAllLogs();
+    expect(logs[logs.length - 1]).toContain("] ERROR ") && expect(logs[logs.length - 1]).toContain("error message");
   });
 
-  test("should respect log levels", () => {
-    logger.debug("Debug message");
-    logger.info("Info message");
-    logger.warn("Warn message");
+  test("minLevel = 'debug' shows all levels", () => {
+    const logger = new Logger({ minLevel: "debug" });
+    logger.debug("debug message");
+    logger.info("info message");
+    logger.warn("warn message");
+    logger.error("error message");
 
-    expect(mockTransport.writes.length).toBe(2); // info and warn only
-    const infoLog = JSON.parse(mockTransport.writes[0]);
-    const warnLog = JSON.parse(mockTransport.writes[1]);
-    expect(infoLog.level).toBe("info");
-    expect(warnLog.level).toBe("warn");
-    // Timestamps should be valid ISO strings
-    expect(new Date(infoLog.timestamp)).toBeInstanceOf(Date);
-    expect(new Date(warnLog.timestamp)).toBeInstanceOf(Date);
+    expect(stdoutWriteSpy).toHaveBeenCalledTimes(4);
+    const logs = getAllLogs();
+    expect(logs[0]).toContain("DEBUG");
+    expect(logs[1]).toContain("INFO");
+    expect(logs[2]).toContain("WARN");
+    expect(logs[3]).toContain("ERROR");
   });
 
-  test("should include context", () => {
-    // Create a new logger with context for this test
-    const testLogger = new Logger({
-      minLevel: "info",
-      transports: [mockTransport],
-      formatter: (entry) => JSON.stringify(entry),
-      context: { userId: "123", requestId: "abc" },
-    });
+  test("minLevel = 'warn' hides debug and info", () => {
+    const logger = new Logger({ minLevel: "warn" });
+    logger.debug("debug message");
+    logger.info("info message");
+    logger.warn("warn message");
+    logger.error("error message");
 
-    testLogger.info("Test message");
-    expect(mockTransport.writes.length).toBe(1);
-    const logEntry = JSON.parse(mockTransport.writes[0]);
-    expect(logEntry.level).toBe("info");
-    expect(logEntry.message).toBe("Test message");
-    expect(logEntry.userId).toBe("123");
-    expect(logEntry.requestId).toBe("abc");
-    // Timestamp should be a valid ISO string
-    expect(new Date(logEntry.timestamp)).toBeInstanceOf(Date);
+    expect(stdoutWriteSpy).toHaveBeenCalledTimes(2); // warn, error
+    const logs = getAllLogs();
+    expect(logs[0]).toContain("WARN");
+    expect(logs[1]).toContain("ERROR");
   });
 
-  test("should update context", () => {
-    logger.updateContext({ sessionId: "session123" });
-    logger.info("Test message");
+  test("minLevel = 'error' hides debug, info, warn", () => {
+    const logger = new Logger({ minLevel: "error" });
+    logger.debug("debug message");
+    logger.info("info message");
+    logger.warn("warn message");
+    logger.error("error message");
 
-    expect(mockTransport.writes.length).toBe(1);
-    const logEntry = JSON.parse(mockTransport.writes[0]);
-    expect(logEntry.level).toBe("info");
-    expect(logEntry.message).toBe("Test message");
-    expect(logEntry.sessionId).toBe("session123");
-    // Timestamp should be a valid ISO string
-    expect(new Date(logEntry.timestamp)).toBeInstanceOf(Date);
+    expect(stdoutWriteSpy).toHaveBeenCalledTimes(1); // error only
+    const lastLog = getLastLog();
+    expect(lastLog).toContain("] ERROR ") && expect(lastLog).toContain("error message");
   });
 
-  test("should set level dynamically", () => {
-    logger.setLevel("debug");
-    logger.debug("Debug message");
+  test("output format matches [timestamp] LEVEL message", () => {
+    const logger = new Logger({ minLevel: "info" });
+    logger.info("test message");
 
-    expect(mockTransport.writes.length).toBe(1);
-    const logEntry = JSON.parse(mockTransport.writes[0]);
-    expect(logEntry.level).toBe("debug");
-    expect(logEntry.message).toBe("Debug message");
-    // Timestamp should be a valid ISO string
-    expect(new Date(logEntry.timestamp)).toBeInstanceOf(Date);
+    expect(stdoutWriteSpy).toHaveBeenCalledTimes(1);
+    const output = getLastLog();
+    // Check format: [timestamp] LEVEL message\n
+    expect(output).toMatch(/^\[.+\] INFO test message\n$/);
+    // Check timestamp is ISO string
+    const timestampMatch = output.match(/\[(.+)\]/);
+    expect(timestampMatch).toBeTruthy();
+    expect(new Date(timestampMatch![1])).toBeInstanceOf(Date);
+    // Check level is uppercase
+    expect(output).toContain("] INFO ");
+    // Check message is preserved
+    expect(output).toContain("test message");
+    // Check newline at end
+    expect(output.endsWith("\n")).toBe(true);
+  });
+
+  test("ANSI colors applied correctly", () => {
+    const logger = new Logger({ minLevel: "info" }); // Show info and above
+
+    logger.info("info message");
+    logger.warn("warn message");
+    logger.error("error message");
+
+    const logs = stdoutWriteSpy.mock.calls.map(call => call[0]); // raw logs with ANSI
+
+    // Info should be green (\x1b[32m)
+    expect(logs[0]).toMatch(/\x1b\[32m\[.+\] INFO\x1b\[0m info message\n/);
+    // Warn should be yellow (\x1b[33m)
+    expect(logs[1]).toMatch(/\x1b\[33m\[.+\] WARN\x1b\[0m warn message\n/);
+    // Error should be red (\x1b[31m)
+    expect(logs[2]).toMatch(/\x1b\[31m\[.+\] ERROR\x1b\[0m error message\n/);
+  });
+
+  test("output uses process.stdout.write", () => {
+    const logger = new Logger();
+    logger.info("test");
+
+    expect(stdoutWriteSpy).toHaveBeenCalled();
+    // The spy is on process.stdout.write, so if it was called, output went to stdout
   });
 });
