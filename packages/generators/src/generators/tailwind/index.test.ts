@@ -4,10 +4,25 @@ import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("@dxgjs/fs", async (importOriginal) => {
   const original = await importOriginal();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mocked: any = { ...(original as any) };
+  const mocked: any = { ...(original as Record<string, any>) };
   mocked.detectPackageManager = vi.fn();
+  mocked.executeCommand = vi.fn().mockResolvedValue({
+    stdout: '',
+    stderr: '',
+    all: '',
+    failed: false,
+    timedOut: false,
+    isCanceled: false,
+    killed: false,
+    signal: undefined,
+    exitCode: 0,
+    pid: 0,
+    command: '',
+    args: [],
+  });
   return mocked;
 });
+
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
@@ -19,10 +34,14 @@ const mockedDetectPackageManager = detectPackageManager as ReturnType<
 >;
 import tailwindGenerator from "./index";
 
-// Mock child_process.execSync to prevent actual command execution
-vi.mock("child_process", () => ({
-  execSync: vi.fn(),
-}));
+// Mock child_process to prevent actual command execution
+vi.mock("child_process", async (importOriginal) => {
+  const original = await importOriginal();
+  return {
+    ...(original as Record<string, any>),
+    execSync: vi.fn(),
+  };
+});
 
 describe("Tailwind Generator", () => {
   let originalCwd: string;
@@ -420,8 +439,9 @@ describe("Tailwind Generator", () => {
 
       // Mock templates.render to return a simple string
       const renderSpy = vi.fn().mockReturnValue("");
+
       // detectPackageManager mock comes from the top-level vi.mock("@dxgjs/fs")
-      mockedDetectPackageManager.mockResolvedValue("npm");
+      mockedDetectPackageManager.mockResolvedValueOnce("npm");
       // execSync comes from the top-level vi.mock("child_process") instance
       const execSyncMock = vi.mocked(execSync);
       execSyncMock.mockClear();

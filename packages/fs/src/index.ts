@@ -9,6 +9,7 @@ import { rm, rmSync } from "./rm";
 import { copyFile, copyFileSync } from "./copyFile";
 import { appendFile, appendFileSync } from "./appendFile";
 import { detect, getUserAgent } from "package-manager-detector";
+import { execa, type Options } from "execa";
 
 export { readFile, readFileSync };
 export { writeFile, writeFileSync };
@@ -37,6 +38,22 @@ export function pathExistsSync(filePath: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Execute a command with the given arguments using execa.
+ * @param command - The command to execute (e.g., 'npm', 'pnpm', etc.)
+ * @param args - Arguments to pass to the command
+ * @param options - Optional execa options
+ * @returns Promise resolving to the execa result
+ * @throws ExecaError if the command fails
+ */
+export async function executeCommand(
+  command: string,
+  args: string[] = [],
+  options?: Options
+): Promise<ReturnType<typeof execa>> {
+  return execa(command, args, options);
 }
 
 /**

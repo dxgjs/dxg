@@ -1,24 +1,56 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
-
 // Mock @dxgjs/fs FIRST, before any imports that might use it
 vi.mock("@dxgjs/fs", async (importOriginal) => {
   const original = await importOriginal();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mocked: any = { ...(original as any) };
+  const mocked: any = { ...(original as Record<string, any>) };
   mocked.detectPackageManager = vi.fn();
+  mocked.executeCommand = vi.fn().mockResolvedValue({
+    stdout: '',
+    stderr: '',
+    all: '',
+    failed: false,
+    timedOut: false,
+    isCanceled: false,
+    killed: false,
+    signal: undefined,
+    exitCode: 0,
+    pid: 0,
+    command: '',
+    args: [],
+  });
   return mocked;
 });
-// Mock child_process.execSync to prevent actual command execution
-vi.mock("child_process", () => ({
-  execSync: vi.fn()
-}));
+
+// Mock @antfu/ni
+vi.mock("@antfu/ni", async (importOriginal) => {
+  const original = await importOriginal();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const mocked: any = { ...(original as Record<string, any>) };
+  mocked.parseNi = vi.fn();
+  mocked.getCliCommand = vi.fn();
+  return mocked;
+});
+
+// Mock child_process to prevent actual command execution
+vi.mock("child_process", async (importOriginal) => {
+  const original = await importOriginal();
+  return {
+    ...(original as Record<string, any>),
+    execSync: vi.fn(),
+  };
+});
 
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
 import { execSync } from "child_process";
+import { parseNi, getCliCommand } from "@antfu/ni";
+// Cast to mock types so we can use mockResolvedValueOnce
+const mockedParseNi = parseNi as ReturnType<typeof vi.fn>;
+const mockedGetCliCommand = getCliCommand as ReturnType<typeof vi.fn>;
 import { detectPackageManager } from "@dxgjs/fs";
 const mockedDetectPackageManager = detectPackageManager as ReturnType<typeof vi.fn>;
 import databaseGenerator from "./index";
@@ -111,10 +143,28 @@ describe("Database Generator", () => {
         warn: vi.fn(),
       } as unknown as Logger;
 
+      // Mock @antfu/ni functions
+      const mockRunner = vi.fn().mockImplementation((agent: string, args: string[], ctx: any) => {
+        if (!agent && !args && !ctx) {
+          return { command: "npm", args: [] };
+        }
+        if (agent === "npm" && args.includes("add") && args.includes("-D") && args.includes("prisma")) {
+          return { command: "npm", args: ["install", "-D", "prisma"] };
+        }
+        return { command: "npm", args: [...args] };
+      });
+      mockedParseNi.mockReturnValue(mockRunner);
+
+      mockedGetCliCommand.mockResolvedValueOnce({ command: "npm", args: ["install", "-D", "prisma"] });
+
+      // Spy on fs.executeCommand to see if package installation command is executed
+      const executeCommandSpy = vi.spyOn(fs, "executeCommand");
+      // We do not mock the implementation here, letting the mock from @dxgjs/fs handle it.
+
       // Spy on fs.readFile to see what paths are being read
-      let readFileSpy: ReturnType<typeof vi.spyOn> = vi.spyOn(fs, "readFile");
+      const readFileSpy = vi.spyOn(fs, "readFile");
       // Mock templates.render to replace placeholders
-      let renderSpy = vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+      const renderSpy = vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
         return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
           return (data[key] ?? '') as string;
         });
@@ -149,78 +199,108 @@ describe("Database Generator", () => {
         const templateUsed = renderCalls[0][0]; // first argument of first call
         expect(templateUsed).toContain("datasource db");
         expect(templateUsed).toContain("generator client");
+
+        // Verify that executeCommand was called for package installation
+        expect(executeCommandSpy).toHaveBeenCalled();
       } finally {
+        // Restore spies
         readFileSpy.mockRestore();
+        executeCommandSpy.mockRestore();
+        renderSpy.mockRestore();
       }
     });
   });
 
   test("databaseGenerator should run successfully", async () => {
-  // Create a package.json so that validation passes
-  await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+    // Create a package.json so that validation passes
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
 
-  const mockLogger = {
-    info: vi.fn(),
-    error: vi.fn(),
-    warn: vi.fn(),
-  } as unknown as Logger;
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+    } as unknown as Logger;
 
-  // Mock templates.render to replace placeholders
-  const renderSpy = vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
-    return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-      return (data[key] ?? '') as string;
+    // Mock templates.render to replace placeholders
+    const renderSpy = vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+      return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+        return (data[key] ?? '') as string;
+      });
     });
+
+    // Declare spies outside the try block so they can be restored in finally
+    let readFileSpy: ReturnType<typeof vi.spyOn>;
+    let executeCommandSpy: ReturnType<typeof vi.spyOn>;
+
+    // Mock @antfu/ni functions
+    const mockRunner = vi.fn().mockImplementation((agent: string, args: string[], ctx: any) => {
+      // Simulate the behavior of parseNi for npm project with no args
+      if (!agent && !args && !ctx) {
+        return { command: "npm", args: [] };
+      }
+      // For the actual command we're testing: ["add", "-D", "prisma"]
+      if (agent === "npm" && args.includes("add") && args.includes("-D") && args.includes("prisma")) {
+        return { command: "npm", args: ["install", "-D", "prisma"] };
+      }
+      return { command: "npm", args: [...args] };
+    });
+    mockedParseNi.mockReturnValue(mockRunner);
+
+    // Mock getCliCommand to return the resolved command
+    mockedGetCliCommand.mockResolvedValueOnce({ command: "npm", args: ["install", "-D", "prisma"] });
+
+    // We do not mock executeCommand here, letting the mock from @dxgjs/fs handle it.
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: renderSpy },
+    };
+
+    const answers = {
+      provider: "sqlite",
+    };
+
+    try {
+      console.log('About to run databaseGenerator');
+      // Spy on fs.readFile to see what paths are being read
+      readFileSpy = vi.spyOn(fs, "readFile");
+      // Spy on fs.executeCommand to see if package installation command is executed
+      executeCommandSpy = vi.spyOn(fs, "executeCommand");
+
+      await databaseGenerator.run(answers, context);
+
+      // Verify that the template files were read
+      expect(readFileSpy).toHaveBeenCalledWith(
+        expect.stringContaining("schema.prisma.tmpl"),
+        { encoding: "utf8" }
+      );
+
+      // Verify that the rendered content was written to the schema file
+      // Check the actual file created
+      const schemaContent = await fs.readFile("prisma/schema.prisma", { encoding: "utf8" });
+      expect(schemaContent).toContain('provider = "sqlite"');
+
+      // Verify that the template string passed to render was the one from the .tmpl file
+      const renderCall = renderSpy.mock.calls[0];
+      const templateUsed = renderCall[0]; // first argument of first call
+      expect(templateUsed).toContain("datasource db");
+      expect(templateUsed).toContain("provider = \"{{provider}}\"");
+
+      // Verify that executeCommand was called for package installation
+      expect(executeCommandSpy).toHaveBeenCalled();
+
+      // Verify that the logger was called for installing dependencies
+      expect(mockLogger.info).toHaveBeenCalledWith(
+        expect.stringContaining("Installing dependencies")
+      );
+    } finally {
+      // Restore spies
+      renderSpy.mockRestore();
+      readFileSpy.mockRestore();
+      executeCommandSpy.mockRestore();
+    }
   });
-
-  const context = {
-    logger: mockLogger,
-    fs: fs,
-    templates: { render: renderSpy },
-  };
-
-  const answers = {
-    provider: "sqlite",
-  };
-
-  try {
-    console.log('About to run databaseGenerator');
-    // Spy on fs.readFile to see what paths are being read
-    const readFileSpy = vi.spyOn(fs, "readFile");
-    // Initialize the execSync mock BEFORE running the generator
-    // (uses the top-level vi.mock("child_process") instance)
-    const execSyncMock = vi.mocked(execSync);
-
-    await databaseGenerator.run(answers, context);
-
-    // Verify that the template files were read
-    expect(readFileSpy).toHaveBeenCalledWith(
-      expect.stringContaining("schema.prisma.tmpl"),
-      { encoding: "utf8" }
-    );
-
-    // Verify that the rendered content was written to the schema file
-    // Check the actual file created
-    const schemaContent = await fs.readFile("prisma/schema.prisma", { encoding: "utf8" });
-    expect(schemaContent).toContain('provider = "sqlite"');
-
-    // Verify that the template string passed to render was the one from the .tmpl file
-    const renderCall = renderSpy.mock.calls[0];
-    const templateUsed = renderCall[0]; // first argument of first call
-    expect(templateUsed).toContain("datasource db");
-    expect(templateUsed).toContain("provider = \"{{provider}}\"");
-
-    // Verify that execSync was called for package installation
-    expect(execSyncMock).toHaveBeenCalled();
-
-    // Verify that the logger was called for installing dependencies
-    expect(mockLogger.info).toHaveBeenCalledWith(
-      expect.stringContaining("Installing dependencies")
-    );
-  } finally {
-    // Restore spies
-    renderSpy.mockRestore();
-  }
-});
 
   describe("Idempotence", () => {
     test("second run should not duplicate schema file", async () => {
@@ -346,42 +426,42 @@ describe("Database Generator", () => {
       expect(packageManager).toBe("npm");
       expect(detectPackageManager).toHaveBeenCalledWith(undefined);
     });
-  describe("Dry-run mode", () => {
-    test("does not install dependencies", async () => {
-      // Create a package.json so that validation passes
-      await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
-  
-      const mockLogger = {
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      } as unknown as Logger;
-  
-      // Mock detectPackageManager to return a value (though it shouldn't be called for installation in dry-run)
-      mockedDetectPackageManager.mockResolvedValue("npm");
-      // execSync comes from the top-level vi.mock("child_process") instance
-      const execSyncMock = vi.mocked(execSync);
-      execSyncMock.mockClear();
-  
-      const context = {
-        logger: mockLogger,
-        fs: fs,
-        templates: { render: vi.fn().mockReturnValue("") },
-        dryRun: true, // Set dryRun to true
-      };
-  
-      const answers = {
-        provider: "sqlite",
-      };
-  
-      await databaseGenerator.run(answers, context);
-  
-      // Verify that execSync was not called (dependency installation)
-      expect(execSyncMock).not.toHaveBeenCalled();
-  
-      // Verify that the logger logged the dry-run message
-      expect(mockLogger.info).toHaveBeenCalledWith("[database] Dry-run: Would install dependencies");
+    describe("Dry-run mode", () => {
+      test("does not install dependencies", async () => {
+        // Create a package.json so that validation passes
+        await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+
+        const mockLogger = {
+          info: vi.fn(),
+          error: vi.fn(),
+          warn: vi.fn(),
+        } as unknown as Logger;
+
+        // Mock detectPackageManager to return a value (though it shouldn't be called for installation in dry-run)
+        mockedDetectPackageManager.mockResolvedValueOnce("npm");
+        // execSync comes from the top-level vi.mock("child_process") instance
+        const execSyncMock = vi.mocked(execSync);
+        execSyncMock.mockClear();
+
+        const context = {
+          logger: mockLogger,
+          fs: fs,
+          templates: { render: vi.fn().mockReturnValue("") },
+          dryRun: true, // Set dryRun to true
+        };
+
+        const answers = {
+          provider: "sqlite",
+        };
+
+        await databaseGenerator.run(answers, context);
+
+        // Verify that execSync was not called (dependency installation)
+        expect(execSyncMock).not.toHaveBeenCalled();
+
+        // Verify that the logger logged the dry-run message
+        expect(mockLogger.info).toHaveBeenCalledWith("[database] Dry-run: Would install dependencies");
+      });
     });
-  });
   });
 });

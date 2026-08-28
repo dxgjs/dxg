@@ -1,8 +1,8 @@
 import { GeneratorContext, Generator } from "../../types";
-import { execSync } from "child_process";
 import { fileURLToPath } from "url";
 import { dirname, join, sep } from "path";
-import { detectPackageManager } from "@dxgjs/fs";
+import { executeCommand } from "@dxgjs/fs";
+import { parseNi, getCliCommand } from "@antfu/ni";
 
 
 // Get the directory where this module is located
@@ -183,13 +183,29 @@ export async function executeAuth(
     if (authInstalled) {
       logger.info(` ${provider} already detected. Skipping dependency installation.`);
     } else if (answers.installDependencies) {
-      // Install dependencies
+      // Install dependencies using @antfu/ni getCliCommand and executeCommand
       try {
-        // Detect package manager
-        const packageManager = await detectPackageManager(undefined);
-        const installCommand = getInstallCommand(packageManager, planToUse.packages, true); // true for devDependency
+        const resolved = await getCliCommand(
+          parseNi,
+          ["add", "-D", ...planToUse.packages],
+          {
+            cwd: process.cwd(),
+            programmatic: true,
+          }
+        );
+
+        if (!resolved) {
+          throw new Error("Failed to resolve package manager command for adding dependencies");
+        }
+
+        const { command: cmd, args, cwd: resolvedCwd } = resolved;
+        const executeCwd = resolvedCwd ?? process.cwd();
+
         logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
-        execSync(installCommand, { stdio: "inherit" });
+        await executeCommand(cmd, args, {
+          cwd: executeCwd,
+          stdio: "inherit"
+        });
       } catch (error) {
         throw new Error(
           `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
@@ -329,21 +345,6 @@ export function summarizeAuth(
   logger.info(` Auth generator completed successfully`);
 }
 
-// Get the install command for the detected package manager
-function getInstallCommand(packageManager: "npm" | "pnpm" | "yarn" | "bun", packages: string[], isDevDependency: boolean): string {
-  const devFlag = isDevDependency ? "-D" : ""; // Save as dev dependency
-  switch (packageManager) {
-    case "pnpm":
-      return `pnpm add ${devFlag} ${packages.join(" ")}`;
-    case "yarn":
-      return `yarn add ${devFlag} ${packages.join(" ")}`;
-    case "bun":
-      return `bun add ${devFlag} ${packages.join(" ")}`;
-    case "npm":
-    default:
-      return `npm install ${devFlag} ${packages.join(" ")}`;
-  }
-}
 
 /**
  * Auth generator – satisfies the Generator interface.

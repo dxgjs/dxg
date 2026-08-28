@@ -1,4 +1,5 @@
 import fg from "fast-glob";
+import type { Options } from "fast-glob";
 
 /**
  * Resolve glob pattern(s) to an array of absolute file paths.
@@ -8,16 +9,16 @@ import fg from "fast-glob";
  */
 export async function glob(
   pattern: string | string[],
-  options: { cwd?: string; dot?: boolean } = {}
+  options: Options = {}
 ): Promise<string[]> {
-  const { cwd = process.cwd(), dot = false } = options;
+  const { cwd = process.cwd(), dot = false, ...opts } = options;
   // Use fast-glob with absolute: true to get absolute paths
   const paths = await fg(pattern, {
     cwd,
     dot,
     onlyFiles: false, // we want directories too
     absolute: true,
-    // We don't want to ignore any files by default; the caller can filter
+    ...opts,
   });
   return paths;
 }
@@ -30,15 +31,16 @@ export async function glob(
  */
 export function globSync(
   pattern: string | string[],
-  options: { cwd?: string; dot?: boolean } = {}
+  options: Options = {}
 ): string[] {
-  const { cwd = process.cwd(), dot = false } = options;
+  const { cwd = process.cwd(), dot = false, ...opts } = options;
   // Use fast-glob with absolute: true to get absolute paths
   const paths = fg.sync(pattern, {
     cwd,
     dot,
     onlyFiles: false,
     absolute: true,
+    ...opts,
   });
   return paths;
 }
