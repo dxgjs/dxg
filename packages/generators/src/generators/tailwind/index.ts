@@ -662,10 +662,6 @@ export const tailwindGenerator: Generator = {
     // Plan
     const plan = planTailwind(answers);
 
-    // Use spinner for file creation operations
-    const s = spinner();
-    s.start("Setting up Tailwind CSS...");
-
     try {
       // Execute
       const execResult = await executeTailwind(answers, ctx, plan);
@@ -675,18 +671,12 @@ export const tailwindGenerator: Generator = {
         await verifyTailwind(answers, ctx, plan);
       }
 
-      // Stop spinner
-      s.stop();
-
       // Summarize using Clack UX
       summarizeTailwind(answers, execResult, ctx);
 
       // Outro
       outro(`Tailwind CSS setup completed!`);
     } catch (error) {
-      // Stop spinner on error
-      s.stop();
-
       // Handle cancellation
       if (isCancel(error)) {
         cancel("Operation cancelled");

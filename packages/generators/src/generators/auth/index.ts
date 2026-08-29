@@ -438,10 +438,6 @@ export const authGenerator: Generator = {
     // Plan
     const plan = planAuth(answers);
 
-    // Use spinner for file creation operations
-    const s = spinner();
-    s.start("Setting up authentication...");
-
     try {
       // Execute
       const execResult = await executeAuth(answers, ctx, plan);
@@ -451,18 +447,12 @@ export const authGenerator: Generator = {
         await verifyAuth(answers, ctx, plan);
       }
 
-      // Stop spinner
-      s.stop();
-
       // Summarize using Clack UX
       summarizeAuth(answers, execResult, ctx);
 
       // Outro
       outro(`Auth setup completed for ${answers.provider}!`);
     } catch (error) {
-      // Stop spinner on error
-      s.stop();
-
       // Handle cancellation
       if (isCancel(error)) {
         cancel("Operation cancelled");

@@ -158,6 +158,9 @@ importers:
       '@dxgjs/templates':
         specifier: workspace:*
         version: link:../templates
+      picocolors:
+        specifier: ^1.1.1
+        version: 1.1.1
     devDependencies:
       '@antfu/ni':
         specifier: ^30.5.0

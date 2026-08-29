@@ -16,6 +16,7 @@ import { fileURLToPath } from "url";
 import { dirname, join, sep } from "path";
 import { executeCommand } from "@dxgjs/fs";
 import { parseNi, getCliCommand } from "@antfu/ni";
+import pc from "picocolors";
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
@@ -23,7 +24,8 @@ const __dirname = dirname(__filename);
 
 // Determine if we're in a bundled context (where __dirname points to dist/)
 // In bundled context, we need to adjust the path to point to generators/database/templates/
-const isBundled = __dirname.endsWith(`${sep}dist`) || __dirname.endsWith("/dist");
+const isBundled =
+  __dirname.endsWith(`${sep}dist`) || __dirname.endsWith("/dist");
 let templateBasePath;
 if (isBundled) {
   // In bundle, templates are under generators/<generator-name>/templates/
@@ -44,21 +46,18 @@ export const providerData = {
     adapterImport: "PrismaBetterSqlite3",
     adapterClass: "PrismaBetterSqlite3",
     driverPackage: "better-sqlite3",
-    devDependencies: [
-      "prisma@7.10.0",
-      "@types/node",
-      "@types/better-sqlite3"
-    ],
+    devDependencies: ["prisma@7.10.0", "@types/node", "@types/better-sqlite3"],
     dependencies: [
       "@prisma/client@7.10.0",
       "@prisma/adapter-better-sqlite3",
       "better-sqlite3",
-      "dotenv"
+      "dotenv",
     ],
     templatePath: join(templateBasePath, "prisma-client-lib.ts.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    notes: "SQLite is a file-based database suited for development and prototyping."
+    notes:
+      "SQLite is a file-based database suited for development and prototyping.",
   },
   postgresql: {
     key: "postgresql",
@@ -69,21 +68,18 @@ export const providerData = {
     adapterImport: "PrismaPg",
     adapterClass: "PrismaPg",
     driverPackage: "pg",
-    devDependencies: [
-      "prisma@7.10.0",
-      "@types/node",
-      "@types/pg"
-    ],
+    devDependencies: ["prisma@7.10.0", "@types/node", "@types/pg"],
     dependencies: [
       "@prisma/client@7.10.0",
       "@prisma/adapter-pg",
       "pg",
-      "dotenv"
+      "dotenv",
     ],
     templatePath: join(templateBasePath, "prisma-client-lib.ts.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    notes: "PostgreSQL is a powerful, open source object-relational database system."
+    notes:
+      "PostgreSQL is a powerful, open source object-relational database system.",
   },
   mysql: {
     key: "mysql",
@@ -94,19 +90,17 @@ export const providerData = {
     adapterImport: "PrismaMariaDb",
     adapterClass: "PrismaMariaDb",
     driverPackage: "", // MariaDB adapter uses individual params, not a driver package
-    devDependencies: [
-      "prisma@7.10.0",
-      "@types/node"
-    ],
+    devDependencies: ["prisma@7.10.0", "@types/node"],
     dependencies: [
       "@prisma/client@7.10.0",
       "@prisma/adapter-mariadb",
-      "dotenv"
+      "dotenv",
     ],
     templatePath: join(templateBasePath, "prisma-client-lib-mysql.ts.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "individualParams", // Uses individual connection parameters
-    notes: "MySQL is a widely-used open source relational database management system."
+    notes:
+      "MySQL is a widely-used open source relational database management system.",
   },
   sqlserver: {
     key: "sqlserver",
@@ -117,20 +111,13 @@ export const providerData = {
     adapterImport: "PrismaMssql",
     adapterClass: "PrismaMssql",
     driverPackage: "", // MSSQL adapter uses individual params
-    devDependencies: [
-      "prisma@7.10.0",
-      "@types/node",
-      "@types/mssql"
-    ],
-    dependencies: [
-      "@prisma/client@7.10.0",
-      "@prisma/adapter-mssql",
-      "dotenv"
-    ],
+    devDependencies: ["prisma@7.10.0", "@types/node", "@types/mssql"],
+    dependencies: ["@prisma/client@7.10.0", "@prisma/adapter-mssql", "dotenv"],
     templatePath: join(templateBasePath, "prisma-client-lib-sqlserver.ts.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "individualParams", // Uses individual connection parameters
-    notes: "Microsoft SQL Server is a relational database management system developed by Microsoft."
+    notes:
+      "Microsoft SQL Server is a relational database management system developed by Microsoft.",
   },
   cockroachdb: {
     key: "cockroachdb",
@@ -141,21 +128,18 @@ export const providerData = {
     adapterImport: "PrismaPg",
     adapterClass: "PrismaPg",
     driverPackage: "pg",
-    devDependencies: [
-      "prisma@7.10.0",
-      "@types/node",
-      "@types/pg"
-    ],
+    devDependencies: ["prisma@7.10.0", "@types/node", "@types/pg"],
     dependencies: [
       "@prisma/client@7.10.0",
       "@prisma/adapter-pg",
       "pg",
-      "dotenv"
+      "dotenv",
     ],
     templatePath: join(templateBasePath, "prisma-client-lib.ts.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    notes: "CockroachDB is a distributed SQL database built on a transactional and strongly-consistent key-value store."
+    notes:
+      "CockroachDB is a distributed SQL database built on a transactional and strongly-consistent key-value store.",
   },
   planetscale: {
     key: "planetscale",
@@ -166,20 +150,21 @@ export const providerData = {
     adapterImport: "PrismaPlanetScale",
     adapterClass: "PrismaPlanetScale",
     driverPackage: "undici", // Required for fetch polyfill
-    devDependencies: [
-      "prisma@7.10.0",
-      "@types/node"
-    ],
+    devDependencies: ["prisma@7.10.0", "@types/node"],
     dependencies: [
       "@prisma/client@7.10.0",
       "@prisma/adapter-planetscale",
       "undici",
-      "dotenv"
+      "dotenv",
     ],
-    templatePath: join(templateBasePath, "prisma-client-lib-planetscale.ts.tmpl"),
+    templatePath: join(
+      templateBasePath,
+      "prisma-client-lib-planetscale.ts.tmpl",
+    ),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    notes: "PlanetScale is a serverless database platform built on Vitess. Requires relationMode = 'prisma' in schema.prisma for MySQL variant."
+    notes:
+      "PlanetScale is a serverless database platform built on Vitess. Requires relationMode = 'prisma' in schema.prisma for MySQL variant.",
   },
   prismapostgres: {
     key: "prismapostgres",
@@ -190,22 +175,19 @@ export const providerData = {
     adapterImport: "PrismaPg",
     adapterClass: "PrismaPg",
     driverPackage: "pg",
-    devDependencies: [
-      "prisma@7.10.0",
-      "@types/node",
-      "@types/pg"
-    ],
+    devDependencies: ["prisma@7.10.0", "@types/node", "@types/pg"],
     dependencies: [
       "@prisma/client@7.10.0",
       "@prisma/adapter-pg",
       "pg",
-      "dotenv"
+      "dotenv",
     ],
     templatePath: join(templateBasePath, "prisma-client-lib.ts.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    notes: "Prisma Postgres is a fully managed PostgreSQL-compatible database service."
-  }
+    notes:
+      "Prisma Postgres is a fully managed PostgreSQL-compatible database service.",
+  },
 };
 
 // Prompt questions for the database generator
@@ -215,9 +197,9 @@ export const databasePrompts = [
     name: "provider",
     message: "Choose your database provider:",
     default: "sqlite",
-    choices: Object.values(providerData).map(p => ({
+    choices: Object.values(providerData).map((p) => ({
       name: p.displayName,
-      value: p.key
+      value: p.key,
     })),
   },
 ] satisfies {
@@ -242,7 +224,7 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
   const packageJsonExists = await ctx.fs.pathExists("package.json");
   if (!packageJsonExists) {
     throw new Error(
-      "package.json not found. Please initialize your project (e.g., npm init) before running dxg add database."
+      "package.json not found. Please initialize your project (e.g., npm init) before running dxg add database.",
     );
   }
 
@@ -252,7 +234,9 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
 }
 
 // Check if prisma dependency is already installed in package.json
-export async function isPrismaInstalled(fs: GeneratorContext['fs']): Promise<boolean> {
+export async function isPrismaInstalled(
+  fs: GeneratorContext["fs"],
+): Promise<boolean> {
   try {
     const packageJsonExists = await fs.pathExists("package.json");
     if (!packageJsonExists) {
@@ -262,7 +246,8 @@ export async function isPrismaInstalled(fs: GeneratorContext['fs']): Promise<boo
     const pkg = JSON.parse(content as string);
 
     // Check for prisma package
-    const result = (pkg.devDependencies && pkg.devDependencies["prisma"]) ||
+    const result =
+      (pkg.devDependencies && pkg.devDependencies["prisma"]) ||
       (pkg.dependencies && pkg.dependencies["prisma"]);
     return !!result;
   } catch {
@@ -284,7 +269,7 @@ export function planDatabase(answers: Record<string, unknown>) {
     provider: provider.key,
     providerName: provider.displayName,
     year: new Date().getFullYear(),
-    ...provider // Spread provider data for template use
+    ...provider, // Spread provider data for template use
   };
 
   // Determine which template conditional to use
@@ -310,7 +295,7 @@ export function planDatabase(answers: Record<string, unknown>) {
     connectionString,
     individualParams,
     sqlserverParams,
-    planetscaleMysqlParams
+    planetscaleMysqlParams,
   });
 
   // Determine packages to install - separate dev and regular dependencies
@@ -322,8 +307,8 @@ export function planDatabase(answers: Record<string, unknown>) {
     {
       path: provider.templateOutputPath,
       templatePath: provider.templatePath,
-      data
-    }
+      data,
+    },
   ];
 
   return {
@@ -332,7 +317,7 @@ export function planDatabase(answers: Record<string, unknown>) {
     providerName: provider.displayName,
     devPackages,
     regularPackages,
-    filesToCreate
+    filesToCreate,
   };
 }
 
@@ -341,10 +326,20 @@ export async function executeDatabase(
   answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planDatabase>,
-): Promise<{ created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] }> {
+): Promise<{
+  created: string[];
+  updated: string[];
+  skipped: string[];
+  conflicts: { path: string; existsAs: "file" | "directory" }[];
+}> {
   const { fs } = ctx;
   const planToUse = plan ?? planDatabase(answers);
-  const result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = {
+  const result: {
+    created: string[];
+    updated: string[];
+    skipped: string[];
+    conflicts: { path: string; existsAs: "file" | "directory" }[];
+  } = {
     created: [],
     updated: [],
     skipped: [],
@@ -361,27 +356,33 @@ export async function executeDatabase(
           {
             cwd: process.cwd(),
             programmatic: true,
-          }
+          },
         );
 
         if (!resolved) {
-          throw new Error("Failed to resolve package manager command for adding dev dependencies");
+          throw new Error(
+            "Failed to resolve package manager command for adding dev dependencies",
+          );
         }
 
         const { command: cmd, args, cwd: resolvedCwd } = resolved;
         const executeCwd = resolvedCwd ?? process.cwd();
 
         const s = spinner();
-        s.start(`Installing dev dependencies: ${planToUse.devPackages.join(", ")}`);
+        s.start(
+          `Installing dev dependencies: ${planToUse.devPackages.join(", ")}`,
+        );
         await executeCommand(cmd, args, {
           cwd: executeCwd,
-          stdio: "inherit"
+          stdio: "inherit",
         });
-        s.stop(`Successfully installed dev dependencies: ${planToUse.devPackages.join(", ")}`);
+        s.stop(
+          `Successfully installed dev dependencies: ${planToUse.devPackages.join(", ")}`,
+        );
       } catch (error) {
         throw new Error(
           `Failed to install dev dependencies: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error }
+          { cause: error },
         );
       }
     }
@@ -402,27 +403,33 @@ export async function executeDatabase(
           {
             cwd: process.cwd(),
             programmatic: true,
-          }
+          },
         );
 
         if (!resolved) {
-          throw new Error("Failed to resolve package manager command for adding dependencies");
+          throw new Error(
+            "Failed to resolve package manager command for adding dependencies",
+          );
         }
 
         const { command: cmd, args, cwd: resolvedCwd } = resolved;
         const executeCwd = resolvedCwd ?? process.cwd();
 
         const s = spinner();
-        s.start(`Installing dependencies: ${planToUse.regularPackages.join(", ")}`);
+        s.start(
+          `Installing dependencies: ${planToUse.regularPackages.join(", ")}`,
+        );
         await executeCommand(cmd, args, {
           cwd: executeCwd,
-          stdio: "inherit"
+          stdio: "inherit",
         });
-        s.stop(`Successfully installed dependencies: ${planToUse.regularPackages.join(", ")}`);
+        s.stop(
+          `Successfully installed dependencies: ${planToUse.regularPackages.join(", ")}`,
+        );
       } catch (error) {
         throw new Error(
           `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error }
+          { cause: error },
         );
       }
     }
@@ -437,42 +444,62 @@ export async function executeDatabase(
   if (!ctx.dryRun) {
     try {
       const s = spinner();
-      const providerObj = providerData[planToUse.provider as keyof typeof providerData];
-      s.start(`Initializing Prisma with provider ${providerObj.prismaProvider}...`);
+      const providerObj =
+        providerData[planToUse.provider as keyof typeof providerData];
+      s.start(
+        `Initializing Prisma with provider ${providerObj.prismaProvider}...`,
+      );
 
       // Use the existing command execution infrastructure
       const prismaResolved = await getCliCommand(
         parseNi,
-        ["dlx", "prisma", "init", "--datasource-provider", providerObj.prismaProvider, "--output", "./prisma"],
+        [
+          "dlx",
+          "prisma",
+          "init",
+          "--datasource-provider",
+          providerObj.prismaProvider,
+          "--output",
+          "./prisma",
+        ],
         {
           cwd: process.cwd(),
           programmatic: true,
-        }
+        },
       );
 
       if (!prismaResolved) {
         throw new Error("Failed to resolve prisma command");
       }
 
-      const { command: prismaCmd, args: prismaArgs, cwd: prismaResolvedCwd } = prismaResolved;
+      const {
+        command: prismaCmd,
+        args: prismaArgs,
+        cwd: prismaResolvedCwd,
+      } = prismaResolved;
       const prismaExecuteCwd = prismaResolvedCwd ?? process.cwd();
 
       await executeCommand(prismaCmd, prismaArgs, {
         cwd: prismaExecuteCwd,
-        stdio: "inherit"
+        stdio: "inherit",
       });
 
-      s.stop(`Prisma initialized successfully with provider ${providerObj.prismaProvider}`);
+      s.stop(
+        `Prisma initialized successfully with provider ${providerObj.prismaProvider}`,
+      );
     } catch (error) {
       throw new Error(
         `Failed to initialize Prisma: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error }
+        { cause: error },
       );
     }
   } else {
     // In dry-run mode, report what would happen
-    const providerObj = providerData[planToUse.provider as keyof typeof providerData];
-    note(`[database] Dry-run: Would run: prisma init --datasource-provider ${providerObj.prismaProvider} --output ./prisma`);
+    const providerObj =
+      providerData[planToUse.provider as keyof typeof providerData];
+    note(
+      `[database] Dry-run: Would run: prisma init --datasource-provider ${providerObj.prismaProvider} --output ./prisma`,
+    );
     note(`[database] Dry-run: Would create/update:`);
     note(`[database]   - prisma/schema.prisma`);
     note(`[database]   - prisma.config.ts`);
@@ -484,11 +511,13 @@ export async function executeDatabase(
     // Read the template file with utf8 encoding to get a string directly
     let template: string;
     try {
-      template = (await fs.readFile(templatePath, { encoding: "utf8" })) as string;
+      template = (await fs.readFile(templatePath, {
+        encoding: "utf8",
+      })) as string;
     } catch (error) {
       throw new Error(
         `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error }
+        { cause: error },
       );
     }
 
@@ -502,7 +531,7 @@ export async function executeDatabase(
 
       if (isDirectory) {
         // Directory collision - expected path is occupied by a directory
-        result.conflicts.push({ path, existsAs: 'directory' });
+        result.conflicts.push({ path, existsAs: "directory" });
         continue;
       }
 
@@ -516,7 +545,7 @@ export async function executeDatabase(
       // File exists with different content - handle based on dryRun and force flags
       if (ctx.dryRun) {
         // In dry-run mode, report as conflict (would need user interaction or force to resolve)
-        result.conflicts.push({ path, existsAs: 'file' });
+        result.conflicts.push({ path, existsAs: "file" });
         continue;
       }
 
@@ -528,7 +557,7 @@ export async function executeDatabase(
       }
 
       // Without force, treat as conflict
-      result.conflicts.push({ path, existsAs: 'file' });
+      result.conflicts.push({ path, existsAs: "file" });
       continue;
     } else {
       // Path doesn't exist, check if parent directory would be a file collision
@@ -539,7 +568,7 @@ export async function executeDatabase(
           const dirStats = await fs.stat(dir);
           if (dirStats.isFile()) {
             // Parent path is occupied by a file
-            result.conflicts.push({ path: dir, existsAs: 'file' });
+            result.conflicts.push({ path: dir, existsAs: "file" });
             continue;
           }
         }
@@ -570,32 +599,38 @@ export async function executeDatabase(
         {
           cwd: process.cwd(),
           programmatic: true,
-        }
+        },
       );
 
       if (!generateResolved) {
         throw new Error("Failed to resolve prisma generate command");
       }
 
-      const { command: generateCmd, args: generateArgs, cwd: generateResolvedCwd } = generateResolved;
+      const {
+        command: generateCmd,
+        args: generateArgs,
+        cwd: generateResolvedCwd,
+      } = generateResolved;
       const generateExecuteCwd = generateResolvedCwd ?? process.cwd();
 
       await executeCommand(generateCmd, generateArgs, {
         cwd: generateExecuteCwd,
-        stdio: "inherit"
+        stdio: "inherit",
       });
 
       s.stop(`Prisma Client generated successfully`);
     } catch (error) {
       throw new Error(
         `Failed to generate Prisma Client: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error }
+        { cause: error },
       );
     }
   } else {
     // In dry-run mode, report what would happen
     note("[database] Dry-run: Would run: prisma generate");
-    note("[database] Dry-run: Would generate Prisma Client in ./prisma/client/");
+    note(
+      "[database] Dry-run: Would generate Prisma Client in ./prisma/client/",
+    );
   }
 
   return result;
@@ -625,7 +660,12 @@ export async function verifyDatabase(
 // Summarize function using Clack UX (replaces logger-based summarization)
 export function summarizeDatabase(
   answers: Record<string, unknown>,
-  result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
+  result: {
+    created: string[];
+    updated: string[];
+    skipped: string[];
+    conflicts: { path: string; existsAs: "file" | "directory" }[];
+  },
   ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
@@ -640,14 +680,19 @@ export function summarizeDatabase(
     note(`Unchanged: ${skipped.join(", ")}`);
   }
   if (conflicts.length) {
-    const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
+    const conflictDetails = conflicts
+      .map((c) => `${c.path} (${c.existsAs})`)
+      .join(", ");
     note(`Conflicts: ${conflictDetails}`);
   }
 
-  logger.debug(`Database generator completed successfully (provider: ${answers.provider})`);
-  note(`Database generator completed successfully (provider: ${answers.provider})`);
+  logger.debug(
+    `Database generator completed successfully (provider: ${answers.provider})`,
+  );
+  note(
+    `Database generator completed successfully (provider: ${answers.provider})`,
+  );
 }
-
 
 /**
  * Database generator – satisfies the Generator interface.
@@ -661,7 +706,7 @@ export const databaseGenerator: Generator = {
     const ctx = context;
 
     // Intro
-    intro("DXG Database Setup");
+    intro(pc.bgCyan(pc.black(" DXG Database Setup ")));
 
     // Collect inputs - use CLI/provided answers, fallback to interactive prompts
     let answers = { ...cliAnswers };
@@ -682,7 +727,9 @@ export const databaseGenerator: Generator = {
 
       let promptAnswers: Record<string, unknown>;
       try {
-        promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+        promptAnswers = await prompt(
+          promptQuestions as Parameters<typeof prompt>[0],
+        );
       } catch (error) {
         // Handle cancellation during interactive input collection
         if (isCancel(error)) {
@@ -695,7 +742,9 @@ export const databaseGenerator: Generator = {
       // In non-interactive mode, throw error for missing required values
       const missing = [];
       if (needsProvider) missing.push("provider");
-      throw new Error(`Missing required values in non-interactive mode: ${missing.join(", ")}`);
+      throw new Error(
+        `Missing required values in non-interactive mode: ${missing.join(", ")}`,
+      );
     }
 
     // Validate preconditions
@@ -711,10 +760,6 @@ export const databaseGenerator: Generator = {
     // Plan
     const plan = planDatabase(answers);
 
-    // Use spinner for file creation operations
-    const s = spinner();
-    s.start("Setting up database...");
-
     try {
       // Execute
       const execResult = await executeDatabase(answers, ctx, plan);
@@ -724,18 +769,12 @@ export const databaseGenerator: Generator = {
         await verifyDatabase(answers, ctx, plan);
       }
 
-      // Stop spinner
-      s.stop();
-
       // Summarize using Clack UX
       summarizeDatabase(answers, execResult, ctx);
 
       // Outro
       outro(`Database setup completed for ${answers.provider}!`);
     } catch (error) {
-      // Stop spinner on error
-      s.stop();
-
       // Handle cancellation
       if (isCancel(error)) {
         cancel("Operation cancelled");

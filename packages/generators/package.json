@@ -24,7 +24,8 @@
     "@dxgjs/fs": "workspace:*",
     "@dxgjs/logger": "workspace:*",
     "@dxgjs/prompts": "workspace:*",
-    "@dxgjs/templates": "workspace:*"
+    "@dxgjs/templates": "workspace:*",
+    "picocolors": "^1.1.1"
   },
   "devDependencies": {
     "@antfu/ni": "^30.5.0",
