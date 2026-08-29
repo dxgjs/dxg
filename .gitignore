@@ -33,6 +33,3 @@ logs
 
 # TypeScript build info
 *.tsbuildinfo
-
-# Playground
-playground/

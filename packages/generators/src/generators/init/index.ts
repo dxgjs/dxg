@@ -256,7 +256,16 @@ export const initGenerator: Generator = {
         promptQuestions.push(initPrompts[1]); // description prompt
       }
 
-      const promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      let promptAnswers: Record<string, unknown>;
+      try {
+        promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      } catch (error) {
+        // Handle cancellation during interactive input collection
+        if (isCancel(error)) {
+          cancel("Operation cancelled");
+        }
+        throw error;
+      }
       answers = { ...answers, ...promptAnswers };
     } else if ((needsName || needsDescription) && !shouldPrompt) {
       // In non-interactive mode, throw error for missing required values

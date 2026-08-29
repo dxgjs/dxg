@@ -194,6 +194,7 @@ export async function executeAuth(
     const authInstalled = await isAuthInstalled(fs, provider);
     if (authInstalled) {
           note(`${provider} already detected. Skipping dependency installation.`);
+          logger.debug(`[auth] ${provider} already detected. Skipping dependency installation.`);
     } else if (answers.installDependencies) {
       // Install dependencies using @antfu/ni getCliCommand and executeCommand
       try {
@@ -231,7 +232,7 @@ export async function executeAuth(
     // In dry-run mode, just check if installation would be needed
     const authInstalled = await isAuthInstalled(fs, provider);
     if (!authInstalled && answers.installDependencies) {
-          note("[auth] Dry-run: Would install dependencies");
+          logger.debug("[auth] Dry-run: Would install dependencies");
     }
   }
 
@@ -404,7 +405,16 @@ export const authGenerator: Generator = {
         promptQuestions.push(authPrompts[2]); // generateExampleConfig prompt
       }
 
-      const promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      let promptAnswers: Record<string, unknown>;
+      try {
+        promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      } catch (error) {
+        // Handle cancellation during interactive input collection
+        if (isCancel(error)) {
+          cancel("Operation cancelled");
+        }
+        throw error;
+      }
       answers = { ...answers, ...promptAnswers };
     } else if ((needsProvider || needsInstallDependencies || needsGenerateExampleConfig) && !shouldPrompt) {
       // In non-interactive mode, throw error for missing required values

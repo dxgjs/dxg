@@ -1,4 +1,4 @@
-import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 // We need to mock the modules before importing the databaseGenerator
 vi.mock("@dxgjs/prompts", async () => {
@@ -23,7 +23,7 @@ vi.mock("@dxgjs/prompts", async () => {
 });
 
 vi.mock("@dxgjs/fs", async () => {
-  const actual = await vi.importActual("@dxgjs/fs");
+  const actual = await vi.importActual<typeof import("@dxgjs/fs")>("@dxgjs/fs");
   const _mock = {
     ...actual,
     _files: new Map<string, string>(),
@@ -134,6 +134,9 @@ import * as path from "path";
 import * as os from "os";
 import databaseGenerator from "./index";
 
+// Direct access to the @dxgjs/fs mock storage (see the vi.mock factory above)
+const fsMockStore = fs as unknown as { _files: Map<string, string>; _directories: Set<string> };
+
 describe("Database Generator", () => {
   let originalCwd: string;
   let tempDir: string;
@@ -148,6 +151,10 @@ describe("Database Generator", () => {
     fs.mkdirSync(tempDir, { recursive: true });
     // Change to the temporary directory
     process.chdir(tempDir);
+    // Reset mock storage and call history between tests
+    vi.clearAllMocks();
+    fsMockStore._files.clear();
+    fsMockStore._directories.clear();
   });
 
   afterEach(() => {
@@ -302,10 +309,11 @@ describe("Database Generator", () => {
   });
 
   test("databaseGenerator should handle force mode", async () => {
-    // Mock that files already exist
-    vi.mocked(fs).pathExists.mockResolvedValue(true);
-    vi.mocked(fs).stat.mockResolvedValue({ isDirectory: () => false });
-    vi.mocked(fs).readFile.mockResolvedValue("existing content"); // Different from template
+    // Create a package.json (precondition) and an existing schema file with
+    // different content (conflict)
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+    await fs.mkdir("prisma", { recursive: true });
+    await fs.writeFile("prisma/schema.prisma", "existing content", { encoding: "utf8" });
 
     const mockLogger = {
       info: vi.fn(),
@@ -345,7 +353,7 @@ describe("Database Generator", () => {
 
   test("databaseGenerator should handle interactive prompts when CLI answers are incomplete", async () => {
     // Override the prompt mock for this specific test
-    (prompts.prompt as vi.Mock).mockResolvedValueOnce({ provider: "postgresql" });
+    (prompts.prompt as Mock).mockResolvedValueOnce({ provider: "postgresql" });
 
     // Create a package.json so that validation passes
     await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
@@ -387,7 +395,9 @@ describe("Database Generator", () => {
 
   test("databaseGenerator should handle cancellation", async () => {
     // Override the prompt mock to simulate cancellation for this test
-    (prompts.prompt as vi.Mock).mockRejectedValueOnce(new Error("Canceled"));
+    (prompts.prompt as Mock).mockRejectedValueOnce(new Error("Canceled"));
+    // And recognize the rejection as a Clack cancellation
+    (prompts.isCancel as unknown as Mock).mockReturnValueOnce(true);
 
     // Create a package.json so that validation passes
     await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });

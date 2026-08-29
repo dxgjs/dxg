@@ -178,6 +178,7 @@ export async function executeTailwind(
   const tailwindInstalled = await isTailwindInstalled(fs);
   if (tailwindInstalled) {
         note("Tailwind CSS already detected. Skipping dependency installation.");
+        logger.debug("[tailwind] Tailwind CSS already detected. Skipping dependency installation.");
   } else if (!ctx.dryRun) {
     // Install dependencies using @antfu/ni getCliCommand and executeCommand
     try {
@@ -344,8 +345,14 @@ export function summarizeTailwind(
     note(`Conflicts: ${conflictDetails}`);
   }
 
-  logger.debug(`Tailwind CSS setup completed (${created.length + updated.length + skipped.length + conflicts.length} files processed)`);
-  note(`Tailwind CSS setup completed (${created.length + updated.length + skipped.length + conflicts.length} files processed)`);
+  const customizations = [];
+  if (answers.customiseTailwind) customizations.push("customized");
+  if (answers.addPostcssPlugins) customizations.push("with PostCSS plugins");
+  if (answers.installAutoprefixer) customizations.push("with autoprefixer");
+  const customizationDesc = customizations.length > 0 ? ` (${customizations.join(", ")})` : "";
+
+  logger.debug(`Tailwind CSS setup completed${customizationDesc} (${created.length + updated.length + skipped.length + conflicts.length} files processed)`);
+  note(`Tailwind CSS setup completed${customizationDesc} (${created.length + updated.length + skipped.length + conflicts.length} files processed)`);
 }
 
 /**
@@ -622,7 +629,16 @@ export const tailwindGenerator: Generator = {
         promptQuestions.push(tailwindPrompts[2]); // installAutoprefixer prompt
       }
 
-      const promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      let promptAnswers: Record<string, unknown>;
+      try {
+        promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      } catch (error) {
+        // Handle cancellation during interactive input collection
+        if (isCancel(error)) {
+          cancel("Operation cancelled");
+        }
+        throw error;
+      }
       answers = { ...answers, ...promptAnswers };
     } else if ((needsCustomiseTailwind || needsAddPostcssPlugins || needsInstallAutoprefixer) && !shouldPrompt) {
       // In non-interactive mode, throw error for missing required values

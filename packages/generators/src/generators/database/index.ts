@@ -153,6 +153,7 @@ export async function executeDatabase(
   const prismaInstalled = await isPrismaInstalled(fs);
   if (prismaInstalled) {
         note("Prisma already detected. Skipping dependency installation.");
+        logger.debug("[database] Prisma already detected. Skipping dependency installation.");
   } else if (!ctx.dryRun) {
         // Install dependencies using @antfu/ni getCliCommand and executeCommand
     try {
@@ -347,7 +348,16 @@ export const databaseGenerator: Generator = {
         promptQuestions.push(databasePrompts[0]); // provider prompt
       }
 
-      const promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      let promptAnswers: Record<string, unknown>;
+      try {
+        promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      } catch (error) {
+        // Handle cancellation during interactive input collection
+        if (isCancel(error)) {
+          cancel("Operation cancelled");
+        }
+        throw error;
+      }
       answers = { ...answers, ...promptAnswers };
     } else if (needsProvider && !shouldPrompt) {
       // In non-interactive mode, throw error for missing required values

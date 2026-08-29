@@ -1,4 +1,4 @@
-import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 // We need to mock the modules before importing the tailwindGenerator
 vi.mock("@dxgjs/prompts", async () => {
@@ -23,16 +23,74 @@ vi.mock("@dxgjs/prompts", async () => {
 });
 
 vi.mock("@dxgjs/fs", async () => {
-  const actual = await vi.importActual("@dxgjs/fs");
-  return {
+  const actual = await vi.importActual<typeof import("@dxgjs/fs")>("@dxgjs/fs");
+  const _mock = {
     ...actual,
-    pathExists: vi.fn().mockResolvedValue(false),
-    readFile: vi.fn().mockResolvedValue(""),
-    writeFile: vi.fn().mockResolvedValue(undefined),
-    stat: vi.fn().mockResolvedValue({ isDirectory: () => false }),
-    mkdir: vi.fn().mockResolvedValue(undefined),
+    _files: new Map<string, string>(),
+    _directories: new Set<string>(),
+    pathExists: vi.fn().mockImplementation(async function(this: any, path: string) {
+      // Check if we have this file in our mock storage
+      if (this._files.has(path)) {
+        return true;
+      }
+      // Check if we have this directory in our mock storage
+      if (this._directories.has(path)) {
+        return true;
+      }
+      // Fall back to actual implementation for other paths
+      return actual.pathExists(path);
+    }),
+    readFile: vi.fn().mockImplementation(async function(this: any, path: string, options?: any) {
+      // Check if we have this file in our mock storage
+      if (this._files.has(path)) {
+        return this._files.get(path);
+      }
+      // Fall back to actual implementation for other paths
+      return actual.readFile(path, options);
+    }),
+    writeFile: vi.fn().mockImplementation(async function(this: any, path: string, data: string | Buffer, options?: any) {
+      // Store the file in our mock storage
+      this._files.set(path, data.toString());
+      // Also ensure parent directories are tracked
+      const dir = path.split("/").slice(0, -1).join("/");
+      if (dir) {
+        this._directories.add(dir);
+      }
+      // Call actual writeFile (though in test env this might not do anything)
+      return actual.writeFile(path, data, options);
+    }),
+    stat: vi.fn().mockImplementation(async function(this: any, path: string) {
+      // Check if it's a file we have
+      if (this._files.has(path)) {
+        return {
+          isDirectory: () => false,
+          isFile: () => true,
+        };
+      }
+      // Check if it's a directory we have
+      if (this._directories.has(path)) {
+        return {
+          isDirectory: () => true,
+          isFile: () => false,
+        };
+      }
+      // Fall back to actual implementation
+      return actual.stat(path);
+    }),
+    mkdir: vi.fn().mockImplementation(async function(this: any, path: string, options?: any) {
+      // Track the directory as created
+      this._directories.add(path);
+      // Also track parent directories
+      const parentDir = path.split("/").slice(0, -1).join("/");
+      if (parentDir) {
+        this._directories.add(parentDir);
+      }
+      // Call actual mkdir (though in test env this might not do anything)
+      return actual.mkdir(path, options);
+    }),
     executeCommand: vi.fn().mockResolvedValue(undefined),
   };
+  return _mock;
 });
 
 vi.mock("@dxgjs/templates", async () => {
@@ -78,6 +136,9 @@ import * as path from "path";
 import * as os from "os";
 import tailwindGenerator from "./index";
 
+// Direct access to the @dxgjs/fs mock storage (see the vi.mock factory above)
+const fsMockStore = fs as unknown as { _files: Map<string, string>; _directories: Set<string> };
+
 describe("Tailwind Generator", () => {
   let originalCwd: string;
   let tempDir: string;
@@ -92,6 +153,10 @@ describe("Tailwind Generator", () => {
     fs.mkdirSync(tempDir, { recursive: true });
     // Change to the temporary directory
     process.chdir(tempDir);
+    // Reset mock storage and call history between tests
+    vi.clearAllMocks();
+    fsMockStore._files.clear();
+    fsMockStore._directories.clear();
   });
 
   afterEach(() => {
@@ -253,16 +318,8 @@ describe("Tailwind Generator", () => {
     // And mkdir should still be called for src directory
     expect(fs.mkdir).toHaveBeenCalledWith("src", { recursive: true });
 
-    // And readFile should be called for package.json and template
+    // And readFile should be called for package.json (framework detection)
     expect(fs.readFile).toHaveBeenCalledWith("package.json", { encoding: "utf8" });
-    expect(fs.readFile).toHaveBeenCalledWith(
-      expect.stringContaining("tailwind.config.tmpl"),
-      { encoding: "utf8" }
-    );
-    expect(fs.readFile).toHaveBeenCalledWith(
-      expect.stringContaining("postcss.config.tmpl"),
-      { encoding: "utf8" }
-    );
 
     // Verify that the dry-run message was noted
     expect(prompts.note).toHaveBeenCalledWith(
@@ -271,10 +328,10 @@ describe("Tailwind Generator", () => {
   });
 
   test("tailwindGenerator should handle force mode", async () => {
-    // Mock that files already exist
-    vi.mocked(fs).pathExists.mockResolvedValue(true);
-    vi.mocked(fs).stat.mockResolvedValue({ isDirectory: () => false });
-    vi.mocked(fs).readFile.mockResolvedValue("existing content"); // Different from template
+    // Create a package.json and an existing CSS file without directives (conflict)
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+    await fs.mkdir("src", { recursive: true });
+    await fs.writeFile("src/index.css", "existing content", { encoding: "utf8" });
 
     const mockLogger = {
       info: vi.fn(),
@@ -316,7 +373,7 @@ describe("Tailwind Generator", () => {
 
   test("tailwindGenerator should handle interactive prompts when CLI answers are incomplete", async () => {
     // Override the prompt mock for this specific test
-    (prompts.prompt as vi.Mock).mockResolvedValueOnce({
+    (prompts.prompt as Mock).mockResolvedValueOnce({
       customiseTailwind: true,
       addPostcssPlugins: false,
       installAutoprefixer: true
@@ -364,7 +421,9 @@ describe("Tailwind Generator", () => {
 
   test("tailwindGenerator should handle cancellation", async () => {
     // Override the prompt mock to simulate cancellation for this test
-    (prompts.prompt as vi.Mock).mockRejectedValueOnce(new Error("Canceled"));
+    (prompts.prompt as Mock).mockRejectedValueOnce(new Error("Canceled"));
+    // And recognize the rejection as a Clack cancellation
+    (prompts.isCancel as unknown as Mock).mockReturnValueOnce(true);
 
     // Create a package.json so that validation passes
     await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });

@@ -1,4 +1,4 @@
-import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 // We need to mock the modules before importing the initGenerator
 vi.mock("@dxgjs/prompts", async () => {
@@ -23,7 +23,7 @@ vi.mock("@dxgjs/prompts", async () => {
 });
 
 vi.mock("@dxgjs/fs", async () => {
-  const actual = await vi.importActual("@dxgjs/fs");
+  const actual = await vi.importActual<typeof import("@dxgjs/fs")>("@dxgjs/fs");
   return {
     ...actual,
     _files: new Map<string, string>(),
@@ -111,6 +111,9 @@ import * as path from "path";
 import * as os from "os";
 import initGenerator from "./index";
 
+// Direct access to the @dxgjs/fs mock storage (see the vi.mock factory above)
+const fsMockStore = fs as unknown as { _files: Map<string, string>; _directories: Set<string> };
+
 describe("Init Generator", () => {
   let originalCwd: string;
   let tempDir: string;
@@ -125,6 +128,10 @@ describe("Init Generator", () => {
     fs.mkdirSync(tempDir, { recursive: true });
     // Change to the temporary directory
     process.chdir(tempDir);
+    // Reset mock storage and call history between tests
+    vi.clearAllMocks();
+    fsMockStore._files.clear();
+    fsMockStore._directories.clear();
   });
 
   afterEach(() => {
@@ -139,48 +146,29 @@ describe("Init Generator", () => {
     expect(initGenerator).toBeDefined();
     expect(initGenerator.name).toBe("init");
     expect(initGenerator.description).toBe(
-      "Initialize a new DXG project"
+      "Initializes a small DXG project (proof pipeline)"
     );
     expect(Array.isArray(initGenerator.prompts)).toBe(true);
-    expect(initGenerator.prompts.length).toBe(4);
+    expect(initGenerator.prompts.length).toBe(2);
   });
 
   test("initGenerator should have correct prompts", () => {
     const prompts = initGenerator.prompts;
 
-    // First prompt: projectName
-    expect(prompts[0].name).toBe("projectName");
+    // First prompt: project name
+    expect(prompts[0].name).toBe("name");
     expect(prompts[0].type).toBe("input");
     expect(prompts[0].message).toBe(
-      "What is the name of your project?"
+      "Project name:"
     );
 
-    // Second prompt: framework
-    expect(prompts[1].name).toBe("framework");
-    expect(prompts[1].type).toBe("select");
+    // Second prompt: description (optional)
+    expect(prompts[1].name).toBe("description");
+    expect(prompts[1].type).toBe("input");
     expect(prompts[1].message).toBe(
-      "Choose your frontend framework:"
+      "Description (optional):"
     );
-    expect(prompts[1].default).toBe("nextjs");
-    const choices = prompts[1].choices;
-    expect(Array.isArray(choices)).toBe(true);
-    expect(choices!.length).toBe(4);
-
-    // Third prompt: typescript
-    expect(prompts[2].name).toBe("typescript");
-    expect(prompts[2].type).toBe("confirm");
-    expect(prompts[2].message).toBe(
-      "Do you want to use TypeScript?"
-    );
-    expect(prompts[2].default).toBe(true);
-
-    // Fourth prompt: installDependencies
-    expect(prompts[3].name).toBe("installDependencies");
-    expect(prompts[3].type).toBe("confirm");
-    expect(prompts[3].message).toBe(
-      "Do you want to install dependencies?"
-    );
-    expect(prompts[3].default).toBe(true);
+    expect(prompts[1].default).toBe("");
   });
 
   test("initGenerator should validate correctly", () => {
@@ -208,10 +196,8 @@ describe("Init Generator", () => {
     };
 
     const answers = {
-      projectName: "my-project",
-      framework: "nextjs",
-      typescript: true,
-      installDependencies: true,
+      name: "my-project",
+      description: "A test project",
     };
 
     await expect(
@@ -219,10 +205,10 @@ describe("Init Generator", () => {
     ).resolves.not.toThrow();
 
     // Verify that intro was called
-    expect(prompts.intro).toHaveBeenCalledWith("DXG Project Init");
+    expect(prompts.intro).toHaveBeenCalledWith("DXG Project Initializer");
 
     // Verify that outro was called
-    expect(prompts.outro).toHaveBeenCalledWith("Project initialized successfully!");
+    expect(prompts.outro).toHaveBeenCalledWith("Project my-project initialized successfully!");
 
     // Verify that note was called for user-facing messages
     expect(prompts.note).toHaveBeenCalled();
@@ -230,8 +216,8 @@ describe("Init Generator", () => {
     // Verify that logger.debug was called for technical diagnostics
     expect(mockLogger.debug).toHaveBeenCalled();
 
-    // Verify that fs.mkdir was called for the project directory
-    expect(fs.mkdir).toHaveBeenCalledWith("my-project", { recursive: true });
+    // Verify that fs.mkdir was called for the src directory (for src/index.ts)
+    expect(fs.mkdir).toHaveBeenCalledWith("src", { recursive: true });
 
     // Verify that fs.writeFile was called for package.json
     expect(fs.writeFile).toHaveBeenCalledWith(
@@ -262,10 +248,8 @@ describe("Init Generator", () => {
     };
 
     const answers = {
-      projectName: "my-project",
-      framework: "nextjs",
-      typescript: true,
-      installDependencies: true,
+      name: "my-project",
+      description: "A test project",
     };
 
     await expect(
@@ -279,20 +263,16 @@ describe("Init Generator", () => {
       "utf8"
     );
 
-    // But fs.mkdir should still be called for the project directory
-    expect(fs.mkdir).toHaveBeenCalledWith("my-project", { recursive: true });
+    // And no directory should have been created in dry-run mode
+    expect(fs.mkdir).not.toHaveBeenCalled();
 
-    // Verify that the dry-run message was noted
-    expect(prompts.note).toHaveBeenCalledWith(
-      "[init] Dry-run: Would create project structure"
-    );
+    // Verify that the dry-run summary notes what would have been created
+    expect(prompts.note).toHaveBeenCalledWith(expect.stringContaining("Created:"));
   });
 
   test("initGenerator should handle force mode", async () => {
-    // Mock that files already exist
-    vi.mocked(fs).pathExists.mockResolvedValue(true);
-    vi.mocked(fs).stat.mockResolvedValue({ isDirectory: () => false });
-    vi.mocked(fs).readFile.mockResolvedValue("existing content"); // Different from template
+    // Create an existing package.json with different content (conflict)
+    await fs.writeFile("package.json", "existing content", { encoding: "utf8" });
 
     const mockLogger = {
       info: vi.fn(),
@@ -315,10 +295,8 @@ describe("Init Generator", () => {
     };
 
     const answers = {
-      projectName: "my-project",
-      framework: "nextjs",
-      typescript: true,
-      installDependencies: true,
+      name: "my-project",
+      description: "A test project",
     };
 
     await expect(
@@ -335,11 +313,9 @@ describe("Init Generator", () => {
 
   test("initGenerator should handle interactive prompts when CLI answers are incomplete", async () => {
     // Override the prompt mock for this specific test
-    (prompts.prompt as vi.Mock).mockResolvedValueOnce({
-      projectName: "my-project",
-      framework: "vue",
-      typescript: false,
-      installDependencies: true
+    (prompts.prompt as Mock).mockResolvedValueOnce({
+      name: "my-project",
+      description: "A test project"
     });
 
     const mockLogger = {
@@ -379,7 +355,9 @@ describe("Init Generator", () => {
 
   test("initGenerator should handle cancellation", async () => {
     // Override the prompt mock to simulate cancellation for this test
-    (prompts.prompt as vi.Mock).mockRejectedValueOnce(new Error("Canceled"));
+    (prompts.prompt as Mock).mockRejectedValueOnce(new Error("Canceled"));
+    // And recognize the rejection as a Clack cancellation
+    (prompts.isCancel as unknown as Mock).mockReturnValueOnce(true);
 
     const mockLogger = {
       info: vi.fn(),
@@ -438,6 +416,6 @@ describe("Init Generator", () => {
 
     await expect(
       initGenerator.run(answers, context)
-    ).rejects.toThrow("Project name is required");
+    ).rejects.toThrow("Invalid project name provided");
   });
 });
