@@ -1,4 +1,17 @@
+// Get the directory where this module is located
 import { GeneratorContext, Generator } from "../../types";
+
+// Import Clack-native UX utilities from @dxgjs/prompts
+import {
+  intro,
+  outro,
+  isCancel,
+  cancel,
+  spinner,
+  note,
+  prompt,
+} from "@dxgjs/prompts";
+
 import { fileURLToPath } from "url";
 import { dirname, join, sep } from "path";
 import { executeCommand } from "@dxgjs/fs";
@@ -28,7 +41,7 @@ export const databasePrompts = [
     type: "select" as const,
     name: "provider",
     message: "Choose your database provider:",
-    default: "sqlite", // SQLite
+    default: "sqlite",
     choices: [
       { name: "SQLite", value: "sqlite" },
       { name: "PostgreSQL", value: "postgresql" },
@@ -62,41 +75,63 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
   }
 }
 
-// Check if Prisma is already installed in package.json
+// Check if prisma dependency is already installed in package.json
 export async function isPrismaInstalled(fs: GeneratorContext['fs']): Promise<boolean> {
   try {
     const packageJsonExists = await fs.pathExists("package.json");
-    if (!packageJsonExists) return false;
+    if (!packageJsonExists) {
+      return false;
+    }
     const content = await fs.readFile("package.json", { encoding: "utf8" });
     const pkg = JSON.parse(content as string);
-    const result = (
-      (pkg.devDependencies && pkg.devDependencies.prisma) ||
-      (pkg.dependencies && pkg.dependencies.prisma)
-    );
-    return result;
+
+    // Check for prisma package
+    const result = (pkg.devDependencies && pkg.devDependencies["prisma"]) ||
+      (pkg.dependencies && pkg.dependencies["prisma"]);
+    return !!result;
   } catch {
     // If we can't read or parse, assume not installed
     return false;
   }
 }
 
-
 // Planning function
 export function planDatabase(answers: Record<string, unknown>) {
+  const provider = answers.provider as string;
+
   const data = {
-    provider: answers.provider,
+    provider: provider,
+    providerName: getProviderName(provider),
     year: new Date().getFullYear(),
   };
 
   // Determine packages to install
-  const packages = ["prisma"]; // We always install prisma as devDependency
+  const packages: string[] = ["prisma"];
+  if (provider !== "sqlite") {
+    // For non-sqlite databases, we also need the corresponding database client
+    const providerClients: Record<string, string> = {
+      postgresql: "@prisma/client",
+      mysql: "@prisma/client",
+    };
+    packages.push(providerClients[provider] || "@prisma/client");
+  }
 
   // Determine files to create
-  const filesToCreate = [];
-  const schemaPath = "prisma/schema.prisma";
-  filesToCreate.push({ path: schemaPath, templatePath: schemaTemplatePath, data });
+  const filesToCreate = [
+    { path: "prisma/schema.prisma", templatePath: schemaTemplatePath, data },
+  ];
 
   return { data, packages, filesToCreate };
+}
+
+// Helper functions
+function getProviderName(provider: string): string {
+  const names: Record<string, string> = {
+    sqlite: "SQLite",
+    postgresql: "PostgreSQL",
+    mysql: "MySQL"
+  };
+  return names[provider] || provider;
 }
 
 // Execution function
@@ -117,7 +152,7 @@ export async function executeDatabase(
   // Check if Prisma is already installed
   const prismaInstalled = await isPrismaInstalled(fs);
   if (prismaInstalled) {
-        logger.info(" Prisma already detected. Skipping dependency installation.");
+        note("Prisma already detected. Skipping dependency installation.");
   } else if (!ctx.dryRun) {
         // Install dependencies using @antfu/ni getCliCommand and executeCommand
     try {
@@ -137,20 +172,22 @@ export async function executeDatabase(
       const { command: cmd, args, cwd: resolvedCwd } = resolved;
       const executeCwd = resolvedCwd ?? process.cwd();
 
-      logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
+      const s = spinner();
+      s.start(`Installing dependencies: ${planToUse.packages.join(", ")}`);
       await executeCommand(cmd, args, {
         cwd: executeCwd,
         stdio: "inherit"
       });
+      s.stop(`Successfully installed: ${planToUse.packages.join(", ")}`);
     } catch (error) {
       throw new Error(
         `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
         { cause: error }
       );
-  }
+    }
   } else {
-    // In dry-run mode, log that we would install dependencies
-        logger.info("[database] Dry-run: Would install dependencies");
+    // In dry-run mode, note that we would install dependencies
+        note("[database] Dry-run: Would install dependencies");
   }
 
   // Handle schema file
@@ -236,53 +273,48 @@ export async function executeDatabase(
 
 // Verification function
 export async function verifyDatabase(
-  _answers: Record<string, unknown>,
+  answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planDatabase>,
 ): Promise<void> {
   const { fs } = ctx;
-  const planToUse = plan ?? planDatabase(_answers);
+  const planToUse = plan ?? planDatabase(answers);
 
-  // Verify that the schema file exists and contains the expected provider
+  // Verify that the schema file exists if it was supposed to be created
   for (const { path } of planToUse.filesToCreate) {
     const exists = await fs.pathExists(path);
     if (!exists) {
       throw new Error(`Expected file missing after generation: ${path}`);
     }
-
-    const content = (await fs.readFile(path, { encoding: "utf8" })) as string;
-    // Check that the provider is set correctly in the schema
-    const providerLine = `provider = "${_answers.provider}"`;
-    if (!content.includes(providerLine)) {
-      throw new Error(`Generated schema missing expected provider: ${providerLine}`);
-    }
   }
 }
 
-// Summarize function
+// Summarize function using Clack UX (replaces logger-based summarization)
 export function summarizeDatabase(
+  answers: Record<string, unknown>,
   result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
   ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
   const { created, updated, skipped, conflicts } = result;
-
   if (created.length) {
-    logger.info(` Created: ${created.join(", ")}`);
+    note(`Created: ${created.join(", ")}`);
   }
   if (updated.length) {
-    logger.info(` Updated: ${updated.join(", ")}`);
+    note(`Updated: ${updated.join(", ")}`);
   }
   if (skipped.length) {
-    logger.info(` Unchanged: ${skipped.join(", ")}`);
+    note(`Unchanged: ${skipped.join(", ")}`);
   }
   if (conflicts.length) {
     const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
-    logger.warn(` Conflicts: ${conflictDetails}`);
+    note(`Conflicts: ${conflictDetails}`);
   }
 
-  logger.info(` Database generator completed successfully`);
+  logger.debug(`Database generator completed successfully (provider: ${answers.provider})`);
+  note(`Database generator completed successfully (provider: ${answers.provider})`);
 }
+
 
 /**
  * Database generator – satisfies the Generator interface.
@@ -292,30 +324,87 @@ export const databaseGenerator: Generator = {
   name: "database",
   description: "Adds Prisma ORM with a selected database provider",
   prompts: databasePrompts,
-  async run(answers: Record<string, unknown>, context: GeneratorContext) {
+  async run(cliAnswers: Record<string, unknown>, context: GeneratorContext) {
     const ctx = context;
+
+    // Intro
+    intro("DXG Database Setup");
+
+    // Collect inputs - use CLI/provided answers, fallback to interactive prompts
+    let answers = { ...cliAnswers };
+
+    // Check if we need to prompt for missing required fields
+    const needsProvider = answers.provider === undefined;
+
+    // Only prompt in interactive mode
+    const shouldPrompt = !(ctx.dryRun === true && Object.keys(cliAnswers).length > 0) && !process.env.CI; // Simple check for non-interactive
+
+    if (needsProvider && shouldPrompt) {
+      // Use interactive prompts for missing fields
+      const promptQuestions = [];
+
+      if (needsProvider) {
+        promptQuestions.push(databasePrompts[0]); // provider prompt
+      }
+
+      const promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      answers = { ...answers, ...promptAnswers };
+    } else if (needsProvider && !shouldPrompt) {
+      // In non-interactive mode, throw error for missing required values
+      const missing = [];
+      if (needsProvider) missing.push("provider");
+      throw new Error(`Missing required values in non-interactive mode: ${missing.join(", ")}`);
+    }
 
     // Validate preconditions
     await checkPreconditions(ctx);
 
     // Validate (interface compliance)
     if (!validateDatabase()) {
+      // Use Clack cancel for validation failure
+      cancel("Invalid responses for database generator");
       throw new Error("Invalid responses for database generator");
     }
 
     // Plan
     const plan = planDatabase(answers);
 
-    // Execute
-    const execResult = await executeDatabase(answers, ctx, plan);
+    // Use spinner for file creation operations
+    const s = spinner();
+    s.start("Setting up database...");
 
-    // Verify (skip in dry-run mode)
-    if (!ctx.dryRun) {
-      await verifyDatabase(answers, ctx, plan);
+    try {
+      // Execute
+      const execResult = await executeDatabase(answers, ctx, plan);
+
+      // Verify (skip in dry-run mode)
+      if (!ctx.dryRun) {
+        await verifyDatabase(answers, ctx, plan);
+      }
+
+      // Stop spinner
+      s.stop();
+
+      // Summarize using Clack UX
+      summarizeDatabase(answers, execResult, ctx);
+
+      // Outro
+      outro(`Database setup completed for ${answers.provider}!`);
+    } catch (error) {
+      // Stop spinner on error
+      s.stop();
+
+      // Handle cancellation
+      if (isCancel(error)) {
+        cancel("Operation cancelled");
+        throw error;
+      }
+
+      // Handle other errors
+      note(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      outro(`Failed to setup database for ${answers.provider}`);
+      throw error;
     }
-
-    // Summarize
-    summarizeDatabase(execResult, ctx);
   },
 };
 

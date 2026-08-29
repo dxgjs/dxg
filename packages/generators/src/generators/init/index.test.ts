@@ -1,11 +1,11 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
-// We need to mock the modules before importing the databaseGenerator
+// We need to mock the modules before importing the initGenerator
 vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
   return {
     ...actual,
-    prompt: vi.fn().mockResolvedValue({ provider: "sqlite" }),
+    prompt: vi.fn().mockResolvedValue({}),
     intro: vi.fn(),
     outro: vi.fn(),
     isCancel: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock("@dxgjs/prompts", async () => {
 
 vi.mock("@dxgjs/fs", async () => {
   const actual = await vi.importActual("@dxgjs/fs");
-  const _mock = {
+  return {
     ...actual,
     _files: new Map<string, string>(),
     _directories: new Set<string>(),
@@ -88,7 +88,6 @@ vi.mock("@dxgjs/fs", async () => {
     }),
     executeCommand: vi.fn().mockResolvedValue(undefined),
   };
-  return _mock;
 });
 
 vi.mock("@dxgjs/templates", async () => {
@@ -104,44 +103,22 @@ vi.mock("@dxgjs/templates", async () => {
   };
 });
 
-vi.mock("@antfu/ni", async () => {
-  const actual = await vi.importActual("@antfu/ni");
-  return {
-    ...actual,
-    parseNi: vi.fn().mockReturnValue((agent: string, args: string[], ctx: any) => {
-      // Simulate the behavior of parseNi for npm project with no args
-      if (!agent && !args && !ctx) {
-        return { command: "npm", args: [] };
-      }
-      // For the actual command we're testing: ["add", "-D", "prisma"]
-      if (agent === "npm" && args.includes("add") && args.includes("-D") && args.includes("prisma")) {
-        return { command: "npm", args: ["install", "-D", "prisma"] };
-      }
-      return { command: "npm", args: [...args] };
-    }),
-    // Fix: Export getCliCommand as a mock function that accepts arguments
-    getCliCommand: vi.fn().mockResolvedValue({ command: "npm", args: ["install", "-D", "prisma"] }),
-    // Fix: Export executeCommand as a mock function
-    executeCommand: vi.fn().mockResolvedValue(undefined),
-  };
-});
-
 // Import the mocked modules
 const prompts = await import("@dxgjs/prompts");
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
-import databaseGenerator from "./index";
+import initGenerator from "./index";
 
-describe("Database Generator", () => {
+describe("Init Generator", () => {
   let originalCwd: string;
   let tempDir: string;
 
   beforeEach(() => {
     originalCwd = process.cwd();
     // Create a temporary directory
-    tempDir = path.join(os.tmpdir(), `dxg-db-test-${Date.now()}-${Math.random()
+    tempDir = path.join(os.tmpdir(), `dxg-init-test-${Date.now()}-${Math.random()
       .toString(36)
       .substring(2, 15)}`);
     // Ensure the directory exists
@@ -158,46 +135,60 @@ describe("Database Generator", () => {
     vi.restoreAllMocks();
   });
 
-  test("databaseGenerator should exist", () => {
-    expect(databaseGenerator).toBeDefined();
-    expect(databaseGenerator.name).toBe("database");
-    expect(databaseGenerator.description).toBe(
-      "Adds Prisma ORM with a selected database provider"
+  test("initGenerator should exist", () => {
+    expect(initGenerator).toBeDefined();
+    expect(initGenerator.name).toBe("init");
+    expect(initGenerator.description).toBe(
+      "Initialize a new DXG project"
     );
-    expect(Array.isArray(databaseGenerator.prompts)).toBe(true);
-    expect(databaseGenerator.prompts.length).toBe(1);
+    expect(Array.isArray(initGenerator.prompts)).toBe(true);
+    expect(initGenerator.prompts.length).toBe(4);
   });
 
-  test("databaseGenerator should have correct prompts", () => {
-    const prompts = databaseGenerator.prompts;
+  test("initGenerator should have correct prompts", () => {
+    const prompts = initGenerator.prompts;
 
-    // First prompt: provider
-    expect(prompts[0].name).toBe("provider");
-    expect(prompts[0].type).toBe("select");
+    // First prompt: projectName
+    expect(prompts[0].name).toBe("projectName");
+    expect(prompts[0].type).toBe("input");
     expect(prompts[0].message).toBe(
-      "Choose your database provider:"
+      "What is the name of your project?"
     );
-    expect(prompts[0].default).toBe("sqlite");
-    const choices = prompts[0].choices;
+
+    // Second prompt: framework
+    expect(prompts[1].name).toBe("framework");
+    expect(prompts[1].type).toBe("select");
+    expect(prompts[1].message).toBe(
+      "Choose your frontend framework:"
+    );
+    expect(prompts[1].default).toBe("nextjs");
+    const choices = prompts[1].choices;
     expect(Array.isArray(choices)).toBe(true);
-    expect(choices!.length).toBe(3);
+    expect(choices!.length).toBe(4);
 
-    // Check choices
-    const choiceValues = choices!.map(c => c.value);
-    expect(choiceValues).toContain("sqlite");
-    expect(choiceValues).toContain("postgresql");
-    expect(choiceValues).toContain("mysql");
+    // Third prompt: typescript
+    expect(prompts[2].name).toBe("typescript");
+    expect(prompts[2].type).toBe("confirm");
+    expect(prompts[2].message).toBe(
+      "Do you want to use TypeScript?"
+    );
+    expect(prompts[2].default).toBe(true);
+
+    // Fourth prompt: installDependencies
+    expect(prompts[3].name).toBe("installDependencies");
+    expect(prompts[3].type).toBe("confirm");
+    expect(prompts[3].message).toBe(
+      "Do you want to install dependencies?"
+    );
+    expect(prompts[3].default).toBe(true);
   });
 
-  test("databaseGenerator should validate correctly", () => {
-    // Since validateDatabase always returns true, any answers should pass
-    expect(databaseGenerator.prompts).toBeDefined();
+  test("initGenerator should validate correctly", () => {
+    // Since validateInit always returns true, any answers should pass
+    expect(initGenerator.prompts).toBeDefined();
   });
 
-  test("databaseGenerator should run successfully with CLI answers", async () => {
-    // Create a package.json so that validation passes
-    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
-
+  test("initGenerator should run successfully with CLI answers", async () => {
     const mockLogger = {
       info: vi.fn(),
       error: vi.fn(),
@@ -205,56 +196,52 @@ describe("Database Generator", () => {
       debug: vi.fn(),
     } as unknown as Logger;
 
-    const templatesMock = {
-      render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
         // Simple template replacement for testing
         return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
           return (data[key] ?? '') as string;
         });
-      })
-    };
-
-    const context = {
-      logger: mockLogger,
-      fs: fs,
-      templates: templatesMock,
-      dryRun: false,
-      force: false,
+      }) },
     };
 
     const answers = {
-      provider: "sqlite",
+      projectName: "my-project",
+      framework: "nextjs",
+      typescript: true,
+      installDependencies: true,
     };
 
     await expect(
-      databaseGenerator.run(answers, context)
+      initGenerator.run(answers, context)
     ).resolves.not.toThrow();
 
-    // Verify that fs.pathExists was called for package.json
-    expect(fs.pathExists).toHaveBeenCalledWith("package.json");
+    // Verify that intro was called
+    expect(prompts.intro).toHaveBeenCalledWith("DXG Project Init");
 
-    // Verify that fs.readFile was called for package.json and template
-    expect(fs.readFile).toHaveBeenCalledWith("package.json", { encoding: "utf8" });
-    expect(fs.readFile).toHaveBeenCalledWith(
-      expect.stringContaining("schema.prisma.tmpl"),
-      { encoding: "utf8" }
-    );
+    // Verify that outro was called
+    expect(prompts.outro).toHaveBeenCalledWith("Project initialized successfully!");
 
-    // Verify that fs.writeFile was called for the schema file
-    expect(fs.writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("prisma/schema.prisma"),
-      expect.any(String),
-      "utf8"
-    );
+    // Verify that note was called for user-facing messages
+    expect(prompts.note).toHaveBeenCalled();
 
     // Verify that logger.debug was called for technical diagnostics
     expect(mockLogger.debug).toHaveBeenCalled();
+
+    // Verify that fs.mkdir was called for the project directory
+    expect(fs.mkdir).toHaveBeenCalledWith("my-project", { recursive: true });
+
+    // Verify that fs.writeFile was called for package.json
+    expect(fs.writeFile).toHaveBeenCalledWith(
+      expect.stringContaining("package.json"),
+      expect.any(String),
+      "utf8"
+    );
   });
 
-  test("databaseGenerator should handle dry-run mode", async () => {
-    // Create a package.json so that validation passes
-    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
-
+  test("initGenerator should handle dry-run mode", async () => {
     const mockLogger = {
       info: vi.fn(),
       error: vi.fn(),
@@ -272,36 +259,36 @@ describe("Database Generator", () => {
         });
       }) },
       dryRun: true, // Dry run mode
-      force: false,
     };
 
     const answers = {
-      provider: "sqlite",
+      projectName: "my-project",
+      framework: "nextjs",
+      typescript: true,
+      installDependencies: true,
     };
 
     await expect(
-      databaseGenerator.run(answers, context)
+      initGenerator.run(answers, context)
     ).resolves.not.toThrow();
 
-    // In dry-run mode, fs.writeFile should NOT be called for the schema file
+    // In dry-run mode, fs.writeFile should NOT be called for package.json
     expect(fs.writeFile).not.toHaveBeenCalledWith(
-      expect.stringContaining("prisma/schema.prisma"),
+      expect.stringContaining("package.json"),
       expect.any(String),
       "utf8"
     );
 
-    // But pathExists should still be called to check for package.json
-    expect(fs.pathExists).toHaveBeenCalledWith("package.json");
+    // But fs.mkdir should still be called for the project directory
+    expect(fs.mkdir).toHaveBeenCalledWith("my-project", { recursive: true });
 
-    // And readFile should be called for package.json and template
-    expect(fs.readFile).toHaveBeenCalledWith("package.json", { encoding: "utf8" });
-    expect(fs.readFile).toHaveBeenCalledWith(
-      expect.stringContaining("schema.prisma.tmpl"),
-      { encoding: "utf8" }
+    // Verify that the dry-run message was noted
+    expect(prompts.note).toHaveBeenCalledWith(
+      "[init] Dry-run: Would create project structure"
     );
   });
 
-  test("databaseGenerator should handle force mode", async () => {
+  test("initGenerator should handle force mode", async () => {
     // Mock that files already exist
     vi.mocked(fs).pathExists.mockResolvedValue(true);
     vi.mocked(fs).stat.mockResolvedValue({ isDirectory: () => false });
@@ -328,27 +315,32 @@ describe("Database Generator", () => {
     };
 
     const answers = {
-      provider: "sqlite",
+      projectName: "my-project",
+      framework: "nextjs",
+      typescript: true,
+      installDependencies: true,
     };
 
     await expect(
-      databaseGenerator.run(answers, context)
+      initGenerator.run(answers, context)
     ).resolves.not.toThrow();
 
     // In force mode, fs.writeFile should be called to overwrite existing files
     expect(fs.writeFile).toHaveBeenCalledWith(
-      expect.stringContaining("prisma/schema.prisma"),
+      expect.stringContaining("package.json"),
       expect.any(String),
       "utf8"
     );
   });
 
-  test("databaseGenerator should handle interactive prompts when CLI answers are incomplete", async () => {
+  test("initGenerator should handle interactive prompts when CLI answers are incomplete", async () => {
     // Override the prompt mock for this specific test
-    (prompts.prompt as vi.Mock).mockResolvedValueOnce({ provider: "postgresql" });
-
-    // Create a package.json so that validation passes
-    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+    (prompts.prompt as vi.Mock).mockResolvedValueOnce({
+      projectName: "my-project",
+      framework: "vue",
+      typescript: false,
+      installDependencies: true
+    });
 
     const mockLogger = {
       info: vi.fn(),
@@ -374,23 +366,20 @@ describe("Database Generator", () => {
       force: false,
     };
 
-    // No CLI answers provided, so it should prompt for provider
+    // No CLI answers provided, so it should prompt for all fields
     const cliAnswers = {};
 
     await expect(
-      databaseGenerator.run(cliAnswers, context)
+      initGenerator.run(cliAnswers, context)
     ).resolves.not.toThrow();
 
     // Verify that prompt was called
     expect(prompts.prompt).toHaveBeenCalled();
   });
 
-  test("databaseGenerator should handle cancellation", async () => {
+  test("initGenerator should handle cancellation", async () => {
     // Override the prompt mock to simulate cancellation for this test
     (prompts.prompt as vi.Mock).mockRejectedValueOnce(new Error("Canceled"));
-
-    // Create a package.json so that validation passes
-    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
 
     const mockLogger = {
       info: vi.fn(),
@@ -420,14 +409,14 @@ describe("Database Generator", () => {
     const cliAnswers = {};
 
     await expect(
-      databaseGenerator.run(cliAnswers, context)
+      initGenerator.run(cliAnswers, context)
     ).rejects.toThrow();
+
+    // Verify that cancel was called
+    expect(prompts.cancel).toHaveBeenCalledWith("Operation cancelled");
   });
 
-  test("databaseGenerator should handle missing package.json", async () => {
-    // Ensure no package.json in the temporary directory
-    // (fs.pathExists is already mocked to return false by default)
-
+  test("initGenerator should handle missing project name", async () => {
     const mockLogger = {
       info: vi.fn(),
       error: vi.fn(),
@@ -435,29 +424,20 @@ describe("Database Generator", () => {
       debug: vi.fn(),
     } as unknown as Logger;
 
-    const templatesMock = {
-      render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
-        // Simple template replacement for testing
-        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-          return (data[key] ?? '') as string;
-        });
-      })
-    };
-
     const context = {
       logger: mockLogger,
       fs: fs,
-      templates: templatesMock,
-      dryRun: false,
-      force: false,
+      templates: { render: vi.fn().mockReturnValue("") },
     };
 
     const answers = {
-      provider: "sqlite",
+      framework: "nextjs",
+      typescript: true,
+      installDependencies: true,
     };
 
     await expect(
-      databaseGenerator.run(answers, context)
-    ).rejects.toThrow("package.json not found");
+      initGenerator.run(answers, context)
+    ).rejects.toThrow("Project name is required");
   });
 });

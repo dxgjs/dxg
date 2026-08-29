@@ -1,6 +1,17 @@
 // Template source strings (owned by the init generator)
 import { GeneratorContext, Generator } from "../../types";
 
+// Import Clack-native UX utilities from @dxgjs/prompts
+import {
+  intro,
+  outro,
+  isCancel,
+  cancel,
+  spinner,
+  note,
+  prompt,
+} from "@dxgjs/prompts";
+
 const packageJsonTpl = `{
   "name": "{{name}}",
   "version": "0.0.0",
@@ -153,7 +164,9 @@ export async function executeInit(
       }
 
       // Safe to create
-      if (!ctx.dryRun) {
+      if (ctx.dryRun) {
+        // In dry-run mode, don't actually write the file
+      } else {
         // Ensure the directory exists
         if (dir && !(await ctx.fs.pathExists(dir))) {
           await ctx.fs.mkdir(dir, { recursive: true });
@@ -181,7 +194,7 @@ export async function verifyInit(
   }
 }
 
-// Summarize function
+// Summarize function using Clack UX (replaces logger-based summarization)
 export function summarizeInit(
   answers: Record<string, unknown>,
   result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
@@ -190,22 +203,21 @@ export function summarizeInit(
   const { logger } = ctx;
   const { created, updated, skipped, conflicts } = result;
   if (created.length) {
-    logger.info(` Created: ${created.join(", ")}`);
+    note(`Created: ${created.join(", ")}`);
   }
   if (updated.length) {
-    logger.info(` Updated: ${updated.join(", ")}`);
+    note(`Updated: ${updated.join(", ")}`);
   }
   if (skipped.length) {
-    logger.info(`Unchanged: ${skipped.join(", ")}`);
+    note(`Unchanged: ${skipped.join(", ")}`);
   }
   if (conflicts.length) {
     const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
-    logger.warn(` Conflicts: ${conflictDetails}`);
+    note(`Conflicts: ${conflictDetails}`);
   }
   const total = created.length + updated.length + skipped.length + conflicts.length;
-  logger.info(
-    ` Initialization completed: ${answers.name} (${total} files processed)`,
-  );
+  logger.debug(`Initialization completed: ${answers.name} (${total} files processed)`);
+  note(`Initialization completed: ${answers.name} (${total} files processed)`);
 }
 
 /**
@@ -216,27 +228,90 @@ export const initGenerator: Generator = {
   name: "init",
   description: "Initializes a small DXG project (proof pipeline)",
   prompts: initPrompts,
-  async run(answers: Record<string, unknown>, context: GeneratorContext) {
+  async run(cliAnswers: Record<string, unknown>, context: GeneratorContext) {
     const ctx = context;
+
+    // Intro
+    intro("DXG Project Initializer");
+
+    // Collect inputs - use CLI/provided answers, fallback to interactive prompts
+    let answers = { ...cliAnswers };
+
+    // Check if we need to prompt for missing required fields
+    const needsName = !answers.name || (typeof answers.name === "string" && !answers.name.trim());
+    const needsDescription = answers.description === undefined; // description is optional, so we only prompt if not provided at all
+
+    // Only prompt in interactive mode
+    const shouldPrompt = !(ctx.dryRun === true && Object.keys(cliAnswers).length > 0) && !process.env.CI; // Simple check for non-interactive
+
+    if ((needsName || needsDescription) && shouldPrompt) {
+      // Use interactive prompts for missing fields
+      const promptQuestions = [];
+
+      if (needsName) {
+        promptQuestions.push(initPrompts[0]); // name prompt
+      }
+
+      if (needsDescription) {
+        promptQuestions.push(initPrompts[1]); // description prompt
+      }
+
+      const promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      answers = { ...answers, ...promptAnswers };
+    } else if ((needsName || needsDescription) && !shouldPrompt) {
+      // In non-interactive mode, throw error for missing required values
+      const missing = [];
+      if (needsName) missing.push("name");
+      if (needsDescription) missing.push("description");
+      throw new Error(`Missing required values in non-interactive mode: ${missing.join(", ")}`);
+    }
 
     // Validate
     if (!validateInit(answers)) {
-      throw new Error("Invalid responses for init generator");
+      // Use Clack cancel for validation failure
+      cancel("Invalid project name provided");
+      throw new Error("Invalid project name provided");
     }
 
     // Plan
     const plan = planInit(answers);
 
-    // Execute
-    const execResult = await executeInit(answers, ctx, plan);
+    // Use spinner for file creation operations
+    const s = spinner();
+    s.start("Creating project files...");
 
-    // Verify (skip in dry-run mode)
-    if (!ctx.dryRun) {
-      await verifyInit(answers, ctx, plan);
+    try {
+      // Execute
+      const execResult = await executeInit(answers, ctx, plan);
+
+      // Verify (skip in dry-run mode)
+      if (!ctx.dryRun) {
+        await verifyInit(answers, ctx, plan);
+      }
+
+      // Stop spinner
+      s.stop();
+
+      // Summarize using Clack UX
+      summarizeInit(answers, execResult, ctx);
+
+      // Outro
+      outro(`Project ${answers.name} initialized successfully!`);
+    } catch (error) {
+      // Stop spinner on error
+      s.stop();
+
+      // Handle cancellation
+      if (isCancel(error)) {
+        cancel("Operation cancelled");
+        throw error;
+      }
+
+      // Handle other errors
+      note(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      outro(`Failed to initialize project ${answers.name}`);
+      throw error;
     }
-
-    // Summarize
-    summarizeInit(answers, execResult, ctx);
   },
 };
 

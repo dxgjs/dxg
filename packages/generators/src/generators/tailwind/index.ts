@@ -1,4 +1,17 @@
+// Template source strings (owned by the tailwind generator)
 import { GeneratorContext, Generator } from "../../types";
+
+// Import Clack-native UX utilities from @dxgjs/prompts
+import {
+  intro,
+  outro,
+  isCancel,
+  cancel,
+  spinner,
+  note,
+  prompt,
+} from "@dxgjs/prompts";
+
 import { fileURLToPath } from "url";
 import { dirname, join, sep } from "path";
 import { executeCommand } from "@dxgjs/fs";
@@ -82,9 +95,7 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
   }
 }
 
-/**
- * Check if Tailwind CSS is already installed in package.json
- */
+// Check if Tailwind CSS is already installed in package.json
 export async function isTailwindInstalled(
   fs: GeneratorContext["fs"],
 ): Promise<boolean> {
@@ -166,9 +177,7 @@ export async function executeTailwind(
   // Check if Tailwind is already installed
   const tailwindInstalled = await isTailwindInstalled(fs);
   if (tailwindInstalled) {
-    logger.info(
-      " Tailwind CSS already detected. Skipping dependency installation.",
-    );
+        note("Tailwind CSS already detected. Skipping dependency installation.");
   } else if (!ctx.dryRun) {
     // Install dependencies using @antfu/ni getCliCommand and executeCommand
     try {
@@ -188,11 +197,13 @@ export async function executeTailwind(
       const { command: cmd, args, cwd: resolvedCwd } = resolved;
       const executeCwd = resolvedCwd ?? process.cwd();
 
-      logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
+      const s = spinner();
+      s.start(`Installing dependencies: ${planToUse.packages.join(", ")}`);
       await executeCommand(cmd, args, {
         cwd: executeCwd,
         stdio: "inherit"
       });
+      s.stop(`Successfully installed: ${planToUse.packages.join(", ")}`);
     } catch (error) {
       throw new Error(
         `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
@@ -200,8 +211,8 @@ export async function executeTailwind(
       );
     }
   } else {
-    // In dry-run mode, log that we would install dependencies
-    logger.info("[tailwind] Dry-run: Would install dependencies");
+    // In dry-run mode, note that we would install dependencies
+        note("[tailwind] Dry-run: Would install dependencies");
   }
 
   // Handle config files
@@ -304,8 +315,9 @@ export async function verifyTailwind(
   }
 }
 
-// Summarize function
+// Summarize function using Clack UX (replaces logger-based summarization)
 export function summarizeTailwind(
+  answers: Record<string, unknown>,
   result: {
     created: string[];
     updated: string[];
@@ -316,24 +328,24 @@ export function summarizeTailwind(
 ): void {
   const { logger } = ctx;
   const { created, updated, skipped, conflicts } = result;
-
   if (created.length) {
-    logger.info(` Created: ${created.join(", ")}`);
+    note(`Created: ${created.join(", ")}`);
   }
   if (updated.length) {
-    logger.info(` Updated: ${updated.join(", ")}`);
+    note(`Updated: ${updated.join(", ")}`);
   }
   if (skipped.length) {
-    logger.info(`Unchanged: ${skipped.join(", ")}`);
+    note(`Unchanged: ${skipped.join(", ")}`);
   }
   if (conflicts.length) {
     const conflictDetails = conflicts
       .map((c) => `${c.path} (${c.existsAs})`)
       .join(", ");
-    logger.warn(` Conflicts: ${conflictDetails}`);
+    note(`Conflicts: ${conflictDetails}`);
   }
 
-  logger.info(` Tailwind CSS v4 installed successfully`);
+  logger.debug(`Tailwind CSS setup completed (${created.length + updated.length + skipped.length + conflicts.length} files processed)`);
+  note(`Tailwind CSS setup completed (${created.length + updated.length + skipped.length + conflicts.length} files processed)`);
 }
 
 /**
@@ -577,30 +589,99 @@ export const tailwindGenerator: Generator = {
   name: "tailwind",
   description: "Adds Tailwind CSS v4 to a Node/frontend project",
   prompts: tailwindPrompts,
-  async run(answers: Record<string, unknown>, context: GeneratorContext) {
+  async run(cliAnswers: Record<string, unknown>, context: GeneratorContext) {
     const ctx = context;
+
+    // Intro
+    intro("DXG Tailwind Setup");
+
+    // Collect inputs - use CLI/provided answers, fallback to interactive prompts
+    let answers = { ...cliAnswers };
+
+    // Check if we need to prompt for missing required fields
+    const needsCustomiseTailwind = answers.customiseTailwind === undefined;
+    const needsAddPostcssPlugins = answers.addPostcssPlugins === undefined;
+    const needsInstallAutoprefixer = answers.installAutoprefixer === undefined;
+
+    // Only prompt in interactive mode
+    const shouldPrompt = !(ctx.dryRun === true && Object.keys(cliAnswers).length > 0) && !process.env.CI; // Simple check for non-interactive
+
+    if ((needsCustomiseTailwind || needsAddPostcssPlugins || needsInstallAutoprefixer) && shouldPrompt) {
+      // Use interactive prompts for missing fields
+      const promptQuestions = [];
+
+      if (needsCustomiseTailwind) {
+        promptQuestions.push(tailwindPrompts[0]); // customiseTailwind prompt
+      }
+
+      if (needsAddPostcssPlugins) {
+        promptQuestions.push(tailwindPrompts[1]); // addPostcssPlugins prompt
+      }
+
+      if (needsInstallAutoprefixer) {
+        promptQuestions.push(tailwindPrompts[2]); // installAutoprefixer prompt
+      }
+
+      const promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      answers = { ...answers, ...promptAnswers };
+    } else if ((needsCustomiseTailwind || needsAddPostcssPlugins || needsInstallAutoprefixer) && !shouldPrompt) {
+      // In non-interactive mode, throw error for missing required values
+      const missing = [];
+      if (needsCustomiseTailwind) missing.push("customiseTailwind");
+      if (needsAddPostcssPlugins) missing.push("addPostcssPlugins");
+      if (needsInstallAutoprefixer) missing.push("installAutoprefixer");
+      throw new Error(`Missing required values in non-interactive mode: ${missing.join(", ")}`);
+    }
 
     // Validate preconditions
     await checkPreconditions(ctx);
 
     // Validate (interface compliance)
     if (!validateTailwind()) {
+      // Use Clack cancel for validation failure
+      cancel("Invalid responses for tailwind generator");
       throw new Error("Invalid responses for tailwind generator");
     }
 
     // Plan
     const plan = planTailwind(answers);
 
-    // Execute
-    const execResult = await executeTailwind(answers, ctx, plan);
+    // Use spinner for file creation operations
+    const s = spinner();
+    s.start("Setting up Tailwind CSS...");
 
-    // Verify (skip in dry-run mode)
-    if (!ctx.dryRun) {
-      await verifyTailwind(answers, ctx, plan);
+    try {
+      // Execute
+      const execResult = await executeTailwind(answers, ctx, plan);
+
+      // Verify (skip in dry-run mode)
+      if (!ctx.dryRun) {
+        await verifyTailwind(answers, ctx, plan);
+      }
+
+      // Stop spinner
+      s.stop();
+
+      // Summarize using Clack UX
+      summarizeTailwind(answers, execResult, ctx);
+
+      // Outro
+      outro(`Tailwind CSS setup completed!`);
+    } catch (error) {
+      // Stop spinner on error
+      s.stop();
+
+      // Handle cancellation
+      if (isCancel(error)) {
+        cancel("Operation cancelled");
+        throw error;
+      }
+
+      // Handle other errors
+      note(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      outro(`Failed to setup Tailwind CSS`);
+      throw error;
     }
-
-    // Summarize
-    summarizeTailwind(execResult, ctx);
   },
 };
 

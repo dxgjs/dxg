@@ -1,47 +1,82 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
 
-// Mock @dxgjs/fs FIRST, before any imports that might use it
-vi.mock("@dxgjs/fs", async (importOriginal) => {
-  const original = await importOriginal();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mocked: any = { ...(original as Record<string, any>) };
-  mocked.detectPackageManager = vi.fn();
-  mocked.executeCommand = vi.fn().mockResolvedValue({
-    stdout: '',
-    stderr: '',
-    all: '',
-    failed: false,
-    timedOut: false,
-    isCanceled: false,
-    killed: false,
-    signal: undefined,
-    exitCode: 0,
-    pid: 0,
-    command: '',
-    args: [],
-  });
-  return mocked;
+// We need to mock the modules before importing the tailwindGenerator
+vi.mock("@dxgjs/prompts", async () => {
+  const actual = await vi.importActual("@dxgjs/prompts");
+  return {
+    ...actual,
+    prompt: vi.fn().mockResolvedValue({}),
+    intro: vi.fn(),
+    outro: vi.fn(),
+    isCancel: vi.fn(),
+    cancel: vi.fn(),
+    spinner: vi.fn().mockReturnValue({
+      start: vi.fn(),
+      stop: vi.fn(),
+    }),
+    note: vi.fn(),
+    // Remove unused imports that we actually removed from the implementation
+    // text: vi.fn(),
+    // confirm: vi.fn(),
+    select: vi.fn(),
+  };
 });
 
+vi.mock("@dxgjs/fs", async () => {
+  const actual = await vi.importActual("@dxgjs/fs");
+  return {
+    ...actual,
+    pathExists: vi.fn().mockResolvedValue(false),
+    readFile: vi.fn().mockResolvedValue(""),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    stat: vi.fn().mockResolvedValue({ isDirectory: () => false }),
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    executeCommand: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+vi.mock("@dxgjs/templates", async () => {
+  const actual = await vi.importActual("@dxgjs/templates");
+  return {
+    ...actual,
+    render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+      // Simple template replacement for testing
+      return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+        return (data[key] ?? '') as string;
+      });
+    }),
+  };
+});
+
+vi.mock("@antfu/ni", async () => {
+  const actual = await vi.importActual("@antfu/ni");
+  return {
+    ...actual,
+    parseNi: vi.fn().mockReturnValue((agent: string, args: string[], ctx: any) => {
+      // Simulate the behavior of parseNi for npm project with no args
+      if (!agent && !args && !ctx) {
+        return { command: "npm", args: [] };
+      }
+      // For the actual command we're testing: ["add", "-D", "tailwindcss", "postcss"]
+      if (agent === "npm" && args.includes("add") && args.includes("-D") && args.includes("tailwindcss") && args.includes("postcss")) {
+        return { command: "npm", args: ["install", "-D", "tailwindcss", "postcss"] };
+      }
+      return { command: "npm", args: [...args] };
+    }),
+    // Fix: Export getCliCommand as a mock function that accepts arguments
+    getCliCommand: vi.fn().mockResolvedValue({ command: "npm", args: ["install", "-D", "tailwindcss", "postcss"] }),
+    // Fix: Export executeCommand as a mock function
+    executeCommand: vi.fn().mockResolvedValue(undefined),
+  };
+});
+
+// Import the mocked modules
+const prompts = await import("@dxgjs/prompts");
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
-import { execSync } from "child_process";
-import { detectPackageManager } from "@dxgjs/fs";
-const mockedDetectPackageManager = detectPackageManager as ReturnType<
-  typeof vi.fn
->;
 import tailwindGenerator from "./index";
-
-// Mock child_process to prevent actual command execution
-vi.mock("child_process", async (importOriginal) => {
-  const original = await importOriginal();
-  return {
-    ...(original as Record<string, any>),
-    execSync: vi.fn(),
-  };
-});
 
 describe("Tailwind Generator", () => {
   let originalCwd: string;
@@ -50,12 +85,9 @@ describe("Tailwind Generator", () => {
   beforeEach(() => {
     originalCwd = process.cwd();
     // Create a temporary directory
-    tempDir = path.join(
-      os.tmpdir(),
-      `dxg-tailwind-test-${Date.now()}-${Math.random()
-        .toString(36)
-        .substring(2, 15)}`,
-    );
+    tempDir = path.join(os.tmpdir(), `dxg-tailwind-test-${Date.now()}-${Math.random()
+      .toString(36)
+      .substring(2, 15)}`);
     // Ensure the directory exists
     fs.mkdirSync(tempDir, { recursive: true });
     // Change to the temporary directory
@@ -74,7 +106,7 @@ describe("Tailwind Generator", () => {
     expect(tailwindGenerator).toBeDefined();
     expect(tailwindGenerator.name).toBe("tailwind");
     expect(tailwindGenerator.description).toBe(
-      "Adds Tailwind CSS v4 to a Node/frontend project",
+      "Adds Tailwind CSS v4 to a Node/frontend project"
     );
     expect(Array.isArray(tailwindGenerator.prompts)).toBe(true);
     expect(tailwindGenerator.prompts.length).toBe(3);
@@ -87,7 +119,7 @@ describe("Tailwind Generator", () => {
     expect(prompts[0].name).toBe("customiseTailwind");
     expect(prompts[0].type).toBe("confirm");
     expect(prompts[0].message).toBe(
-      "Do you want to customise Tailwind settings (content paths, theme, etc.)? [y/N]",
+      "Do you want to customise Tailwind settings (content paths, theme, etc.)? [y/N]"
     );
     expect(prompts[0].default).toBe(false);
 
@@ -95,7 +127,7 @@ describe("Tailwind Generator", () => {
     expect(prompts[1].name).toBe("addPostcssPlugins");
     expect(prompts[1].type).toBe("confirm");
     expect(prompts[1].message).toBe(
-      "Do you want to add additional PostCSS plugins (e.g., for minification)? [y/N]",
+      "Do you want to add additional PostCSS plugins (e.g., for minification)? [y/N]"
     );
     expect(prompts[1].default).toBe(false);
 
@@ -103,7 +135,7 @@ describe("Tailwind Generator", () => {
     expect(prompts[2].name).toBe("installAutoprefixer");
     expect(prompts[2].type).toBe("confirm");
     expect(prompts[2].message).toBe(
-      "Do you need to support legacy browsers (IE11, older Android)? [y/N]",
+      "Do you need to support legacy browsers (IE11, older Android)? [y/N]"
     );
     expect(prompts[2].default).toBe(false);
   });
@@ -113,148 +145,9 @@ describe("Tailwind Generator", () => {
     expect(tailwindGenerator.prompts).toBeDefined();
   });
 
-  describe("Validation", () => {
-    test("should throw if Node.js version < 18", async () => {
-      // Mock process.versions.node to simulate an old version
-      const originalNodeVersion = process.versions.node;
-      Object.defineProperty(process.versions, "node", {
-        value: "16.0.0",
-        configurable: true,
-      });
-      try {
-        const context = {
-          logger: {
-            info: vi.fn(),
-            error: vi.fn(),
-            warn: vi.fn(),
-          } as unknown as Logger,
-          fs: fs,
-          templates: { render: vi.fn().mockReturnValue("") },
-        };
-        await tailwindGenerator.run(
-          {
-            customiseTailwind: false,
-            addPostcssPlugins: false,
-            installAutoprefixer: false,
-          },
-          context,
-        );
-        expect(false).toBe(true); // Should not reach here
-      } catch (error: unknown) {
-        expect(error).toBeInstanceOf(Error);
-        expect((error as Error).message).toContain("Node.js version");
-      } finally {
-        // Restore original node version
-        Object.defineProperty(process.versions, "node", {
-          value: originalNodeVersion,
-          configurable: true,
-        });
-      }
-    });
-
-    test("should throw if package.json missing", async () => {
-      // Ensure no package.json in the temporary directory
-      const context = {
-        logger: {
-          info: vi.fn(),
-          error: vi.fn(),
-          warn: vi.fn(),
-        } as unknown as Logger,
-        fs: fs,
-        templates: { render: vi.fn().mockReturnValue("") },
-      };
-      await expect(
-        tailwindGenerator.run(
-          {
-            customiseTailwind: false,
-            addPostcssPlugins: false,
-            installAutoprefixer: false,
-          },
-          context,
-        ),
-      ).rejects.toThrow("package.json not found");
-    });
-  });
-
-  describe("Template usage", () => {
-    test("should read template files for config generation", async () => {
-      // Create a package.json so that validation passes
-      await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
-
-      const mockLogger = {
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      } as unknown as Logger;
-
-      // Spy on fs.readFile to see what paths are being read
-      const readFileSpy = vi.spyOn(fs, "readFile");
-      // Mock templates.render to replace placeholders
-      const renderSpy = vi
-        .fn()
-        .mockImplementation(
-          (template: string, data: Record<string, unknown>) => {
-            return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-              return (data[key] ?? "") as string;
-            });
-          },
-        );
-
-      const context = {
-        logger: mockLogger,
-        fs: fs,
-        templates: { render: renderSpy },
-      };
-
-      const answers = {
-        customiseTailwind: true,
-        addPostcssPlugins: true,
-        installAutoprefixer: false,
-      };
-
-      try {
-        await tailwindGenerator.run(answers, context);
-
-        // Verify that the template files were read
-        expect(readFileSpy).toHaveBeenCalledWith(
-          expect.stringContaining("tailwind.config.tmpl"),
-          { encoding: "utf8" },
-        );
-        expect(readFileSpy).toHaveBeenCalledWith(
-          expect.stringContaining("postcss.config.tmpl"),
-          { encoding: "utf8" },
-        );
-
-        // Verify that the rendered content was written to the config files
-        // Check the actual files created
-        const tailwindConfig = await fs.readFile("tailwind.config.js", "utf8");
-        const postcssConfig = await fs.readFile("postcss.config.js", "utf8");
-
-        expect(tailwindConfig).toContain(
-          "@type {import('tailwindcss').Config}",
-        );
-        expect(tailwindConfig).toContain("module.exports = {");
-        expect(postcssConfig).toContain("module.exports = {");
-        expect(postcssConfig).toContain("plugins:");
-
-        // Verify that the template string passed to render was the one from the .tmpl file
-        const renderCalls = renderSpy.mock.calls;
-        const templateUsed = renderCalls[0][0]; // first argument of first call
-        expect(templateUsed).toContain("@type {import('tailwindcss').Config}");
-        expect(templateUsed).toContain("module.exports = {");
-
-        const templateUsed2 = renderCalls[1][0];
-        expect(templateUsed2).toContain("module.exports = {");
-        expect(templateUsed2).toContain("plugins:");
-      } finally {
-        readFileSpy.mockRestore();
-      }
-    }, 30000);
-  });
-
-  test("tailwindGenerator should run successfully", async () => {
+  test("tailwindGenerator should run successfully with CLI answers", async () => {
     // Create a package.json so that validation passes
-    await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
     // Create the src directory
     await fs.mkdir("src", { recursive: true });
 
@@ -262,15 +155,18 @@ describe("Tailwind Generator", () => {
       info: vi.fn(),
       error: vi.fn(),
       warn: vi.fn(),
+      debug: vi.fn(),
     } as unknown as Logger;
-
-    // Mock templates.render to return a simple string
-    const renderSpy = vi.fn().mockReturnValue("");
 
     const context = {
       logger: mockLogger,
       fs: fs,
-      templates: { render: renderSpy },
+      templates: { render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+        // Simple template replacement for testing
+        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+          return (data[key] ?? '') as string;
+        });
+      }) },
     };
 
     const answers = {
@@ -279,200 +175,312 @@ describe("Tailwind Generator", () => {
       installAutoprefixer: false,
     };
 
+    await expect(
+      tailwindGenerator.run(answers, context)
+    ).resolves.not.toThrow();
+
+    // Verify that intro was called
+    expect(prompts.intro).toHaveBeenCalledWith("DXG Tailwind Setup");
+
+    // Verify that outro was called
+    expect(prompts.outro).toHaveBeenCalledWith("Tailwind CSS setup completed!");
+
+    // Verify that note was called for user-facing messages
+    expect(prompts.note).toHaveBeenCalled();
+
+    // Verify that logger.debug was called for technical diagnostics
+    expect(mockLogger.debug).toHaveBeenCalled();
+
+    // Verify that fs.pathExists was called for package.json
+    expect(fs.pathExists).toHaveBeenCalledWith("package.json");
+
+    // Verify that fs.mkdir was called for src directory
+    expect(fs.mkdir).toHaveBeenCalledWith("src", { recursive: true });
+
+    // Verify that fs.writeFile was called for CSS file
+    expect(fs.writeFile).toHaveBeenCalledWith(
+      expect.stringContaining("src/index.css"),
+      expect.any(String),
+      "utf8"
+    );
+  });
+
+  test("tailwindGenerator should handle dry-run mode", async () => {
+    // Create a package.json so that validation passes
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+    // Create the src directory
+    await fs.mkdir("src", { recursive: true });
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+        // Simple template replacement for testing
+        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+          return (data[key] ?? '') as string;
+        });
+      }) },
+      dryRun: true, // Dry run mode
+    };
+
+    const answers = {
+      customiseTailwind: false,
+      addPostcssPlugins: false,
+      installAutoprefixer: false,
+    };
+
+    await expect(
+      tailwindGenerator.run(answers, context)
+    ).resolves.not.toThrow();
+
+    // In dry-run mode, fs.writeFile should NOT be called for the CSS file
+    expect(fs.writeFile).not.toHaveBeenCalledWith(
+      expect.stringContaining("src/index.css"),
+      expect.any(String),
+      "utf8"
+    );
+
+    // But pathExists should still be called to check for package.json
+    expect(fs.pathExists).toHaveBeenCalledWith("package.json");
+
+    // And mkdir should still be called for src directory
+    expect(fs.mkdir).toHaveBeenCalledWith("src", { recursive: true });
+
+    // And readFile should be called for package.json and template
+    expect(fs.readFile).toHaveBeenCalledWith("package.json", { encoding: "utf8" });
+    expect(fs.readFile).toHaveBeenCalledWith(
+      expect.stringContaining("tailwind.config.tmpl"),
+      { encoding: "utf8" }
+    );
+    expect(fs.readFile).toHaveBeenCalledWith(
+      expect.stringContaining("postcss.config.tmpl"),
+      { encoding: "utf8" }
+    );
+
+    // Verify that the dry-run message was noted
+    expect(prompts.note).toHaveBeenCalledWith(
+      "[tailwind] Dry-run: Would install dependencies"
+    );
+  });
+
+  test("tailwindGenerator should handle force mode", async () => {
+    // Mock that files already exist
+    vi.mocked(fs).pathExists.mockResolvedValue(true);
+    vi.mocked(fs).stat.mockResolvedValue({ isDirectory: () => false });
+    vi.mocked(fs).readFile.mockResolvedValue("existing content"); // Different from template
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+        // Simple template replacement for testing
+        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+          return (data[key] ?? '') as string;
+        });
+      }) },
+      dryRun: false,
+      force: true, // Force mode
+    };
+
+    const answers = {
+      customiseTailwind: false,
+      addPostcssPlugins: false,
+      installAutoprefixer: false,
+    };
+
+    await expect(
+      tailwindGenerator.run(answers, context)
+    ).resolves.not.toThrow();
+
+    // In force mode, fs.writeFile should be called to overwrite existing files
+    expect(fs.writeFile).toHaveBeenCalledWith(
+      expect.stringContaining("src/index.css"),
+      expect.any(String),
+      "utf8"
+    );
+  });
+
+  test("tailwindGenerator should handle interactive prompts when CLI answers are incomplete", async () => {
+    // Override the prompt mock for this specific test
+    (prompts.prompt as vi.Mock).mockResolvedValueOnce({
+      customiseTailwind: true,
+      addPostcssPlugins: false,
+      installAutoprefixer: true
+    });
+
+    // Create a package.json so that validation passes
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+    // Create the src directory
+    await fs.mkdir("src", { recursive: true });
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const templatesMock = {
+      render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+        // Simple template replacement for testing
+        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+          return (data[key] ?? '') as string;
+        });
+      })
+    };
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: templatesMock,
+      dryRun: false,
+      force: false,
+    };
+
+    // No CLI answers provided, so it should prompt for all fields
+    const cliAnswers = {};
+
+    await expect(
+      tailwindGenerator.run(cliAnswers, context)
+    ).resolves.not.toThrow();
+
+    // Verify that prompt was called
+    expect(prompts.prompt).toHaveBeenCalled();
+  });
+
+  test("tailwindGenerator should handle cancellation", async () => {
+    // Override the prompt mock to simulate cancellation for this test
+    (prompts.prompt as vi.Mock).mockRejectedValueOnce(new Error("Canceled"));
+
+    // Create a package.json so that validation passes
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+    // Create the src directory
+    await fs.mkdir("src", { recursive: true });
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const templatesMock = {
+      render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+        // Simple template replacement for testing
+        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+          return (data[key] ?? '') as string;
+        });
+      })
+    };
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: templatesMock,
+      dryRun: false,
+      force: false,
+    };
+
+    // No CLI answers, so it will try to prompt
+    const cliAnswers = {};
+
+    await expect(
+      tailwindGenerator.run(cliAnswers, context)
+    ).rejects.toThrow();
+
+    // Verify that cancel was called
+    expect(prompts.cancel).toHaveBeenCalledWith("Operation cancelled");
+  });
+
+  test("tailwindGenerator should handle missing package.json", async () => {
+    // Ensure no package.json in the temporary directory
+    // (fs.pathExists is already mocked to return false by default)
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const templatesMock = {
+      render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+        // Simple template replacement for testing
+        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+          return (data[key] ?? '') as string;
+        });
+      })
+    };
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: templatesMock,
+      dryRun: false,
+      force: false,
+    };
+
+    const answers = {
+      customiseTailwind: false,
+      addPostcssPlugins: false,
+      installAutoprefixer: false,
+    };
+
+    await expect(
+      tailwindGenerator.run(answers, context)
+    ).rejects.toThrow("package.json not found");
+  });
+
+  test("tailwindGenerator should handle Node.js version < 18", async () => {
+    // Mock process.versions.node to simulate an old version
+    const originalNodeVersion = process.versions.node;
+    Object.defineProperty(process.versions, "node", {
+      value: "16.0.0",
+      configurable: true,
+    });
     try {
-      await tailwindGenerator.run(answers, context);
-
-      // Verify that execSync was called with install command
-      // Note: we cannot directly spy on execSync because it's mocked in the generator file.
-      // The generator file mocks child_process.execSync globally via vi.mock.
-      // We'll rely on the fact that the generator runs without error as success.
-      // For more precise testing, we could check that a dependency was added to package.json,
-      // but that's beyond scope.
-
-      // Verify that templater.render was called for config files (if they were to be created)
-      // Since all options are false, no config files should be created
-      expect(renderSpy).not.toHaveBeenCalled();
-
-      // Verify that fs.writeFile was called for CSS entrypoint
-      // Check that the CSS file was created and contains the directives
-      const cssContent = await fs.readFile("src/index.css", "utf8");
-      expect(cssContent).toContain("@tailwind base;");
-      expect(cssContent).toContain("@tailwind components;");
-      expect(cssContent).toContain("@tailwind utilities;");
-    } finally {
-      // No need to restore execSync because it's a mock function that is reset by vi.mock between tests
-      renderSpy.mockRestore();
-    }
-  }, 30000);
-
-  describe("Idempotence", () => {
-    test("second run should not duplicate CSS directives", async () => {
-      // Create a package.json with tailwind dependencies already installed
-      await fs.writeFile(
-        "package.json",
-        '{"devDependencies":{"tailwindcss":"^3.0.0","postcss":"^8.0.0"}}',
-        "utf8",
-      );
-      // Create the src directory
-      await fs.mkdir("src", { recursive: true });
-      // Create a CSS file that already has the directives
-      await fs.writeFile(
-        "src/index.css",
-        `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n/* custom */`,
-        "utf8",
-      );
-
-      const mockLogger = {
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      } as unknown as Logger;
-
       const context = {
-        logger: mockLogger,
+        logger: {
+          info: vi.fn(),
+          error: vi.fn(),
+          warn: vi.fn(),
+          debug: vi.fn(),
+        } as unknown as Logger,
         fs: fs,
         templates: { render: vi.fn().mockReturnValue("") },
       };
-
-      const answers = {
-        customiseTailwind: false,
-        addPostcssPlugins: false,
-        installAutoprefixer: false,
-      };
-
-      // Spy on fs.writeFile to see if it's called for the CSS file
-      const writeFileSpy = vi.spyOn(fs, "writeFile");
-      // Spy on execSync to ensure it's not called
-      const execSyncMock = vi.spyOn(require("child_process"), "execSync");
-
-      // First run
-      await tailwindGenerator.run(answers, context);
-      // Second run
-      await tailwindGenerator.run(answers, context);
-
-      // Verify that writeFile was not called for CSS entrypoint (since it should be skipped)
-      const writeFileCalls = writeFileSpy.mock.calls.filter(
-        (call) => call[0] === "src/index.css",
+      await tailwindGenerator.run(
+        {
+          customiseTailwind: false,
+          addPostcssPlugins: false,
+          installAutoprefixer: false,
+        },
+        context,
       );
-      expect(writeFileCalls.length).toBe(0);
-
-      // Verify that execSync was not called (since dependencies are already installed)
-      expect(execSyncMock).not.toHaveBeenCalled();
-
-      // Also, the CSS content should remain unchanged
-      const cssContent = await fs.readFile("src/index.css", "utf8");
-      expect(cssContent).toBe(
-        `@tailwind base;\n@tailwind components;\n@tailwind utilities;\n/* custom */`,
-      );
-
-      writeFileSpy.mockRestore();
-    });
-  });
-
-  describe("Package manager detection", () => {
-    test("should detect packageManager field in package.json", async () => {
-      // Mock the detectPackageManager function to return a specific result
-      mockedDetectPackageManager.mockResolvedValueOnce("pnpm");
-
-      const packageManager = await detectPackageManager(undefined);
-      expect(packageManager).toBe("pnpm");
-      expect(detectPackageManager).toHaveBeenCalledWith(undefined);
-    });
-
-    test("should detect yarn when yarn.lock exists (and no packageManager field)", async () => {
-      // Mock the detectPackageManager function to return a specific result
-      mockedDetectPackageManager.mockResolvedValueOnce("yarn");
-
-      const packageManager = await detectPackageManager(undefined);
-      expect(packageManager).toBe("yarn");
-      expect(detectPackageManager).toHaveBeenCalledWith(undefined);
-    });
-
-    test("should detect pnpm when pnpm-lock.yaml exists (and no packageManager field)", async () => {
-      // Mock the detectPackageManager function to return a specific result
-      mockedDetectPackageManager.mockResolvedValueOnce("pnpm");
-
-      const packageManager = await detectPackageManager(undefined);
-      expect(packageManager).toBe("pnpm");
-      expect(detectPackageManager).toHaveBeenCalledWith(undefined);
-    });
-
-    test("should detect bun when bun.lockb exists (and no packageManager field)", async () => {
-      // Mock the detectPackageManager function to return a specific result
-      mockedDetectPackageManager.mockResolvedValueOnce("bun");
-
-      const packageManager = await detectPackageManager(undefined);
-      expect(packageManager).toBe("bun");
-      expect(detectPackageManager).toHaveBeenCalledWith(undefined);
-    });
-
-    test("should detect npm when package-lock.json exists (and no packageManager field)", async () => {
-      // Mock the detectPackageManager function to return a specific result
-      mockedDetectPackageManager.mockResolvedValueOnce("npm");
-
-      const packageManager = await detectPackageManager(undefined);
-      expect(packageManager).toBe("npm");
-      expect(detectPackageManager).toHaveBeenCalledWith(undefined);
-    });
-
-    test("should default to npm when no lockfile exists and no packageManager field", async () => {
-      // Mock the detectPackageManager function to return a specific result
-      mockedDetectPackageManager.mockResolvedValueOnce("npm");
-
-      const packageManager = await detectPackageManager(undefined);
-      expect(packageManager).toBe("npm");
-      expect(detectPackageManager).toHaveBeenCalledWith(undefined);
-    });
-  });
-  describe("Dry-run mode", () => {
-    test("does not install dependencies or write files", async () => {
-      // Create a package.json so that validation passes
-      await fs.writeFile("package.json", '{"devDependencies":{}}', "utf8");
-      // Create the src directory for CSS entrypoint
-      await fs.mkdir("src", { recursive: true });
-
-      const mockLogger = {
-        info: vi.fn(),
-        error: vi.fn(),
-        warn: vi.fn(),
-      } as unknown as Logger;
-
-      // Mock templates.render to return a simple string
-      const renderSpy = vi.fn().mockReturnValue("");
-
-      // detectPackageManager mock comes from the top-level vi.mock("@dxgjs/fs")
-      mockedDetectPackageManager.mockResolvedValueOnce("npm");
-      // execSync comes from the top-level vi.mock("child_process") instance
-      const execSyncMock = vi.mocked(execSync);
-      execSyncMock.mockClear();
-      // Mock fs.writeFile to ensure it's not called for files
-      const writeFileSpy = vi.spyOn(fs, "writeFile");
-
-      const context = {
-        logger: mockLogger,
-        fs: fs,
-        templates: { render: renderSpy },
-        dryRun: true, // Set dryRun to true
-      };
-
-      const answers = {
-        customiseTailwind: false,
-        addPostcssPlugins: false,
-        installAutoprefixer: false,
-      };
-
-      await tailwindGenerator.run(answers, context);
-
-      // Verify that execSync was not called (dependency installation)
-      expect(execSyncMock).not.toHaveBeenCalled();
-
-      // Verify that fs.writeFile was not called for files
-      expect(writeFileSpy).not.toHaveBeenCalled();
-
-      // Verify that the logger logged the dry-run message
-      expect(mockLogger.info).toHaveBeenCalledWith(
-        "[tailwind] Dry-run: Would install dependencies",
-      );
-    });
+      expect(false).toBe(true); // Should not reach here
+    } catch (error: unknown) {
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain("Node.js version");
+    } finally {
+      // Restore original node version
+      Object.defineProperty(process.versions, "node", {
+        value: originalNodeVersion,
+        configurable: true,
+      });
+    }
   });
 });

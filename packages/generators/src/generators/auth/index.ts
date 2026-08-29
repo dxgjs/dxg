@@ -1,9 +1,21 @@
+// Get the directory where this module is located
 import { GeneratorContext, Generator } from "../../types";
+
+// Import Clack-native UX utilities from @dxgjs/prompts
+import {
+  intro,
+  outro,
+  isCancel,
+  cancel,
+  spinner,
+  note,
+  prompt,
+} from "@dxgjs/prompts";
+
 import { fileURLToPath } from "url";
 import { dirname, join, sep } from "path";
 import { executeCommand } from "@dxgjs/fs";
 import { parseNi, getCliCommand } from "@antfu/ni";
-
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
@@ -181,7 +193,7 @@ export async function executeAuth(
   if (!ctx.dryRun) {
     const authInstalled = await isAuthInstalled(fs, provider);
     if (authInstalled) {
-      logger.info(` ${provider} already detected. Skipping dependency installation.`);
+          note(`${provider} already detected. Skipping dependency installation.`);
     } else if (answers.installDependencies) {
       // Install dependencies using @antfu/ni getCliCommand and executeCommand
       try {
@@ -201,11 +213,13 @@ export async function executeAuth(
         const { command: cmd, args, cwd: resolvedCwd } = resolved;
         const executeCwd = resolvedCwd ?? process.cwd();
 
-        logger.info(`Installing dependencies: ${planToUse.packages.join(", ")}`);
+        const s = spinner();
+        s.start(`Installing dependencies: ${planToUse.packages.join(", ")}`);
         await executeCommand(cmd, args, {
           cwd: executeCwd,
           stdio: "inherit"
         });
+        s.stop(`Successfully installed: ${planToUse.packages.join(", ")}`);
       } catch (error) {
         throw new Error(
           `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
@@ -217,7 +231,7 @@ export async function executeAuth(
     // In dry-run mode, just check if installation would be needed
     const authInstalled = await isAuthInstalled(fs, provider);
     if (!authInstalled && answers.installDependencies) {
-      logger.info("[auth] Dry-run: Would install dependencies");
+          note("[auth] Dry-run: Would install dependencies");
     }
   }
 
@@ -288,7 +302,9 @@ export async function executeAuth(
       }
 
       // Safe to create
-      if (!ctx.dryRun) {
+      if (ctx.dryRun) {
+        // In dry-run mode, don't actually write the file
+      } else {
         // Ensure the directory exists
         if (dir && !(await fs.pathExists(dir))) {
           await fs.mkdir(dir, { recursive: true });
@@ -320,29 +336,30 @@ export async function verifyAuth(
   }
 }
 
-// Summarize function
+// Summarize function using Clack UX (replaces logger-based summarization)
 export function summarizeAuth(
+  answers: Record<string, unknown>,
   result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
   ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
   const { created, updated, skipped, conflicts } = result;
-
   if (created.length) {
-    logger.info(` Created: ${created.join(", ")}`);
+    note(`Created: ${created.join(", ")}`);
   }
   if (updated.length) {
-    logger.info(` Updated: ${updated.join(", ")}`);
+    note(`Updated: ${updated.join(", ")}`);
   }
   if (skipped.length) {
-    logger.info(` Unchanged: ${skipped.join(", ")}`);
+    note(`Unchanged: ${skipped.join(", ")}`);
   }
   if (conflicts.length) {
     const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
-    logger.warn(` Conflicts: ${conflictDetails}`);
+    note(`Conflicts: ${conflictDetails}`);
   }
 
-  logger.info(` Auth generator completed successfully`);
+  logger.debug(`Auth generator completed successfully (provider: ${answers.provider})`);
+  note(`Auth generator completed successfully (provider: ${answers.provider})`);
 }
 
 
@@ -354,30 +371,99 @@ export const authGenerator: Generator = {
   name: "auth",
   description: "Adds authentication provider configuration",
   prompts: authPrompts,
-  async run(answers: Record<string, unknown>, context: GeneratorContext) {
+  async run(cliAnswers: Record<string, unknown>, context: GeneratorContext) {
     const ctx = context;
+
+    // Intro
+    intro("DXG Auth Setup");
+
+    // Collect inputs - use CLI/provided answers, fallback to interactive prompts
+    let answers = { ...cliAnswers };
+
+    // Check if we need to prompt for missing required fields
+    const needsProvider = answers.provider === undefined;
+    const needsInstallDependencies = answers.installDependencies === undefined;
+    const needsGenerateExampleConfig = answers.generateExampleConfig === undefined;
+
+    // Only prompt in interactive mode
+    const shouldPrompt = !(ctx.dryRun === true && Object.keys(cliAnswers).length > 0) && !process.env.CI; // Simple check for non-interactive
+
+    if ((needsProvider || needsInstallDependencies || needsGenerateExampleConfig) && shouldPrompt) {
+      // Use interactive prompts for missing fields
+      const promptQuestions = [];
+
+      if (needsProvider) {
+        promptQuestions.push(authPrompts[0]); // provider prompt
+      }
+
+      if (needsInstallDependencies) {
+        promptQuestions.push(authPrompts[1]); // installDependencies prompt
+      }
+
+      if (needsGenerateExampleConfig) {
+        promptQuestions.push(authPrompts[2]); // generateExampleConfig prompt
+      }
+
+      const promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+      answers = { ...answers, ...promptAnswers };
+    } else if ((needsProvider || needsInstallDependencies || needsGenerateExampleConfig) && !shouldPrompt) {
+      // In non-interactive mode, throw error for missing required values
+      const missing = [];
+      if (needsProvider) missing.push("provider");
+      if (needsInstallDependencies) missing.push("installDependencies");
+      if (needsGenerateExampleConfig) missing.push("generateExampleConfig");
+      throw new Error(`Missing required values in non-interactive mode: ${missing.join(", ")}`);
+    }
 
     // Validate preconditions
     await checkPreconditions(ctx);
 
     // Validate (interface compliance)
     if (!validateAuth()) {
+      // Use Clack cancel for validation failure
+      cancel("Invalid responses for auth generator");
       throw new Error("Invalid responses for auth generator");
     }
 
     // Plan
     const plan = planAuth(answers);
 
-    // Execute
-    const execResult = await executeAuth(answers, ctx, plan);
+    // Use spinner for file creation operations
+    const s = spinner();
+    s.start("Setting up authentication...");
 
-    // Verify (skip in dry-run mode)
-    if (!ctx.dryRun) {
-      await verifyAuth(answers, ctx, plan);
+    try {
+      // Execute
+      const execResult = await executeAuth(answers, ctx, plan);
+
+      // Verify (skip in dry-run mode)
+      if (!ctx.dryRun) {
+        await verifyAuth(answers, ctx, plan);
+      }
+
+      // Stop spinner
+      s.stop();
+
+      // Summarize using Clack UX
+      summarizeAuth(answers, execResult, ctx);
+
+      // Outro
+      outro(`Auth setup completed for ${answers.provider}!`);
+    } catch (error) {
+      // Stop spinner on error
+      s.stop();
+
+      // Handle cancellation
+      if (isCancel(error)) {
+        cancel("Operation cancelled");
+        throw error;
+      }
+
+      // Handle other errors
+      note(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      outro(`Failed to setup auth for ${answers.provider}`);
+      throw error;
     }
-
-    // Summarize
-    summarizeAuth(execResult, ctx);
   },
 };
 
