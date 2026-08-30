@@ -242,7 +242,7 @@ export const initGenerator: Generator = {
     const needsDescription = answers.description === undefined; // description is optional, so we only prompt if not provided at all
 
     // Only prompt in interactive mode
-    const shouldPrompt = !(ctx.dryRun === true && Object.keys(cliAnswers).length > 0) && !process.env.CI; // Simple check for non-interactive
+    const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
 
     if ((needsName || needsDescription) && shouldPrompt) {
       // Use interactive prompts for missing fields

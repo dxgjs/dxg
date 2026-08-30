@@ -611,7 +611,7 @@ export const tailwindGenerator: Generator = {
     const needsInstallAutoprefixer = answers.installAutoprefixer === undefined;
 
     // Only prompt in interactive mode
-    const shouldPrompt = !(ctx.dryRun === true && Object.keys(cliAnswers).length > 0) && !process.env.CI; // Simple check for non-interactive
+    const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
 
     if ((needsCustomiseTailwind || needsAddPostcssPlugins || needsInstallAutoprefixer) && shouldPrompt) {
       // Use interactive prompts for missing fields

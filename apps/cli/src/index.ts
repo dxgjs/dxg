@@ -2,8 +2,6 @@ import { Command } from "commander";
 import { detectWorkspace } from "@dxgjs/workspace";
 import { loadConfig } from "@dxgjs/config";
 import {
-  prompt,
-  type PromptQuestion,
   intro,
   outro,
   note,
@@ -28,7 +26,7 @@ import { tailwindGenerator } from "@dxgjs/generators";
 import { databaseGenerator } from "@dxgjs/generators";
 import { render as templatesRender } from "@dxgjs/templates";
 import pc from "picocolors";
-import { DXGError, formatDXGError } from "./errors";
+import { formatDXGError } from "./errors";
 import pkg from "../package.json" with { type: "json" };
 
 const program = new Command();
@@ -73,6 +71,7 @@ function prepareContext(options: CommanderOptions) {
     templates: { render: templatesRender },
     dryRun: options.dryRun ?? false,
     force: options.force ?? false,
+    nonInteractive: options.nonInteractive ?? false,
   };
 }
 
@@ -136,15 +135,6 @@ function mergeAnswersWithConfig(
   return finalAnswers;
 }
 
-/**
- * Answer definition for collecting values from CLI options, environment variables, or prompts
- */
-interface AnswerDef {
-  name: string;
-  option?: string; // CLI option name (e.g., 'customise')
-  env?: string; // Environment variable name (e.g., 'DXG_TAILWIND_CUSTOMISE')
-  type?: "boolean" | "string";
-}
 
 interface CommanderOptions {
   verbose: boolean;
@@ -163,128 +153,6 @@ interface CommanderOptions {
  * @param prompts Generator's prompt definitions
  * @param answerDefs Mapping of how to collect each answer
  */
-async function collectAnswersForGenerator(
-  generatorName: string,
-  options: CommanderOptions,
-  nonInteractive: boolean,
-  prompts: PromptQuestion[],
-  answerDefs: AnswerDef[],
-): Promise<Record<string, unknown>> {
-  const answers: Record<string, unknown> = {};
-  const missing: string[] = [];
-
-  for (const def of answerDefs) {
-    let value: unknown = undefined;
-
-    // 1. Check CLI option (if defined)
-    if (def.option !== undefined && options[def.option] !== undefined) {
-      value = options[def.option];
-    }
-    // 2. Check environment variable
-    else if (def.env !== undefined && process.env[def.env] !== undefined) {
-      const envVal = process.env[def.env];
-      if (def.type === "boolean") {
-        value = envVal === "true";
-      } else {
-        value = envVal;
-      }
-    }
-    // 3. If not found via CLI/env, mark as missing (will prompt if interactive)
-    else {
-      missing.push(def.name);
-    }
-
-    if (value !== undefined) {
-      answers[def.name] = value;
-    }
-  }
-
-  // If in non-interactive mode and we have missing values, throw error
-  if (nonInteractive && missing.length > 0) {
-    throw new DXGError(
-      `Missing required values in non-interactive mode for generator '${generatorName}': ${missing.join(", ")}`,
-      {
-        hint: "Cannot prompt for input in non-interactive mode",
-        suggestion:
-          "Set the corresponding environment variables (e.g., DXG_PROJECT_NAME) or provide CLI options (e.g., --name)",
-      },
-    );
-  }
-
-  // If interactive and we have missing values, prompt for all answers
-  if (!nonInteractive && missing.length > 0) {
-    const promptAnswers = await prompt(prompts);
-    // Merge prompted answers with any CLI/env values we already collected
-    return { ...answers, ...promptAnswers };
-  }
-
-  return answers;
-}
-
-// Answer definition mappings for each generator
-const initAnswerDefs: AnswerDef[] = [
-  { name: "name", env: "DXG_PROJECT_NAME" },
-  { name: "description", env: "DXG_PROJECT_DESCRIPTION" },
-];
-
-const tailwindAnswerDefs: AnswerDef[] = [
-  {
-    name: "customiseTailwind",
-    option: "customise",
-    env: "DXG_TAILWIND_CUSTOMISE",
-    type: "boolean",
-  },
-  {
-    name: "addPostcssPlugins",
-    option: "postcss",
-    env: "DXG_TAILWIND_POSTCSS",
-    type: "boolean",
-  },
-  {
-    name: "installAutoprefixer",
-    option: "autoprefixer",
-    env: "DXG_TAILWIND_AUTOPREFIXER",
-    type: "boolean",
-  },
-];
-
-const databaseAnswerDefs: AnswerDef[] = [
-  {
-    name: "provider",
-    option: "provider",
-    env: "DXG_DATABASE_PROVIDER",
-    type: "string",
-  },
-];
-
-const authAnswerDefs: AnswerDef[] = [
-  {
-    name: "provider",
-    option: "provider",
-    env: "DXG_AUTH_PROVIDER",
-    type: "string",
-  },
-  {
-    name: "installDependencies",
-    option: "installDeps",
-    env: "DXG_AUTH_INSTALL_DEPS",
-    type: "boolean",
-  },
-  {
-    name: "generateExampleConfig",
-    option: "generateConfig",
-    env: "DXG_AUTH_GENERATE_CONFIG",
-    type: "boolean",
-  },
-];
-
-// Map generator names to their answer definitions
-const answerDefsMap: Record<string, AnswerDef[]> = {
-  init: initAnswerDefs,
-  tailwind: tailwindAnswerDefs,
-  database: databaseAnswerDefs,
-  auth: authAnswerDefs,
-};
 
 /**
  * Runs the UX showcase demo
@@ -422,8 +290,6 @@ program
   .option("--quiet", "Suppress non-essential output")
   .argument("[directory]", "target directory (default: current directory)", ".")
   .action(async (targetDirRaw: string, options: CommanderOptions) => {
-    const nonInteractive = options.nonInteractive;
-
     try {
       const targetDir = join(process.cwd(), targetDirRaw);
       const projectRoot = await findProjectRoot(targetDir);
@@ -433,21 +299,12 @@ program
       const config = await loadConfigSilently(projectRoot);
       const context = prepareContext(options);
 
-      // Collect answers for init generator
-      const answers = await collectAnswersForGenerator(
-        "init",
-        options,
-        nonInteractive,
-        initGenerator.prompts,
-        initAnswerDefs,
-      );
-
-      // Merge with config
-      const finalAnswers = mergeAnswersWithConfig(answers, config);
-
+      // Build initial answers from CLI options and config
+      const configAnswers = mergeAnswersWithConfig({}, config);
+      const cliAnswers = { ...options, ...configAnswers };
       // Run generator in project root directory
       await runInTargetDirectory(projectRoot, async () => {
-        await initGenerator.run(finalAnswers, context);
+        await initGenerator.run(cliAnswers, context);
       });
 
       // Natural exit (code 0)
@@ -508,7 +365,6 @@ program
   .option("--verbose", "Enable verbose logging")
   .option("--quiet", "Suppress non-essential output")
   .action(async (generatorName, targetDirRaw, options: CommanderOptions) => {
-    const nonInteractive = options.nonInteractive ?? false;
 
     try {
       const targetDir = join(process.cwd(), targetDirRaw);
@@ -532,29 +388,13 @@ program
         throw new Error(`Unknown generator: ${generatorName}`);
       }
 
-      // Get answer definitions for this generator
-      const answerDefs = answerDefsMap[generatorName];
-      if (!answerDefs) {
-        throw new Error(
-          `No answer definitions found for generator: ${generatorName}`,
-        );
-      }
-
-      // Collect answers for this generator
-      const answers = await collectAnswersForGenerator(
-        generatorName,
-        options,
-        nonInteractive,
-        generator.prompts,
-        answerDefs,
-      );
-
-      // Merge with config (for name and description if applicable)
-      const finalAnswers = mergeAnswersWithConfig(answers, config);
+      // Build initial answers from CLI options and config
+      const configAnswers = mergeAnswersWithConfig({}, config);
+      const cliAnswers = { ...options, ...configAnswers };
 
       // Run generator in project root directory
       await runInTargetDirectory(projectRoot, async () => {
-        await generator.run(finalAnswers, context);
+        await generator.run(cliAnswers, context);
       });
 
       // Natural exit (code 0)

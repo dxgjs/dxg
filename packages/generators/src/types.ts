@@ -20,6 +20,8 @@ export interface GeneratorContext {
   dryRun?: boolean;
   /** Whether to force overwrite conflicting files */
   force?: boolean;
+  /** Whether to run in non-interactive mode (no prompts) */
+  nonInteractive?: boolean;
 }
 
 export interface GeneratorPrompt {

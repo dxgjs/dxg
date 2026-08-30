@@ -715,7 +715,7 @@ export const databaseGenerator: Generator = {
     const needsProvider = answers.provider === undefined;
 
     // Only prompt in interactive mode (not dry-run and not CI)
-    const shouldPrompt = !(ctx.dryRun === true) && !process.env.CI;
+    const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
 
     if (needsProvider && shouldPrompt) {
       // Use interactive prompts for missing fields
