@@ -6,10 +6,12 @@ import {
   beforeEach,
   afterEach,
   beforeAll,
+  type Mock,
 } from "vitest";
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import { render as realRender } from "@dxgjs/templates";
+import { note as noteMock, prompt as promptMock } from "@dxgjs/prompts";
 import * as path from "path";
 import * as os from "os";
 import { getCliCommand } from "@antfu/ni";
@@ -130,6 +132,8 @@ vi.mock("@dxgjs/templates", async () => {
   };
 });
 
+let triggerPrismaInitWorkaround = false;
+
 vi.mock("@antfu/ni", () => {
   return {
     parseNlx: vi.fn().mockReturnValue("npx"),
@@ -144,30 +148,36 @@ vi.mock("@antfu/ni", () => {
         if (!args || args.length === 0) {
           return { command: "npm", args: [] };
         }
+        // For prisma init command — keyed to the EXACT production argument
+        // shape (executeDatabase calls getCliCommand(parseNlx,
+        // ["prisma@7", "init", ...])). This branch MUST be evaluated before
+        // the dependency-install branches, whose "-D"/"add" heuristics would
+        // otherwise swallow the prisma args. Real @antfu/ni resolves this
+        // command with a verbatim args passthrough (npx / pnpm dlx /
+        // yarn dlx / bun x), so the mock must never transform or drop args
+        // (especially --no-skills).
+        if (args[0] === "prisma@7" && args[1] === "init") {
+          // If we want to trigger the workaround, simulate legacy
+          // @antfu/ni versions that mis-resolved the dlx command to
+          // "<agent> add ..." — the production originalArgs workaround must
+          // rewrite this to npx + the original args (still including
+          // --no-skills).
+          if (triggerPrismaInitWorkaround) {
+            return {
+              command: "some-agent",
+              args: ["add", ...args],
+            };
+          }
+
+          // Real ni behavior: verbatim passthrough after the executable.
+          return { command: "npx", args: [...args] };
+        }
         // For dependency installation commands
         if (args.includes("-D") && !args.includes("add")) {
           return { command: "npm", args: ["install", "-D", ...args] };
         }
         if (!args.includes("-D") && !args.includes("add")) {
           return { command: "npm", args: ["install", ...args] };
-        }
-        // For prisma init command
-        if (
-          args.includes("dlx") &&
-          args.includes("prisma") &&
-          args.includes("init")
-        ) {
-          return {
-            command: "npx",
-            args: [
-              "prisma",
-              "init",
-              "--datasource-provider",
-              "sqlite",
-              "--output",
-              "../lib/generated/prisma",
-            ],
-          };
         }
         // For prisma generate command
         if (
@@ -264,6 +274,16 @@ describe("Database Generator", () => {
     expect(choiceValues).toContain("cockroachdb");
     expect(choiceValues).toContain("planetscale");
     expect(choiceValues).toContain("prismapostgres");
+
+    // Second prompt: the Prisma agent skills decision — owned by DXG
+    // (a Clack confirm), so Prisma itself never asks this question.
+    expect(prompts[1].name).toBe("installPrismaSkills");
+    expect(prompts[1].type).toBe("confirm");
+    expect(prompts[1].message).toBe("Install Prisma agent skills?");
+    // Default is No: skills artifacts (.claude/skills/, .windsurf/skills/,
+    // .agents/skills/, skills-lock.json) only land in the project when the
+    // user explicitly opts in.
+    expect(prompts[1].default).toBe(false);
   });
 
   test("databaseGenerator should validate correctly", () => {
@@ -613,6 +633,288 @@ describe("Database Generator", () => {
           call[0].includes("schema.prisma.tmpl"),
       );
       expect(schemaTemplateCalls.length).toBe(0);
+    });
+
+    test("should trigger workaround for @antfu/ni issue and still pass --no-skills to prisma init", async () => {
+      // Create a package.json so that validation passes
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      const mockLogger = {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as unknown as Logger;
+
+      const templatesMock = {
+        render: vi.fn(realRender),
+      };
+
+      // Set the flag to trigger the workaround
+      triggerPrismaInitWorkaround = true;
+
+      const context = {
+        logger: mockLogger,
+        fs: fs,
+        templates: templatesMock,
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: { name: 'unknown', detected: false },
+          language: { name: 'javascript', detected: true },
+          packageManager: 'npm',
+          styling: { name: 'none', detected: false, version: null, configFile: null },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false
+          },
+          packageJson: {
+            name: 'test-project',
+            version: '1.0.0',
+            private: true
+          }
+        },
+        dryRun: false,
+        force: false,
+        nonInteractive: false,
+      };
+
+      const answers = {
+        provider: "sqlite",
+      };
+
+      await databaseGenerator.run(answers, context);
+
+      // Reset the flag
+      triggerPrismaInitWorkaround = false;
+
+      // Expect that the workaround was triggered: command should be "npx" and args should be the original args
+      // (which include --no-skills)
+      expect(fs.executeCommand).toHaveBeenCalledTimes(3); // deps, deps, prisma init
+      // The last call to executeCommand should be for prisma init
+      const prismaInitCall = (fs.executeCommand as Mock).mock.calls[2];
+      expect(prismaInitCall[0]).toBe("npx");
+      expect(prismaInitCall[1]).toEqual([
+        "prisma@7",
+        "init",
+        "--datasource-provider",
+        "sqlite",
+        "--no-skills",
+        "--output",
+        "../lib/generated/prisma"
+      ]);
+    });
+  });
+
+  describe("Prisma agent skills decision (DXG-owned)", () => {
+    const baseContext = (overrides: Record<string, unknown> = {}) => ({
+      logger: {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as unknown as Logger,
+      fs,
+      templates: {
+        // Real renderer semantics (delegates to @dxgjs/templates render).
+        render: vi.fn(realRender),
+      },
+      awareness: {
+        projectRoot: ".",
+        workspaceRoot: ".",
+        framework: { name: "unknown", detected: false },
+        language: { name: "javascript", detected: true },
+        packageManager: "npm",
+        styling: {
+          name: "none",
+          detected: false,
+          version: null,
+          configFile: null,
+        },
+        capabilities: {
+          hasTests: false,
+          hasLinting: false,
+          hasFormatter: false,
+          hasCI: false,
+          hasDocker: false,
+        },
+        packageJson: { name: "test-project", version: "1.0.0", private: true },
+      },
+      dryRun: false,
+      force: false,
+      ...overrides,
+    });
+
+    /** The last executeCommand call is the prisma init invocation. */
+    function getPrismaInitArgs(): string[] {
+      const calls = (fs.executeCommand as Mock).mock.calls;
+      return calls[calls.length - 1][1] as string[];
+    }
+
+    test("user selects No → prisma init receives --no-skills", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      await databaseGenerator.run(
+        { provider: "sqlite", installPrismaSkills: false },
+        baseContext(),
+      );
+
+      // Exact contract: --no-skills sits between the provider and --output.
+      expect(getPrismaInitArgs()).toEqual([
+        "prisma@7",
+        "init",
+        "--datasource-provider",
+        "sqlite",
+        "--no-skills",
+        "--output",
+        "../lib/generated/prisma",
+      ]);
+    });
+
+    test("user selects Yes → invoked without --no-skills and never interactive", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      await databaseGenerator.run(
+        { provider: "sqlite", installPrismaSkills: true },
+        baseContext(),
+      );
+
+      // prisma@7.10.0 installs agent skills UNCONDITIONALLY and
+      // non-interactively when --no-skills is omitted (verified in the CLI
+      // source: no prompt/TTY check on that path) — so Prisma can never ask
+      // the question DXG already asked.
+      expect(getPrismaInitArgs()).toEqual([
+        "prisma@7",
+        "init",
+        "--datasource-provider",
+        "sqlite",
+        "--output",
+        "../lib/generated/prisma",
+      ]);
+    });
+
+    test("defaults to No (non-interactive) without asking Prisma", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      await databaseGenerator.run(
+        { provider: "sqlite" },
+        baseContext({ nonInteractive: true }),
+      );
+
+      // DXG did not ask, and Prisma must not be left to ask either: the
+      // explicit --no-skills contract applies.
+      expect(promptMock).not.toHaveBeenCalled();
+      expect(getPrismaInitArgs()).toContain("--no-skills");
+    });
+
+    test("dry-run plans the chosen contract and never executes", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      await databaseGenerator.run(
+        { provider: "sqlite", installPrismaSkills: false },
+        baseContext({ dryRun: true }),
+      );
+      const noNote = (noteMock as Mock).mock.calls.find((call) =>
+        String(call[0]).includes("Would run: prisma"),
+      );
+      expect(String(noNote?.[0])).toContain("--no-skills");
+      expect(fs.executeCommand).not.toHaveBeenCalled();
+
+      (noteMock as Mock).mockClear();
+
+      await databaseGenerator.run(
+        { provider: "sqlite", installPrismaSkills: true },
+        baseContext({ dryRun: true }),
+      );
+      const yesNote = (noteMock as Mock).mock.calls.find((call) =>
+        String(call[0]).includes("Would run: prisma"),
+      );
+      expect(String(yesNote?.[0])).toContain("--datasource-provider sqlite");
+      expect(String(yesNote?.[0])).not.toContain("--no-skills");
+      expect(fs.executeCommand).not.toHaveBeenCalled();
+    });
+
+    test("PlanetScale keeps the mysql mapping regardless of the skills choice", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      await databaseGenerator.run(
+        { provider: "planetscale", installPrismaSkills: true },
+        baseContext(),
+      );
+      let args = getPrismaInitArgs();
+      expect(args[args.indexOf("--datasource-provider") + 1]).toBe("mysql");
+      expect(args).not.toContain("--no-skills");
+
+      await databaseGenerator.run(
+        { provider: "planetscale", installPrismaSkills: false },
+        baseContext(),
+      );
+      args = getPrismaInitArgs();
+      expect(args[args.indexOf("--datasource-provider") + 1]).toBe("mysql");
+      expect(args).toContain("--no-skills");
+    });
+
+    test("asks the DXG skills question right after the provider selection", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+      (promptMock as unknown as Mock).mockResolvedValue({
+        provider: "postgresql",
+        installPrismaSkills: false,
+      });
+
+      await databaseGenerator.run({}, baseContext());
+
+      const questions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
+        name: string;
+        type: string;
+        message: string;
+        default?: unknown;
+      }>;
+      expect(questions.map((q) => q.name)).toEqual([
+        "provider",
+        "installPrismaSkills",
+      ]);
+      expect(questions[1].type).toBe("confirm");
+      expect(questions[1].message).toBe("Install Prisma agent skills?");
+      expect(questions[1].default).toBe(false);
+
+      // The "No" answer flows through to the Prisma arguments.
+      expect(getPrismaInitArgs()).toContain("--no-skills");
+    });
+
+    test("asks only the skills question when the provider comes from the CLI", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+      (promptMock as unknown as Mock).mockResolvedValue({
+        installPrismaSkills: true,
+      });
+
+      await databaseGenerator.run({ provider: "sqlite" }, baseContext());
+
+      const questions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
+        name: string;
+      }>;
+      expect(questions.map((q) => q.name)).toEqual(["installPrismaSkills"]);
+
+      // "Yes" → no --no-skills flag (Prisma installs skills non-interactively).
+      expect(getPrismaInitArgs()).not.toContain("--no-skills");
     });
   });
 

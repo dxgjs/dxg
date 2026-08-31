@@ -200,6 +200,16 @@ export const databasePrompts = [
       value: p.key,
     })),
   },
+  {
+    // DXG owns the Prisma agent skills decision: the user is asked here so
+    // Prisma itself never has to ask. Default is No — Prisma agent skills
+    // (.claude/skills/, .windsurf/skills/, .agents/skills/, skills-lock.json)
+    // are only written into the user's project when explicitly requested.
+    type: "confirm" as const,
+    name: "installPrismaSkills",
+    message: "Install Prisma agent skills?",
+    default: false,
+  },
 ] satisfies {
   type: "input" | "confirm" | "select";
   name: string;
@@ -208,6 +218,36 @@ export const databasePrompts = [
   choices?: Array<{ name: string; value: string }>;
   validate?: (input: unknown) => boolean | string;
 }[];
+
+/**
+ * Builds the exact `prisma init` argument contract. This is the single
+ * source of truth used by BOTH production resolution paths in
+ * executeDatabase (the primary `getCliCommand(parseNlx, ...)` call and the
+ * `originalArgs` fallback/workaround), so the skills decision can never
+ * diverge between the two paths.
+ *
+ * Skills translation (verified against the prisma@7.10.0 CLI source):
+ * - `installSkills: false` passes the explicit `--no-skills` flag → Prisma
+ *   skips agent skills entirely.
+ * - `installSkills: true` omits the flag → prisma@7 installs agent skills
+ *   unconditionally and NON-interactively (that code path contains no
+ *   prompt/TTY check). Prisma therefore never asks the question DXG
+ *   already asked.
+ */
+export function buildPrismaInitArgs(
+  prismaProvider: string,
+  installSkills: boolean,
+): string[] {
+  return [
+    "prisma@7",
+    "init",
+    "--datasource-provider",
+    prismaProvider,
+    ...(installSkills ? [] : ["--no-skills"]),
+    "--output",
+    "../lib/generated/prisma",
+  ];
+}
 
 // Validation function
 export function validateDatabase(): boolean {
@@ -287,6 +327,9 @@ export function planDatabase(answers: Record<string, unknown>) {
     ...data,
     provider: provider.key, // Return just the provider key string for tests
     providerName: provider.displayName,
+    // DXG-owned Prisma agent skills decision (from the confirm prompt).
+    // Defaults to false (skip) — see buildPrismaInitArgs.
+    installPrismaSkills: answers.installPrismaSkills === true,
     devPackages,
     regularPackages,
     filesToCreate,
@@ -438,17 +481,19 @@ export async function executeDatabase(
         `Initializing Prisma with provider ${providerObj.prismaProvider}...`,
       );
 
+      // The skills decision (DXG-owned) is translated here into the exact
+      // prisma init argument contract. This array is the single source of
+      // truth for BOTH the primary resolution and the originalArgs fallback
+      // below, so the two paths can never diverge.
+      const prismaInitArguments = buildPrismaInitArgs(
+        providerObj.prismaProvider,
+        planToUse.installPrismaSkills === true,
+      );
+
       // Use the existing command execution infrastructure
       const prismaResolved = await getCliCommand(
         parseNlx,
-        [
-          "prisma@7",
-          "init",
-          "--datasource-provider",
-          providerObj.prismaProvider,
-          "--output",
-          "../lib/generated/prisma",
-        ],
+        prismaInitArguments,
         {
           cwd: process.cwd(),
           programmatic: true,
@@ -470,14 +515,8 @@ export async function executeDatabase(
 
       // Workaround for @antfu/ni issue with dlx commands
       // When args starts with ["prisma@7", "init"], some versions incorrectly resolve to "<agent> add ..."
-      const originalArgs = [
-        "prisma@7",
-        "init",
-        "--datasource-provider",
-        providerObj.prismaProvider,
-        "--output",
-        "../lib/generated/prisma",
-      ];
+      // Built from the same contract as the primary path (see prismaInitArguments).
+      const originalArgs = [...prismaInitArguments];
       if (
         originalArgs.length >= 2 &&
         originalArgs[0] === "prisma@7" &&
@@ -517,9 +556,17 @@ export async function executeDatabase(
     // In dry-run mode, report what would happen
     const providerObj =
       providerData[planToUse.provider as keyof typeof providerData];
-    note(
-      `[database] Dry-run: Would run: prisma init --datasource-provider ${providerObj.prismaProvider} --output ../lib/generated/prisma`,
-    );
+    // Reflect the DXG-owned skills decision in the planned command:
+    // No (default) → "--no-skills" is part of the planned arguments;
+    // Yes → the flag is omitted (prisma@7 then installs skills
+    // non-interactively). Nothing is executed in dry-run mode.
+    const plannedArgs = buildPrismaInitArgs(
+      providerObj.prismaProvider,
+      planToUse.installPrismaSkills === true,
+    )
+      .slice(1) // drop the "prisma@7" package spec for display
+      .join(" ");
+    note(`[database] Dry-run: Would run: prisma ${plannedArgs}`);
     note(`[database] Dry-run: Would create/update:`);
     note(`[database]   - prisma/schema.prisma`);
     note(`[database]   - prisma.config.ts`);
@@ -539,10 +586,11 @@ export async function executeDatabase(
     };
     try {
       const PRISMA_SCRIPTS: Record<string, string> = {
-        "prisma:generate": "prisma generate",
-        "prisma:migrate:dev": "prisma migrate dev",
-        "prisma:seed": "prisma db seed",
-        "prisma:studio": "prisma studio",
+        "db:generate": "prisma generate",
+        "db:pull": "prisma db pull",
+        "db:push": "prisma db push",
+        "db:seed": "prisma db seed",
+        "db:studio": "prisma studio",
       };
 
       scriptResult = await addPackageScripts(
@@ -755,16 +803,23 @@ export const databaseGenerator: Generator = {
 
     // Check if we need to prompt for missing required fields
     const needsProvider = answers.provider === undefined;
+    const needsSkillsAnswer = answers.installPrismaSkills === undefined;
 
     // Only prompt in interactive mode (not dry-run and not CI)
     const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
 
-    if (needsProvider && shouldPrompt) {
-      // Use interactive prompts for missing fields
+    if (shouldPrompt && (needsProvider || needsSkillsAnswer)) {
+      // Use interactive prompts for missing fields. DXG owns the Prisma
+      // agent skills decision ("Install Prisma agent skills?") — it is asked
+      // here, after the provider selection, so the Prisma CLI itself never
+      // has to ask it.
       const promptQuestions = [];
 
       if (needsProvider) {
         promptQuestions.push(databasePrompts[0]); // provider prompt
+      }
+      if (needsSkillsAnswer) {
+        promptQuestions.push(databasePrompts[1]); // skills prompt
       }
 
       let promptAnswers: Record<string, unknown>;
@@ -787,6 +842,14 @@ export const databaseGenerator: Generator = {
       throw new Error(
         `Missing required values in non-interactive mode: ${missing.join(", ")}`,
       );
+    }
+
+    if (answers.installPrismaSkills === undefined) {
+      // Non-interactive / dry-run / CLI-only default: do NOT install Prisma
+      // agent skills. The conservative choice keeps the user's project free
+      // of .claude/skills/, .windsurf/skills/, .agents/skills/ and
+      // skills-lock.json unless explicitly requested (see buildPrismaInitArgs).
+      answers.installPrismaSkills = false;
     }
 
     // Validate preconditions
