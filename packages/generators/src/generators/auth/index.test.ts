@@ -231,6 +231,16 @@ describe("Auth Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: { name: "next", detected: true },
+        language: { name: "typescript", detected: true },
+        packageManager: 'npm',
+        styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+        capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+        packageJson: { name: "test-project", version: "1.0.0", private: true }
+      },
     };
 
     const answers = {
@@ -289,6 +299,16 @@ describe("Auth Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: { name: "next", detected: true },
+        language: { name: "typescript", detected: true },
+        packageManager: 'npm',
+        styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+        capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+        packageJson: { name: "test-project", version: "1.0.0", private: true }
+      },
       dryRun: true, // Dry run mode
     };
 
@@ -352,6 +372,16 @@ describe("Auth Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: { name: "next", detected: true },
+        language: { name: "typescript", detected: true },
+        packageManager: 'npm',
+        styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+        capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+        packageJson: { name: "test-project", version: "1.0.0", private: true }
+      },
       dryRun: false,
       force: false,
     };
@@ -396,6 +426,16 @@ describe("Auth Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: { name: "next", detected: true },
+        language: { name: "typescript", detected: true },
+        packageManager: 'npm',
+        styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+        capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+        packageJson: { name: "test-project", version: "1.0.0", private: true }
+      },
       dryRun: false,
       force: false,
     };
@@ -435,6 +475,16 @@ describe("Auth Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: { name: "next", detected: true },
+        language: { name: "typescript", detected: true },
+        packageManager: 'npm',
+        styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+        capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+        packageJson: { name: "test-project", version: "1.0.0", private: true }
+      },
       dryRun: false,
       force: false,
     };
@@ -465,6 +515,16 @@ describe("Auth Generator", () => {
       } as unknown as Logger,
       fs: fs,
       templates: { render: vi.fn().mockReturnValue("") },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: { name: "next", detected: true },
+        language: { name: "typescript", detected: true },
+        packageManager: 'npm',
+        styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+        capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+        packageJson: { name: "test-project", version: "1.0.0", private: true }
+      },
     };
     await authGenerator.run(
       {

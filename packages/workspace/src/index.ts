@@ -79,6 +79,7 @@ import { stat } from "@dxgjs/fs";
       packageManager,
       styling,
       capabilities,
+      packageJson,
     };
   }
 

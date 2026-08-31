@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { detectWorkspace } from "@dxgjs/workspace";
+import { detectProjectAwareness, type ProjectAwareness } from "@dxgjs/workspace";
 import { loadConfig } from "@dxgjs/config";
 import {
   intro,
@@ -19,6 +19,8 @@ import {
   stat,
   readdir,
   mkdir,
+  readJson,
+  writeJson,
 } from "@dxgjs/fs";
 import { initGenerator, type Generator } from "@dxgjs/generators";
 import type { DXGConfig } from "@dxgjs/config";
@@ -34,13 +36,32 @@ const program = new Command();
 // Helper functions to eliminate duplication
 
 /**
- * Attempts to detect workspace, logs warning on failure but continues
+ * Attempts to detect project awareness, returns a default awareness on failure but continues
  */
-async function detectWorkspaceSilently(targetDir: string): Promise<void> {
+async function detectProjectAwarenessSilently(targetDir: string): Promise<ProjectAwareness> {
   try {
-    await detectWorkspace(targetDir);
+    return await detectProjectAwareness(targetDir);
   } catch {
-    // No workspace found, we continue anyway
+    // Return a minimal awareness object to allow continuation
+    return {
+      projectRoot: targetDir,
+      workspaceRoot: targetDir,
+      framework: { name: "unknown", detected: false },
+      language: { name: "typescript", detected: false },
+      packageManager: "unknown",
+      styling: { name: "", detected: false, version: null, configFile: null },
+      capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
+      packageJson: {
+        name: "",
+        version: undefined,
+        private: true,
+        workspaces: undefined,
+        dependencies: undefined,
+        devDependencies: undefined,
+        peerDependencies: undefined,
+        scripts: undefined,
+      },
+    };
   }
 }
 
@@ -54,7 +75,7 @@ async function loadConfigSilently(targetDir: string) {
 /**
  * Prepares the generator context with logger, fs, and templates
  */
-function prepareContext(options: CommanderOptions) {
+function prepareContext(options: CommanderOptions, awareness: ProjectAwareness) {
   // Determine log level based on verbosity options
   let minLevel: LogLevel = "info";
   if (options.verbose) {
@@ -67,8 +88,9 @@ function prepareContext(options: CommanderOptions) {
   // Provide stat and readdir functions (not used by all generators but required by type)
   return {
     logger,
-    fs: { readFile, writeFile, pathExists, stat, readdir, mkdir },
+    fs: { readFile, writeFile, pathExists, stat, readdir, mkdir, readJson, writeJson },
     templates: { render: templatesRender },
+    awareness,
     dryRun: options.dryRun ?? false,
     force: options.force ?? false,
     nonInteractive: options.nonInteractive ?? false,
@@ -295,9 +317,9 @@ program
       const projectRoot = await findProjectRoot(targetDir);
 
       // Shared setup
-      await detectWorkspaceSilently(projectRoot);
+      const awareness = await detectProjectAwarenessSilently(projectRoot);
       const config = await loadConfigSilently(projectRoot);
-      const context = prepareContext(options);
+      const context = prepareContext(options, awareness);
 
       // Build initial answers from CLI options and config
       const configAnswers = mergeAnswersWithConfig({}, config);
@@ -371,9 +393,9 @@ program
       const projectRoot = await findProjectRoot(targetDir);
 
       // Shared setup
-      await detectWorkspaceSilently(projectRoot);
+      const awareness = await detectProjectAwarenessSilently(projectRoot);
       const config = await loadConfigSilently(projectRoot);
-      const context = prepareContext(options);
+      const context = prepareContext(options, awareness);
 
       // Get generator instance
       const generatorMap: Record<string, Generator> = {

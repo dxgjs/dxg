@@ -1,5 +1,6 @@
 // Get the directory where this module is located
 import { GeneratorContext, Generator } from "../../types";
+import { addPackageScripts } from "@dxgjs/fs";
 
 // Import Clack-native UX utilities from @dxgjs/prompts
 import {
@@ -525,6 +526,73 @@ export async function executeDatabase(
     note(`[database]   - .env`);
   }
 
+  // Step 5: Add Prisma scripts to package.json
+  if (!ctx.dryRun) {
+    let scriptResult: {
+      added: string[];
+      skipped: string[];
+      conflicted: { script: string; existingCommand: string }[];
+    } = {
+      added: [],
+      skipped: [],
+      conflicted: [],
+    };
+    try {
+      const PRISMA_SCRIPTS: Record<string, string> = {
+        "prisma:generate": "prisma generate",
+        "prisma:migrate:dev": "prisma migrate dev",
+        "prisma:seed": "prisma db seed",
+        "prisma:studio": "prisma studio",
+      };
+
+      scriptResult = await addPackageScripts(
+        ctx.awareness.packageJson,
+        ctx.awareness.projectRoot,
+        ctx.dryRun ?? false,
+        ctx.force ?? false,
+        {
+          readJson: ctx.fs.readJson,
+          writeJson: ctx.fs.writeJson,
+        },
+        PRISMA_SCRIPTS,
+      );
+
+      // Log script results
+      if (scriptResult.added.length > 0) {
+        note(`Added Prisma scripts: ${scriptResult.added.join(", ")}`);
+        // If we added scripts, we've updated package.json
+        result.updated.push("package.json");
+      }
+      if (scriptResult.skipped.length > 0) {
+        note(
+          `Skipped Prisma scripts (already exist): ${scriptResult.skipped.join(", ")}`,
+        );
+      }
+      if (scriptResult.conflicted.length > 0) {
+        const conflictDetails = scriptResult.conflicted
+          .map((c) => `${c.script} (existing: ${c.existingCommand})`)
+          .join(", ");
+        note(`Prisma script conflicts: ${conflictDetails}`);
+        // If we have script conflicts and we're not forcing, we have a conflict on package.json
+        if (!ctx.force) {
+          result.conflicts.push({ path: "package.json", existsAs: "file" });
+        }
+      }
+    } catch (error) {
+      // Don't fail the whole generator for script issues - just note them
+      note(
+        `Warning: Failed to add Prisma scripts: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  } else {
+    // In dry-run mode, report what would happen
+    note(`[database] Dry-run: Would add Prisma scripts:`);
+    note(`[database]   - prisma:generate: prisma generate`);
+    note(`[database]   - prisma:migrate:dev: prisma migrate dev`);
+    note(`[database]   - prisma:seed: prisma db seed`);
+    note(`[database]   - prisma:studio: prisma studio`);
+  }
+
   // Step 4: Handle DXG-owned application template (Prisma Client integration)
   for (const { path, templatePath, data } of planToUse.filesToCreate) {
     // Read the template file with utf8 encoding to get a string directly
@@ -632,16 +700,12 @@ export async function verifyDatabase(
 // Summarize function using Clack UX (replaces logger-based summarization).
 // Fully Clack-native: one coherent structured note, no logger output
 // (completion itself is communicated by the generator's outro).
-export function summarizeDatabase(
-  _answers: Record<string, unknown>,
-  result: {
-    created: string[];
-    updated: string[];
-    skipped: string[];
-    conflicts: { path: string; existsAs: "file" | "directory" }[];
-  },
-  _ctx: GeneratorContext,
-): void {
+export function summarizeDatabase(result: {
+  created: string[];
+  updated: string[];
+  skipped: string[];
+  conflicts: { path: string; existsAs: "file" | "directory" }[];
+}): void {
   const { created, updated, skipped, conflicts } = result;
 
   const summary: string[] = [];
@@ -748,7 +812,7 @@ export const databaseGenerator: Generator = {
       }
 
       // Summarize using Clack UX
-      summarizeDatabase(answers, execResult, ctx);
+      summarizeDatabase(execResult);
 
       // Outro
       outro(`Database setup completed for ${answers.provider}!`);

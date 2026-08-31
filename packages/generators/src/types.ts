@@ -1,4 +1,5 @@
 import { Logger } from "@dxgjs/logger";
+import type { ProjectAwareness } from "@dxgjs/workspace";
 type FS = typeof import("@dxgjs/fs");
 
 export interface FSInterface {
@@ -8,6 +9,8 @@ export interface FSInterface {
   stat: FS["stat"];
   mkdir: FS["mkdir"];
   readdir: FS["readdir"];
+  readJson: FS["readJson"];
+  writeJson: FS["writeJson"];
 }
 
 export interface GeneratorContext {
@@ -16,6 +19,7 @@ export interface GeneratorContext {
   templates: {
     render: (template: string, data: Record<string, unknown>) => string;
   };
+  awareness: ProjectAwareness;
   /** Whether to run in dry-run mode (no filesystem changes) */
   dryRun?: boolean;
   /** Whether to force overwrite conflicting files */

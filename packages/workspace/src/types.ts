@@ -57,4 +57,5 @@ export interface ProjectAwareness {
   packageManager: string;
   styling: StylingInfo;
   capabilities: CapabilityInfo;
+  packageJson: PackageJson;
 }

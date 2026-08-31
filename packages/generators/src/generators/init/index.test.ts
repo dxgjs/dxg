@@ -193,6 +193,16 @@ describe("Init Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
     };
 
     const answers = {
@@ -244,6 +254,16 @@ describe("Init Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
       dryRun: true, // Dry run mode
     };
 
@@ -290,6 +310,16 @@ describe("Init Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
       dryRun: false,
       force: true, // Force mode
     };
@@ -338,6 +368,16 @@ describe("Init Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
       dryRun: false,
       force: false,
     };
@@ -379,6 +419,16 @@ describe("Init Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
       dryRun: false,
       force: false,
     };
@@ -406,6 +456,16 @@ describe("Init Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: { render: vi.fn().mockReturnValue("") },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
     };
 
     const answers = {

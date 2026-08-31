@@ -232,7 +232,17 @@ describe("Tailwind Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
-    };
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: undefined,
+          language: undefined,
+          packageManager: 'npm',
+          styling: undefined,
+          capabilities: {},
+          packageJson: {}
+        },
+      };
 
     const answers = {
       customiseTailwind: false,
@@ -292,6 +302,16 @@ describe("Tailwind Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
       dryRun: true, // Dry run mode
     };
 
@@ -349,6 +369,16 @@ describe("Tailwind Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
       dryRun: false,
       force: true, // Force mode
     };
@@ -404,6 +434,16 @@ describe("Tailwind Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
       dryRun: false,
       force: false,
     };
@@ -450,6 +490,16 @@ describe("Tailwind Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
       dryRun: false,
       force: false,
     };
@@ -489,6 +539,16 @@ describe("Tailwind Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
       dryRun: false,
       force: false,
     };
@@ -521,6 +581,16 @@ describe("Tailwind Generator", () => {
         } as unknown as Logger,
         fs: fs,
         templates: { render: vi.fn().mockReturnValue("") },
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: undefined,
+          language: undefined,
+          packageManager: 'npm',
+          styling: undefined,
+          capabilities: {},
+          packageJson: {}
+        },
       };
       await tailwindGenerator.run(
         {

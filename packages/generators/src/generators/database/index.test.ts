@@ -497,6 +497,37 @@ describe("Database Generator", () => {
         logger: mockLogger,
         fs: fs,
         templates: templatesMock,
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: {
+            name: 'unknown',
+            detected: false
+          },
+          language: {
+            name: 'javascript',
+            detected: true
+          },
+          packageManager: 'npm',
+          styling: {
+            name: 'none',
+            detected: false,
+            version: null,
+            configFile: null
+          },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false
+          },
+          packageJson: {
+            name: 'test-project',
+            version: '1.0.0',
+            private: true
+          }
+        },
         dryRun: false,
         force: false,
       };
@@ -610,6 +641,37 @@ describe("Database Generator", () => {
         logger: mockLogger,
         fs: fs,
         templates: templatesMock,
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: {
+            name: 'unknown',
+            detected: false
+          },
+          language: {
+            name: 'javascript',
+            detected: true
+          },
+          packageManager: 'npm',
+          styling: {
+            name: 'none',
+            detected: false,
+            version: null,
+            configFile: null
+          },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false
+          },
+          packageJson: {
+            name: 'test-project',
+            version: '1.0.0',
+            private: true
+          }
+        },
         dryRun: true, // Dry run mode
         force: false,
       };
@@ -665,6 +727,16 @@ describe("Database Generator", () => {
         logger: mockLogger,
         fs: fs,
         templates: templatesMock,
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: undefined,
+          language: undefined,
+          packageManager: 'npm',
+          styling: undefined,
+          capabilities: {},
+          packageJson: {}
+        },
         dryRun: true, // Dry run to avoid prompts
         force: false,
       };
