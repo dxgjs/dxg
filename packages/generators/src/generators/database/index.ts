@@ -593,8 +593,22 @@ export async function executeDatabase(
         "db:studio": "prisma studio",
       };
 
+      // Read package.json FRESH from disk. Steps 1-2 of this run executed the
+      // package manager, which persists the newly installed dependencies into
+      // package.json on disk. `ctx.awareness.packageJson` is the pre-install
+      // snapshot captured ONCE at CLI bootstrap (detectProjectAwareness) —
+      // handing it to addPackageScripts would write that stale snapshot back
+      // verbatim (full writeJson overwrite), erasing every dependency the
+      // package manager just recorded: node_modules had Prisma, the manifest
+      // no longer declared it, and a later `pnpm prisma ...` pruned the
+      // "extraneous" packages. ProjectAwareness stays read-only knowledge.
+      const packageJsonPath = join(ctx.awareness.projectRoot, "package.json");
+      const currentPackageJson = await ctx.fs.readJson<
+        Record<string, unknown> & { scripts?: Record<string, string> }
+      >(packageJsonPath);
+
       scriptResult = await addPackageScripts(
-        ctx.awareness.packageJson,
+        currentPackageJson,
         ctx.awareness.projectRoot,
         ctx.dryRun ?? false,
         ctx.force ?? false,

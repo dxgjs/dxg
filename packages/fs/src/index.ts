@@ -89,6 +89,16 @@ import { readFile, readFileSync } from "./readFile";
     // Initialize scripts object if it doesn't exist
     const scripts = packageJson.scripts ?? {};
 
+    // If package.json had no scripts section, attach the replacement object
+    // back to the manifest. Only `packageJson` is handed to writeJson, so a
+    // detached object would silently discard every added script (the mutation
+    // above happens on `scripts`, but the write-back persists `packageJson`).
+    // Skipped in dry-run, where writeJson is never called and the caller's
+    // object stays untouched.
+    if (!dryRun && !packageJson.scripts) {
+      packageJson.scripts = scripts;
+    }
+
     // Process each script to add
     for (const [scriptName, scriptCommand] of Object.entries(scriptsToAdd)) {
       if (scripts[scriptName]) {
