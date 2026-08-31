@@ -15,7 +15,7 @@ import {
 import { fileURLToPath } from "url";
 import { dirname, join, sep } from "path";
 import { executeCommand } from "@dxgjs/fs";
-import { parseNi, getCliCommand } from "@antfu/ni";
+import { parseNi, parseNlx, getCliCommand } from "@antfu/ni";
 import pc from "picocolors";
 
 // Get the directory where this module is located
@@ -53,7 +53,7 @@ export const providerData = {
       "better-sqlite3",
       "dotenv",
     ],
-    templatePath: join(templateBasePath, "prisma-client-lib.ts.tmpl"),
+    templatePath: join(templateBasePath, "prisma-client-lib-sqlite.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
     notes:
@@ -75,7 +75,7 @@ export const providerData = {
       "pg",
       "dotenv",
     ],
-    templatePath: join(templateBasePath, "prisma-client-lib.ts.tmpl"),
+    templatePath: join(templateBasePath, "prisma-client-lib.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
     notes:
@@ -96,7 +96,7 @@ export const providerData = {
       "@prisma/adapter-mariadb",
       "dotenv",
     ],
-    templatePath: join(templateBasePath, "prisma-client-lib-mysql.ts.tmpl"),
+    templatePath: join(templateBasePath, "prisma-client-lib-mysql.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "individualParams", // Uses individual connection parameters
     notes:
@@ -113,7 +113,7 @@ export const providerData = {
     driverPackage: "", // MSSQL adapter uses individual params
     devDependencies: ["prisma@7.10.0", "@types/node", "@types/mssql"],
     dependencies: ["@prisma/client@7.10.0", "@prisma/adapter-mssql", "dotenv"],
-    templatePath: join(templateBasePath, "prisma-client-lib-sqlserver.ts.tmpl"),
+    templatePath: join(templateBasePath, "prisma-client-lib-sqlserver.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "individualParams", // Uses individual connection parameters
     notes:
@@ -135,7 +135,7 @@ export const providerData = {
       "pg",
       "dotenv",
     ],
-    templatePath: join(templateBasePath, "prisma-client-lib.ts.tmpl"),
+    templatePath: join(templateBasePath, "prisma-client-lib.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
     notes:
@@ -157,10 +157,7 @@ export const providerData = {
       "undici",
       "dotenv",
     ],
-    templatePath: join(
-      templateBasePath,
-      "prisma-client-lib-planetscale.ts.tmpl",
-    ),
+    templatePath: join(templateBasePath, "prisma-client-lib-planetscale.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
     notes:
@@ -182,7 +179,7 @@ export const providerData = {
       "pg",
       "dotenv",
     ],
-    templatePath: join(templateBasePath, "prisma-client-lib.ts.tmpl"),
+    templatePath: join(templateBasePath, "prisma-client-lib.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
     notes:
@@ -247,8 +244,8 @@ export async function isPrismaInstalled(
 
     // Check for prisma package
     const result =
-      (pkg.devDependencies && pkg.devDependencies["prisma"]) ||
-      (pkg.dependencies && pkg.dependencies["prisma"]);
+      (pkg.devDependencies && pkg.devDependencies["prisma@7"]) ||
+      (pkg.dependencies && pkg.dependencies["prisma@7"]);
     return !!result;
   } catch {
     // If we can't read or parse, assume not installed
@@ -271,32 +268,6 @@ export function planDatabase(answers: Record<string, unknown>) {
     year: new Date().getFullYear(),
     ...provider, // Spread provider data for template use
   };
-
-  // Determine which template conditional to use
-  let connectionString = false;
-  let individualParams = false;
-  let sqlserverParams = false;
-  let planetscaleMysqlParams = false;
-
-  if (provider.key === "sqlserver") {
-    sqlserverParams = true;
-  } else if (provider.key === "planetscale") {
-    planetscaleMysqlParams = true;
-  } else {
-    // For other providers, use instantiationPattern
-    if (provider.instantiationPattern === "connectionString") {
-      connectionString = true;
-    } else if (provider.instantiationPattern === "individualParams") {
-      individualParams = true;
-    }
-  }
-
-  Object.assign(data, {
-    connectionString,
-    individualParams,
-    sqlserverParams,
-    planetscaleMysqlParams,
-  });
 
   // Determine packages to install - separate dev and regular dependencies
   const devPackages = [...provider.devDependencies];
@@ -352,7 +323,7 @@ export async function executeDatabase(
       try {
         const resolved = await getCliCommand(
           parseNi,
-          ["add", "-D", ...planToUse.devPackages],
+          ["-D", ...planToUse.devPackages],
           {
             cwd: process.cwd(),
             programmatic: true,
@@ -372,13 +343,21 @@ export async function executeDatabase(
         s.start(
           `Installing dev dependencies: ${planToUse.devPackages.join(", ")}`,
         );
-        await executeCommand(cmd, args, {
-          cwd: executeCwd,
-          stdio: "inherit",
-        });
-        s.stop(
-          `Successfully installed dev dependencies: ${planToUse.devPackages.join(", ")}`,
-        );
+        try {
+          await executeCommand(cmd, args, {
+            cwd: executeCwd,
+            stdio: "inherit",
+          });
+          s.stop(
+            `Successfully installed dev dependencies: ${planToUse.devPackages.join(", ")}`,
+          );
+        } catch (executeError) {
+          s.stop(`Failed to install dev dependencies`);
+          throw new Error(
+            `Failed to install dev dependencies: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
+            { cause: executeError },
+          );
+        }
       } catch (error) {
         throw new Error(
           `Failed to install dev dependencies: ${error instanceof Error ? error.message : String(error)}`,
@@ -399,7 +378,7 @@ export async function executeDatabase(
       try {
         const resolved = await getCliCommand(
           parseNi,
-          ["add", ...planToUse.regularPackages],
+          [...planToUse.regularPackages],
           {
             cwd: process.cwd(),
             programmatic: true,
@@ -419,13 +398,21 @@ export async function executeDatabase(
         s.start(
           `Installing dependencies: ${planToUse.regularPackages.join(", ")}`,
         );
-        await executeCommand(cmd, args, {
-          cwd: executeCwd,
-          stdio: "inherit",
-        });
-        s.stop(
-          `Successfully installed dependencies: ${planToUse.regularPackages.join(", ")}`,
-        );
+        try {
+          await executeCommand(cmd, args, {
+            cwd: executeCwd,
+            stdio: "inherit",
+          });
+          s.stop(
+            `Successfully installed dependencies: ${planToUse.regularPackages.join(", ")}`,
+          );
+        } catch (executeError) {
+          s.stop(`Failed to install dependencies`);
+          throw new Error(
+            `Failed to install dependencies: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
+            { cause: executeError },
+          );
+        }
       } catch (error) {
         throw new Error(
           `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
@@ -452,15 +439,14 @@ export async function executeDatabase(
 
       // Use the existing command execution infrastructure
       const prismaResolved = await getCliCommand(
-        parseNi,
+        parseNlx,
         [
-          "dlx",
-          "prisma",
+          "prisma@7",
           "init",
           "--datasource-provider",
           providerObj.prismaProvider,
           "--output",
-          "./prisma",
+          "../lib/generated/prisma",
         ],
         {
           cwd: process.cwd(),
@@ -473,20 +459,53 @@ export async function executeDatabase(
       }
 
       const {
-        command: prismaCmd,
-        args: prismaArgs,
+        command: prismaCmdInitial,
+        args: prismaArgsInitial,
         cwd: prismaResolvedCwd,
       } = prismaResolved;
+
+      let prismaCmd = prismaCmdInitial;
+      let prismaArgs = prismaArgsInitial;
+
+      // Workaround for @antfu/ni issue with dlx commands
+      // When args starts with ["prisma@7", "init"], some versions incorrectly resolve to "<agent> add ..."
+      const originalArgs = [
+        "prisma@7",
+        "init",
+        "--datasource-provider",
+        providerObj.prismaProvider,
+        "--output",
+        "../lib/generated/prisma",
+      ];
+      if (
+        originalArgs.length >= 2 &&
+        originalArgs[0] === "prisma@7" &&
+        originalArgs[1] === "init" &&
+        prismaArgs.includes("add")
+      ) {
+        // Correct the command to use npx (universal)
+        prismaCmd = "npx";
+        // Use the intended arguments
+        prismaArgs = originalArgs;
+      }
+
       const prismaExecuteCwd = prismaResolvedCwd ?? process.cwd();
 
-      await executeCommand(prismaCmd, prismaArgs, {
-        cwd: prismaExecuteCwd,
-        stdio: "inherit",
-      });
-
-      s.stop(
-        `Prisma initialized successfully with provider ${providerObj.prismaProvider}`,
-      );
+      try {
+        await executeCommand(prismaCmd, prismaArgs, {
+          cwd: prismaExecuteCwd,
+          stdio: "inherit",
+        });
+        s.stop(
+          `Prisma initialized successfully with provider ${providerObj.prismaProvider}`,
+        );
+      } catch (executeError) {
+        s.stop(`Failed to initialize Prisma`);
+        throw new Error(
+          `Failed to initialize Prisma: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
+          { cause: executeError },
+        );
+      }
     } catch (error) {
       throw new Error(
         `Failed to initialize Prisma: ${error instanceof Error ? error.message : String(error)}`,
@@ -498,7 +517,7 @@ export async function executeDatabase(
     const providerObj =
       providerData[planToUse.provider as keyof typeof providerData];
     note(
-      `[database] Dry-run: Would run: prisma init --datasource-provider ${providerObj.prismaProvider} --output ./prisma`,
+      `[database] Dry-run: Would run: prisma init --datasource-provider ${providerObj.prismaProvider} --output ../lib/generated/prisma`,
     );
     note(`[database] Dry-run: Would create/update:`);
     note(`[database]   - prisma/schema.prisma`);
@@ -586,53 +605,6 @@ export async function executeDatabase(
     }
   }
 
-  // Step 5: Execute Prisma generate
-  if (!ctx.dryRun) {
-    try {
-      const s = spinner();
-      s.start(`Generating Prisma Client...`);
-
-      // Use the existing command execution infrastructure
-      const generateResolved = await getCliCommand(
-        parseNi,
-        ["dlx", "prisma", "generate"],
-        {
-          cwd: process.cwd(),
-          programmatic: true,
-        },
-      );
-
-      if (!generateResolved) {
-        throw new Error("Failed to resolve prisma generate command");
-      }
-
-      const {
-        command: generateCmd,
-        args: generateArgs,
-        cwd: generateResolvedCwd,
-      } = generateResolved;
-      const generateExecuteCwd = generateResolvedCwd ?? process.cwd();
-
-      await executeCommand(generateCmd, generateArgs, {
-        cwd: generateExecuteCwd,
-        stdio: "inherit",
-      });
-
-      s.stop(`Prisma Client generated successfully`);
-    } catch (error) {
-      throw new Error(
-        `Failed to generate Prisma Client: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
-    }
-  } else {
-    // In dry-run mode, report what would happen
-    note("[database] Dry-run: Would run: prisma generate");
-    note(
-      "[database] Dry-run: Would generate Prisma Client in ./prisma/client/",
-    );
-  }
-
   return result;
 }
 
@@ -657,41 +629,47 @@ export async function verifyDatabase(
   // as they are managed by Prisma CLI, not DXG
 }
 
-// Summarize function using Clack UX (replaces logger-based summarization)
+// Summarize function using Clack UX (replaces logger-based summarization).
+// Fully Clack-native: one coherent structured note, no logger output
+// (completion itself is communicated by the generator's outro).
 export function summarizeDatabase(
-  answers: Record<string, unknown>,
+  _answers: Record<string, unknown>,
   result: {
     created: string[];
     updated: string[];
     skipped: string[];
     conflicts: { path: string; existsAs: "file" | "directory" }[];
   },
-  ctx: GeneratorContext,
+  _ctx: GeneratorContext,
 ): void {
-  const { logger } = ctx;
   const { created, updated, skipped, conflicts } = result;
+
+  const summary: string[] = [];
+
   if (created.length) {
-    note(`Created: ${created.join(", ")}`);
+    summary.push(`Created: ${created.join(", ")}`);
   }
+
   if (updated.length) {
-    note(`Updated: ${updated.join(", ")}`);
+    summary.push(`Updated: ${updated.join(", ")}`);
   }
+
   if (skipped.length) {
-    note(`Unchanged: ${skipped.join(", ")}`);
+    summary.push(`Unchanged: ${skipped.join(", ")}`);
   }
+
   if (conflicts.length) {
     const conflictDetails = conflicts
       .map((c) => `${c.path} (${c.existsAs})`)
       .join(", ");
-    note(`Conflicts: ${conflictDetails}`);
+
+    summary.push(`Conflicts: ${conflictDetails}`);
   }
 
-  logger.debug(
-    `Database generator completed successfully (provider: ${answers.provider})`,
-  );
-  note(
-    `Database generator completed successfully (provider: ${answers.provider})`,
-  );
+  // Only render the summary block when there is something to report.
+  if (summary.length > 0) {
+    note(summary.join("\n"), "Database setup");
+  }
 }
 
 /**

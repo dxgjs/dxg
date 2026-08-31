@@ -184,7 +184,7 @@ export async function executeTailwind(
     try {
       const resolved = await getCliCommand(
         parseNi,
-        ["add", "-D", ...planToUse.packages],
+        ["-D", ...planToUse.packages],
         {
           cwd: process.cwd(),
           programmatic: true,
@@ -200,11 +200,19 @@ export async function executeTailwind(
 
       const s = spinner();
       s.start(`Installing dependencies: ${planToUse.packages.join(", ")}`);
-      await executeCommand(cmd, args, {
-        cwd: executeCwd,
-        stdio: "inherit"
-      });
-      s.stop(`Successfully installed: ${planToUse.packages.join(", ")}`);
+      try {
+        await executeCommand(cmd, args, {
+          cwd: executeCwd,
+          stdio: "inherit"
+        });
+        s.stop(`Successfully installed: ${planToUse.packages.join(", ")}`);
+      } catch (executeError) {
+        s.stop(`Failed to install dependencies`);
+        throw new Error(
+          `Failed to install dependencies: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
+          { cause: executeError }
+        );
+      }
     } catch (error) {
       throw new Error(
         `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,

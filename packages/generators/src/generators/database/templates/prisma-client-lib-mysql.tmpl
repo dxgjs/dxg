@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { {{adapterImport}} } from "{{adapterPackage}}";
-import { PrismaClient } from "../generated/prisma/client";
+import { PrismaClient } from "./generated/prisma/client";
 
 const adapter = new {{adapterClass}}({
   host: process.env.DATABASE_HOST,

@@ -1,12 +1,12 @@
 import "dotenv/config";
 import { {{adapterImport}} } from "{{adapterPackage}}";
-import { PrismaClient } from "../generated/prisma/client";
+import { PrismaClient } from "./generated/prisma/client";
 
 const sqlConfig = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  server: process.env.HOST,
+  server: process.env.HOST ?? "",
   pool: {
     max: 10,
     min: 0,
@@ -14,7 +14,7 @@ const sqlConfig = {
   },
   options: {
     encrypt: true, // for azure
-    trustServerCertificate: false
+    trustServerCertificate: false, // change to true for local dev / self-signed certs
   },
 };
 

@@ -23,7 +23,8 @@ const __dirname = dirname(__filename);
 
 // Determine if we're in a bundled context (where __dirname points to dist/)
 // In bundled context, we need to adjust the path to point to generators/auth/templates/
-const isBundled = __dirname.endsWith(`${sep}dist`) || __dirname.endsWith("/dist");
+const isBundled =
+  __dirname.endsWith(`${sep}dist`) || __dirname.endsWith("/dist");
 let templateBasePath;
 if (isBundled) {
   // In bundle, templates are under generators/<generator-name>/templates/
@@ -33,7 +34,7 @@ if (isBundled) {
   templateBasePath = join(__dirname, "templates");
 }
 // Template file paths
-const authConfigTemplatePath = join(templateBasePath, "auth.config.ts.tmpl");
+const authConfigTemplatePath = join(templateBasePath, "auth.config.tmpl");
 
 // Prompt questions for the auth generator
 export const authPrompts = [
@@ -83,13 +84,16 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
   const packageJsonExists = await ctx.fs.pathExists("package.json");
   if (!packageJsonExists) {
     throw new Error(
-      "package.json not found. Please initialize your project (e.g., npm init) before running dxg add auth."
+      "package.json not found. Please initialize your project (e.g., npm init) before running dxg add auth.",
     );
   }
 }
 
 // Check if auth dependency is already installed in package.json
-export async function isAuthInstalled(fs: GeneratorContext['fs'], provider: string): Promise<boolean> {
+export async function isAuthInstalled(
+  fs: GeneratorContext["fs"],
+  provider: string,
+): Promise<boolean> {
   try {
     const packageJsonExists = await fs.pathExists("package.json");
     if (!packageJsonExists) {
@@ -102,8 +106,8 @@ export async function isAuthInstalled(fs: GeneratorContext['fs'], provider: stri
     const providerPackages: Record<string, string> = {
       "better-auth": "better-auth",
       "auth.js": "@auth/core",
-      "clerk": "@clerk/clerk-react",
-      "lucia": "lucia"
+      clerk: "@clerk/clerk-react",
+      lucia: "lucia",
     };
 
     const packageName = providerPackages[provider];
@@ -111,7 +115,8 @@ export async function isAuthInstalled(fs: GeneratorContext['fs'], provider: stri
       return false;
     }
 
-    const result = (pkg.devDependencies && pkg.devDependencies[packageName]) ||
+    const result =
+      (pkg.devDependencies && pkg.devDependencies[packageName]) ||
       (pkg.dependencies && pkg.dependencies[packageName]);
     return !!result;
   } catch {
@@ -119,7 +124,6 @@ export async function isAuthInstalled(fs: GeneratorContext['fs'], provider: stri
     return false;
   }
 }
-
 
 // Planning function
 export function planAuth(answers: Record<string, unknown>) {
@@ -146,7 +150,11 @@ export function planAuth(answers: Record<string, unknown>) {
   const filesToCreate = [];
   if (generateExampleConfig) {
     const configPath = "auth.config.ts";
-    filesToCreate.push({ path: configPath, templatePath: authConfigTemplatePath, data });
+    filesToCreate.push({
+      path: configPath,
+      templatePath: authConfigTemplatePath,
+      data,
+    });
   }
 
   return { data, packages, filesToCreate };
@@ -157,8 +165,8 @@ function getProviderName(provider: string): string {
   const names: Record<string, string> = {
     "better-auth": "betterAuth",
     "auth.js": "auth",
-    "clerk": "clerk",
-    "lucia": "lucia"
+    clerk: "clerk",
+    lucia: "lucia",
   };
   return names[provider] || provider;
 }
@@ -167,8 +175,8 @@ function getProviderPackage(provider: string): string {
   const packages: Record<string, string> = {
     "better-auth": "better-auth",
     "auth.js": "@auth/core",
-    "clerk": "@clerk/clerk-react",
-    "lucia": "lucia"
+    clerk: "@clerk/clerk-react",
+    lucia: "lucia",
   };
   return packages[provider] || "";
 }
@@ -178,10 +186,20 @@ export async function executeAuth(
   answers: Record<string, unknown>,
   ctx: GeneratorContext,
   plan?: ReturnType<typeof planAuth>,
-): Promise<{ created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] }> {
+): Promise<{
+  created: string[];
+  updated: string[];
+  skipped: string[];
+  conflicts: { path: string; existsAs: "file" | "directory" }[];
+}> {
   const { logger, fs } = ctx;
   const planToUse = plan ?? planAuth(answers);
-  const result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] } = {
+  const result: {
+    created: string[];
+    updated: string[];
+    skipped: string[];
+    conflicts: { path: string; existsAs: "file" | "directory" }[];
+  } = {
     created: [],
     updated: [],
     skipped: [],
@@ -193,22 +211,26 @@ export async function executeAuth(
   if (!ctx.dryRun) {
     const authInstalled = await isAuthInstalled(fs, provider);
     if (authInstalled) {
-          note(`${provider} already detected. Skipping dependency installation.`);
-          logger.debug(`[auth] ${provider} already detected. Skipping dependency installation.`);
+      note(`${provider} already detected. Skipping dependency installation.`);
+      logger.debug(
+        `[auth] ${provider} already detected. Skipping dependency installation.`,
+      );
     } else if (answers.installDependencies) {
       // Install dependencies using @antfu/ni getCliCommand and executeCommand
       try {
         const resolved = await getCliCommand(
           parseNi,
-          ["add", "-D", ...planToUse.packages],
+          ["-D", ...planToUse.packages],
           {
             cwd: process.cwd(),
             programmatic: true,
-          }
+          },
         );
 
         if (!resolved) {
-          throw new Error("Failed to resolve package manager command for adding dependencies");
+          throw new Error(
+            "Failed to resolve package manager command for adding dependencies",
+          );
         }
 
         const { command: cmd, args, cwd: resolvedCwd } = resolved;
@@ -216,15 +238,23 @@ export async function executeAuth(
 
         const s = spinner();
         s.start(`Installing dependencies: ${planToUse.packages.join(", ")}`);
-        await executeCommand(cmd, args, {
-          cwd: executeCwd,
-          stdio: "inherit"
-        });
-        s.stop(`Successfully installed: ${planToUse.packages.join(", ")}`);
+        try {
+          await executeCommand(cmd, args, {
+            cwd: executeCwd,
+            stdio: "inherit",
+          });
+          s.stop(`Successfully installed: ${planToUse.packages.join(", ")}`);
+        } catch (executeError) {
+          s.stop(`Failed to install dependencies`);
+          throw new Error(
+            `Failed to install dependencies: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
+            { cause: executeError },
+          );
+        }
       } catch (error) {
         throw new Error(
           `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error }
+          { cause: error },
         );
       }
     }
@@ -232,7 +262,7 @@ export async function executeAuth(
     // In dry-run mode, just check if installation would be needed
     const authInstalled = await isAuthInstalled(fs, provider);
     if (!authInstalled && answers.installDependencies) {
-          logger.debug("[auth] Dry-run: Would install dependencies");
+      logger.debug("[auth] Dry-run: Would install dependencies");
     }
   }
 
@@ -241,11 +271,13 @@ export async function executeAuth(
     // Read the template file with utf8 encoding to get a string directly
     let template: string;
     try {
-      template = (await fs.readFile(templatePath, { encoding: "utf8" })) as string;
+      template = (await fs.readFile(templatePath, {
+        encoding: "utf8",
+      })) as string;
     } catch (error) {
       throw new Error(
         `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error }
+        { cause: error },
       );
     }
 
@@ -259,7 +291,7 @@ export async function executeAuth(
 
       if (isDirectory) {
         // Directory collision - expected path is occupied by a directory
-        result.conflicts.push({ path, existsAs: 'directory' });
+        result.conflicts.push({ path, existsAs: "directory" });
         continue;
       }
 
@@ -273,7 +305,7 @@ export async function executeAuth(
       // File exists with different content - handle based on dryRun and force flags
       if (ctx.dryRun) {
         // In dry-run mode, report as conflict (would need user interaction or force to resolve)
-        result.conflicts.push({ path, existsAs: 'file' });
+        result.conflicts.push({ path, existsAs: "file" });
         continue;
       }
 
@@ -285,7 +317,7 @@ export async function executeAuth(
       }
 
       // Without force, treat as conflict
-      result.conflicts.push({ path, existsAs: 'file' });
+      result.conflicts.push({ path, existsAs: "file" });
       continue;
     } else {
       // Path doesn't exist, check if parent directory would be a file collision
@@ -296,7 +328,7 @@ export async function executeAuth(
           const dirStats = await fs.stat(dir);
           if (dirStats.isFile()) {
             // Parent path is occupied by a file
-            result.conflicts.push({ path: dir, existsAs: 'file' });
+            result.conflicts.push({ path: dir, existsAs: "file" });
             continue;
           }
         }
@@ -340,7 +372,12 @@ export async function verifyAuth(
 // Summarize function using Clack UX (replaces logger-based summarization)
 export function summarizeAuth(
   answers: Record<string, unknown>,
-  result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
+  result: {
+    created: string[];
+    updated: string[];
+    skipped: string[];
+    conflicts: { path: string; existsAs: "file" | "directory" }[];
+  },
   ctx: GeneratorContext,
 ): void {
   const { logger } = ctx;
@@ -355,14 +392,17 @@ export function summarizeAuth(
     note(`Unchanged: ${skipped.join(", ")}`);
   }
   if (conflicts.length) {
-    const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
+    const conflictDetails = conflicts
+      .map((c) => `${c.path} (${c.existsAs})`)
+      .join(", ");
     note(`Conflicts: ${conflictDetails}`);
   }
 
-  logger.debug(`Auth generator completed successfully (provider: ${answers.provider})`);
+  logger.debug(
+    `Auth generator completed successfully (provider: ${answers.provider})`,
+  );
   note(`Auth generator completed successfully (provider: ${answers.provider})`);
 }
-
 
 /**
  * Auth generator – satisfies the Generator interface.
@@ -384,12 +424,18 @@ export const authGenerator: Generator = {
     // Check if we need to prompt for missing required fields
     const needsProvider = answers.provider === undefined;
     const needsInstallDependencies = answers.installDependencies === undefined;
-    const needsGenerateExampleConfig = answers.generateExampleConfig === undefined;
+    const needsGenerateExampleConfig =
+      answers.generateExampleConfig === undefined;
 
     // Only prompt in interactive mode
     const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
 
-    if ((needsProvider || needsInstallDependencies || needsGenerateExampleConfig) && shouldPrompt) {
+    if (
+      (needsProvider ||
+        needsInstallDependencies ||
+        needsGenerateExampleConfig) &&
+      shouldPrompt
+    ) {
       // Use interactive prompts for missing fields
       const promptQuestions = [];
 
@@ -407,7 +453,9 @@ export const authGenerator: Generator = {
 
       let promptAnswers: Record<string, unknown>;
       try {
-        promptAnswers = await prompt(promptQuestions as Parameters<typeof prompt>[0]);
+        promptAnswers = await prompt(
+          promptQuestions as Parameters<typeof prompt>[0],
+        );
       } catch (error) {
         // Handle cancellation during interactive input collection
         if (isCancel(error)) {
@@ -416,13 +464,20 @@ export const authGenerator: Generator = {
         throw error;
       }
       answers = { ...answers, ...promptAnswers };
-    } else if ((needsProvider || needsInstallDependencies || needsGenerateExampleConfig) && !shouldPrompt) {
+    } else if (
+      (needsProvider ||
+        needsInstallDependencies ||
+        needsGenerateExampleConfig) &&
+      !shouldPrompt
+    ) {
       // In non-interactive mode, throw error for missing required values
       const missing = [];
       if (needsProvider) missing.push("provider");
       if (needsInstallDependencies) missing.push("installDependencies");
       if (needsGenerateExampleConfig) missing.push("generateExampleConfig");
-      throw new Error(`Missing required values in non-interactive mode: ${missing.join(", ")}`);
+      throw new Error(
+        `Missing required values in non-interactive mode: ${missing.join(", ")}`,
+      );
     }
 
     // Validate preconditions
