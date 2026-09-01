@@ -1,6 +1,5 @@
 import { Command } from "commander";
 import { detectProjectAwareness, type ProjectAwareness } from "@dxgjs/workspace";
-import { loadConfig } from "@dxgjs/config";
 import {
   intro,
   outro,
@@ -23,7 +22,6 @@ import {
   writeJson,
 } from "@dxgjs/fs";
 import { initGenerator, type Generator } from "@dxgjs/generators";
-import type { DXGConfig } from "@dxgjs/config";
 import { tailwindGenerator } from "@dxgjs/generators";
 import { databaseGenerator } from "@dxgjs/generators";
 import { render as templatesRender } from "@dxgjs/templates";
@@ -63,13 +61,6 @@ async function detectProjectAwarenessSilently(targetDir: string): Promise<Projec
       },
     };
   }
-}
-
-/**
- * Loads configuration, returns default values on failure
- */
-async function loadConfigSilently(targetDir: string) {
-  return await loadConfig(targetDir);
 }
 
 /**
@@ -140,22 +131,6 @@ async function findProjectRoot(startDir: string): Promise<string> {
   return startDir;
 }
 
-/**
- * Merges answers with config values for name and description
- */
-function mergeAnswersWithConfig(
-  answers: Record<string, unknown>,
-  config: DXGConfig,
-) {
-  const finalAnswers = { ...answers };
-  if (answers.name === undefined && config.name !== undefined) {
-    finalAnswers.name = config.name;
-  }
-  if (answers.description === undefined && config.description !== undefined) {
-    finalAnswers.description = config.description;
-  }
-  return finalAnswers;
-}
 
 
 interface CommanderOptions {
@@ -318,11 +293,13 @@ program
 
       // Shared setup
       const awareness = await detectProjectAwarenessSilently(projectRoot);
-      const config = await loadConfigSilently(projectRoot);
       const context = prepareContext(options, awareness);
 
-      // Build initial answers from CLI options and config
-      const configAnswers = mergeAnswersWithConfig({}, config);
+      // Build initial answers from CLI options and package.json
+      const configAnswers = {
+        name: awareness.packageJson.name,
+        version: awareness.packageJson.version
+      };
       const cliAnswers = { ...options, ...configAnswers };
       // Run generator in project root directory
       await runInTargetDirectory(projectRoot, async () => {
@@ -394,7 +371,6 @@ program
 
       // Shared setup
       const awareness = await detectProjectAwarenessSilently(projectRoot);
-      const config = await loadConfigSilently(projectRoot);
       const context = prepareContext(options, awareness);
 
       // Get generator instance
@@ -410,8 +386,11 @@ program
         throw new Error(`Unknown generator: ${generatorName}`);
       }
 
-      // Build initial answers from CLI options and config
-      const configAnswers = mergeAnswersWithConfig({}, config);
+      // Build initial answers from CLI options and package.json
+      const configAnswers = {
+        name: awareness.packageJson.name,
+        version: awareness.packageJson.version
+      };
       const cliAnswers = { ...options, ...configAnswers };
 
       // Run generator in project root directory

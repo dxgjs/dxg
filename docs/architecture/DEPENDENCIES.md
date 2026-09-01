@@ -17,7 +17,6 @@ The DXG monorepo dependency graph is designed to be **acyclic** and **layered**:
 - `@dxgjs/package-manager` – Unified npm/Yarn/pnpm/Bun interface → depends on `@dxgjs/fs`, `@dxgjs/env`, `@dxgjs/validation`, `@dxgjs/logger`
 - `@dxgjs/node` – Node/Bun/Deno utilities → depends on `@dxgjs/fs`, `@dxgjs/env`, `@dxgjs/validation`, `@dxgjs/logger`
 - `@dxgjs/git` – Git abstraction → depends on `@dxgjs/fs`, `@dxgjs/validation`, `@dxgjs/logger`
-- `@dxgjs/config` – Configuration loading/merging/validation → depends on `@dxgjs/fs`, `@dxgjs/env`, `@dxgjs/validation`, `@dxgjs/json`, `@dxgjs/logger`
 - `@dxgjs/workspace` – Workspace detection → depends on `@dxgjs/fs`, `@dxgjs/json`, `@dxgjs/validation`, `@dxgjs/logger`
 
 ### Layer 3 – Core and shared services
@@ -32,7 +31,7 @@ The DXG monorepo dependency graph is designed to be **acyclic** and **layered**:
 ### Layer 5 – Orchestration and generation
 - `@dxgjs/templates` – Template engine → depends on `@dxgjs/fs` (loading template files), `@dxgjs/validation` (data validation if schema), `@dxgjs/logger` (optional)
 - `@dxgjs/generators` – Guided scaffolding → depends on `@dxgjs/prompts` (collecting responses), `@dxgjs/templates` (rendering), `@dxgjs/fs` (writing files), `@dxgjs/logger`, `@dxgjs/validation`, **optionally** `@dxgjs/ai` (for AI-assisted generation or revision)
-- `@dxgjs/ai` – AI orchestration → depends on `@dxgjs/core` (DI/event bus), `@dxgjs/config` (API keys, models), `@dxgjs/validation` (prompt/variable schemas), `@dxgjs/logger`, `@dxgjs/fs` (reading context), `@dxgjs/json` (JSON manipulation of context)
+- `@dxgjs/ai` – AI orchestration → depends on `@dxgjs/core` (DI/event bus), `@dxgjs/validation` (prompt/variable schemas), `@dxgjs/logger`, `@dxgjs/fs` (reading context), `@dxgjs/json` (JSON manipulation of context)
 - `@dxgjs/updater` – Update checking → depends on `@dxgjs/fs`, `@dxgjs/logger`, `@dxgjs/validation`, `@dxgjs/json`
 
 ### Layer 6 – Extensibility
@@ -45,7 +44,7 @@ The DXG monorepo dependency graph is designed to be **acyclic** and **layered**:
 
 ## Principle Verification
 
-1. **No circular dependencies**: By following the stratification above, no dependency points to an equal or lower layer (in terms of abstraction); all go from high to low or stay within the same layer when dealing with utility dependencies (e.g., `@dxgjs/config` → `@dxgjs/fs` is allowed because fs is more fundamental).
+1. **No circular dependencies**: By following the stratification above, no dependency points to an equal or lower layer (in terms of abstraction); all go from high to low or stay within the same layer when dealing with utility dependencies.
 
 2. **Low-level packages never depend on the CLI**: The CLI does not appear anywhere in the dependencies of packages (neither in `packages/` nor in `tooling/`), only in `apps/cli`. Thus, `@dxgjs/fs`, `@dxgjs/logger`, `@dxgjs/core`, etc. remain independent of the CLI.
 
@@ -75,7 +74,7 @@ The DXG monorepo dependency graph is designed to be **acyclic** and **layered**:
 [Layer 1 – Fundamentals]
 ```
 
-Each "depends on" arrow points to a lower or equal layer (in the case of dependencies within the same layer, e.g., `@dxgjs/config` → `@dxgjs/fs` remains fundamental).
+Each "depends on" arrow points to a lower or equal layer (in the case of dependencies within the same layer).
 
 ## Development Implications
 - Any new dependency introduction must respect this stratification; otherwise, CI should detect a cycle via `madge` or `depcruft` and block the merge.
@@ -85,4 +84,4 @@ Each "depends on" arrow points to a lower or equal layer (in the case of depende
 ## Rejected / Alternatives Considered
 - **A single utilities package** grouping `fs`, `json`, `env`, `validation` would have created an unnecessary "god package" and would have tied together otherwise independent concerns.
 - **Making the core depend on all infrastructures** would have made the core heavy and introduced cycle risks (e.g., core → fs → logger → core if logger depended on core for some reason).
-- **Allowing lateral dependencies within the same layer** only when clearly justified and acyclic (e.g., `@dxgjs/config` → `@dxgjs/json` is acceptable because json is more fundamental than config).
+- **Allowing lateral dependencies within the same layer** only when clearly justified and acyclic.

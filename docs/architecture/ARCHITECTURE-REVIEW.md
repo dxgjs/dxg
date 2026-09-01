@@ -14,7 +14,6 @@ The initial architecture proposal listed 19 candidate public packages under the 
 @dxgjs/workspace
 @dxgjs/git
 @dxgjs/fs
-@dxgjs/config
 @dxgjs/validation
 @dxgjs/package-manager
 @dxgjs/node
@@ -48,7 +47,6 @@ A deeper review considered whether each package was truly required for a usable 
 | **@dxgjs/logger** | Cross‑cutting concern used by all packages; structured, configurable, transport‑agnostic logging is essential from day one. |
 | **@dxgjs/workspace** | Needed for workspace‑aware commands (e.g., `dxg generate`, `dxg update` across a monorepo). Detects pnpm, Turborepo, Nx, Lerna, simple repo. |
 | **@dxgjs/fs** | Fundamental filesystem abstraction (read/write, copy, glob, watch, tempdir) used by config, templates, generators, updater, etc. |
-| **@dxgjs/config** | Minimal configuration loader: loads JSON files, merges with CLI args and environment variables, applies simple defaults. No YAML/TOML, watch mode, or `$ref` resolution unless a concrete Phase 1 need emerges. |
 | **@dxgjs/templates** | Template engine (Handlebars/EJS‑like) used by the generator system to turn data into files. Provides helpers, partials, caching, and automatic escaping. Remains a thin abstraction over a proven engine (e.g., handlebars) rather than a proprietary engine. |
 | **@dxgjs/generators** | Core scaffotting feature: orchestrates prompts, template rendering, and file writing. Commands like `dxg generate component` rely on this package. |
 | **@dxgjs/prompts** | Interactive prompt library (input, confirm, select, autocomplete, password) used by generators to collect user data. Provides DXG‑specific theming, validation hooks, and masking; not just a thin wrapper over existing libraries. |
@@ -59,7 +57,7 @@ A deeper review considered whether each package was truly required for a usable 
 |--------|--------|
 | **validation** | Schema validation can be delegated to an existing battle‑tested library (e.g., Zod, Yup) consumed directly where needed (config, prompts, AI). No separate `@dxgjs/validation` package. |
 | **json** | JSON deep‑merge, patch, traversal utilities are small; can be implemented as a few helper functions or pulled from a lightweight utility (e.g., lodash/fp) when required. |
-| **env** | Loading `.env` files with masking is handled directly within `@dxgjs/config` (as one configuration source) or via a direct dotenv call; no separate package needed. |
+| **env** | Loading `.env` files with masking is handled via a direct dotenv call; no separate package needed. |
 | **core** | For Phase 1 a DI container or event bus is not required. Packages collaborate via explicit function arguments or direct imports (e.g., `import { logger } from '@dxgjs/logger'`). Core will be introduced only if a concrete decoupling or plugin‑service need arises. |
 
 ###   FUTURE PACKAGES (valid boundaries, deferred to later phases)
@@ -94,7 +92,7 @@ A deeper review considered whether each package was truly required for a usable 
 - **Plugins are completely deferred from Phase 1.** No public plugin API, discovery, or sandboxing in the initial release.
 - **Git, package‑manager, node, updater, and telemetry** are future scope; they will not be bootstrapped during Phase 1.
 - **Avoid YAGNI and premature abstraction.** Each retained package has a demonstrated Phase 1 consumer (see table above).
-- **Phase 1 focuses on the core DXG CLI foundation:** terminal, logger, workspace, fs, config, templates, generators, prompts.
+- **Phase 1 focuses on the core DXG CLI foundation:** terminal, logger, workspace, fs, templates, generators, prompts.
 
 ---
 
@@ -123,7 +121,6 @@ These questions will be addressed in later phases when the respective features a
 @dxgjs/logger
 @dxgjs/workspace
 @dxgjs/fs
-@dxgjs/config
 @dxgjs/templates
 @dxgjs/generators
 @dxgjs/prompts

@@ -13,7 +13,6 @@ DXG/
 │   ├── @dxgjs/workspace    # Workspace detection & manipulation
 │   ├── @dxgjs/git          # Git abstraction (commands, parsing)
 │   ├── @dxgjs/fs           # File system abstraction layer
-│   ├── @dxgjs/config       # Configuration loading, validation, merging
 │   ├── @dxgjs/validation   # Validation schemas (Zod-like) and helpers
 │   ├── @dxgjs/package-manager  # Unified npm/yarn/pnpm/bun interface
 │   ├── @dxgjs/node         # Node-specific utilities (versioning, engines)

@@ -28,7 +28,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@dxgjs/config": "workspace:*",
     "@dxgjs/fs": "workspace:*",
     "@dxgjs/generators": "workspace:*",
     "@dxgjs/logger": "workspace:*",

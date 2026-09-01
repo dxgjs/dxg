@@ -64,7 +64,7 @@ During execution, the system retrieves the template, renders it with the provide
 
 Before calling a provider, the orchestrator can build a rich context from multiple sources:
 - **Workspace**: project root, list of dependent packages, available scripts (via `@dxgjs/workspace`).
-- **Configuration**: AI‑specific parameters loaded from `dxg.config.json` or environment variables (API keys, preferred model, default temperature) (via `@dxgjs/config`).
+- **Configuration**: AI‑specific parameters loaded from environment variables (API keys, preferred model, default temperature).
 - **File System**: content of relevant files (e.g., the file currently open in an integrated editor, or a configuration file to refactor) (via `@dxgjs/fs`).
 - **Environment Variables**: API keys, tokens, etc. (via `@dxgjs/env`).
 - **Terminal State**: current text selection, cursor, active theme (via `@dxgjs/terminal` if the orchestrator is called from an interactive session).
@@ -215,7 +215,7 @@ sequenceDiagram
 
 ## Security and Confidentiality
 
-- **API Keys**: never hard‑coded; must be provided via environment variables (e.g., `CLAUDE_API_KEY`, `OPENAI_API_KEY`) or an integrated secrets manager. The configuration loader (`@dxgjs/core` or `@dxgjs/config`) does not expose them in logs thanks to an automatic mask borrowed from `@dxgjs/env`.
+- **API Keys**: never hard‑coded; must be provided via environment variables (e.g., `CLAUDE_API_KEY`, `OPENAI_API_KEY`) or an integrated secrets manager. The configuration loader (`@dxgjs/core`) does not expose them in logs thanks to an automatic mask borrowed from `@dxgjs/env`.
 - **Transmitted Context**: the `ContextBuilder` allows excluding sensitive fields by default (e.g., any variable containing the keyword `secret`, `key`, `token`). The caller may, however, choose to include a secret explicitly after being warned.
 - **Logging**: AI calls are logged at `debug` level only, and never contain the full prompt or response (only task name, provider used, duration, and status).
 - **GDPR / CCPA Compliance**: no personal data is sent unless the user decides explicitly (e.g., by passing user data in the prompt variables). The system does not collect AI usage telemetry unless DXG’s general telemetry is enabled and the user consents.
@@ -231,7 +231,7 @@ Each extension is subject to the same validation and sandbox rules as other plug
 
 ## Global AI Configuration
 
-A sub‑object in `dxg.config.json` (or a dedicated section in the configuration file) may contain:
+A sub‑object in (or a dedicated section in the configuration file) may contain:
 ```json
 {
   "ai": {
@@ -246,7 +246,7 @@ A sub‑object in `dxg.config.json` (or a dedicated section in the configuration
 }
 ```
 
-The configuration loader (`@dxgjs/config`) reads this block and provides it to the orchestrator at initialization.
+This block is read directly from package.json and provided to the orchestrator at initialization.
 
 ## Rejected / Alternatives Considered
 

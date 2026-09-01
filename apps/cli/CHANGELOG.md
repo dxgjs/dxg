@@ -9,7 +9,6 @@
 ### Patch Changes
 
 - Updated dependencies []:
-  - @dxgjs/config@0.1.0
   - @dxgjs/fs@0.1.0
   - @dxgjs/generators@0.1.0
   - @dxgjs/logger@0.1.0

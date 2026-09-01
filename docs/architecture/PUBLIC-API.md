@@ -140,27 +140,6 @@ Each entry indicates:
 
 ---
 
-## @dxgjs/config
-
-### `config.load(sources: ConfigSource[], schema?: Schema<any>) => Promise<ConfigObject>`
-- **What it does**: Loads configuration from an ordered list of sources (JSON/YAML/TOML files, environment variables, CLI arguments, default values), merges them according to priority (CLI > env > file > defaults), then validates the result against the provided schema (if any).
-- **Owned by**: `@dxgjs/config`
-- **Consumers**: CLI (loading `dxg.config.json`), generators that want to read project configuration, plugins that need parameters, AI (to read API keys and model preferences).
-- **Public**: Yes
-
-### Interfaces
-- `type ConfigSource = { type: 'file' | 'env' | 'cli' | 'default'; payload?: any; }`
-- `interface ConfigObject extends Record<string, any>` – the typed result if a schema is provided, otherwise `Record<string, any>`.
-- **Owned by**: `@dxgjs/config`
-- **Consumers**: Any function that consumes the result of `load`.
-- **Public**: Yes
-
-### `config.watch(sources: ConfigSource[], callback: (newConfig: ConfigObject) => void) => () => void`
-- **What it does**: Watches the specified configuration files and calls the callback when any changes (reload and re-validation).
-- **Owned by**: `@dxgjs/config`
-- **Consumers**: CLI (watch mode for development commands), plugins that want to react to hot config changes.
-- **Public**: Yes
-
 ---
 
 ## @dxgjs/validation

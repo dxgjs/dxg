@@ -68,21 +68,11 @@ Each package is described according to the following criteria:
 - **public surface**: Async functions corresponding to the operations above, with options (e.g., encoding, mode, flag). Return of Buffers or strings depending on encoding.
 - **internal responsibilities**: Runtime differences handling, path normalization, OS-specific error management.
 - **allowed dependencies**: None (it's a fundamental package). May depend on `@dxgjs/logger` to trace its own operations if desired, but generally not necessary.
-- **forbidden dependencies**: No high-level package (workflow, configuration, etc.) that would create coupling to business logic. In particular, must **not** depend on `@dxgjs/json` or `@dxgjs_config` — these treatments belong to specialized packages.
+- **forbidden dependencies**: No high-level package (workflow, configuration, etc.) that would create coupling to business logic. In particular, must **not** depend on `@dxgjs/json` — these treatments belong to specialized packages.
 - **public or internal**: Public
 - **exist now or later**: Now
 
 ---
-
-## @dxgjs/config
-- **purpose**: Load, merge, and validate configuration from multiple sources (files, environment variables, CLI arguments, default values).
-- **responsibilities**: Define priority order (CLI > env > file > defaults), support multiple formats (JSON, YAML, TOML), internal reference resolution (`$ref`, similar to JSON Schema), file watching for hot reloading, validation according to a provided schema.
-- **public surface**: Function `loadConfig(sources: ConfigSource[], schema?: Schema) => Promise<ConfigObject>`, methods to add sources, define a schema, enable watching.
-- **internal responsibilities**: Reading and parsing different formats, merging according to priority, reference resolution, validation schema application, watch management (via chokidar or equivalent native).
-- **allowed dependencies**: `@dxgjs/fs` (file reading), `@dxgjs/env` (environment variable reading), `@dxgjs/validation` (schema validation), `@dxgjs/json` (JSON object manipulation if needed), `@dxgjs/logger`.
-- **forbidden dependencies**: No high-level package (CLI, generators, AI, etc.) that would dictate what configuration to load or how to use it.
-- **public or internal**: Public
-- **exist now or later**: Now
 
 ---
 
@@ -163,7 +153,7 @@ Each package is described according to the following criteria:
 - **responsibilities**: AI provider abstraction (Claude, GPT, Gemini, Fable, futures), versioned prompt registry, context construction from workspace, configuration, file system, etc., complex task planning (decomposition into subtasks, scheduling), specialized agents (code generator, reviewer, refactorer, auditor), semantic response caching, request rate management (rate-limiter) with exponential backoff, retry, and fallback between providers.
 - **public surface**: `AIOrchestrator` class with methods like `execute(taskName: string, variables: Record<string,any>) => Promise<any>`, provider registration (`registerProvider(name, provider)`), prompt promise registration (`registerPrompt(name, template, schema)`), cache access (`getCacheStats()`).
 - **internal responsibilities**: Context construction, provider selection, variable validation schema application, provider call with rendered prompt, potential post-treatment (code block extraction, formatting), cache management (key based on prompt+context+provider version hash), error handling and fallback.
-- **allowed dependencies**: `@dxgjs/core` (DI/event bus to obtain services like logger or config), `@dxgjs/config` (loading API keys and model parameters), `@dxgjs/validation` (prompt schema and variable validation), `@dxgjs/logger` (AI call logging), `@dxgjs/fs` (possible context file reading), `@dxgjs/json` (JSON object manipulation if needed).
+- **allowed dependencies**: `@dxgjs/core` (DI/event bus to obtain services like logger), `@dxgjs/validation` (prompt schema and variable validation), `@dxgjs/logger` (AI call logging), `@dxgjs/fs` (possible context file reading), `@dxgjs/json` (JSON object manipulation if needed).
 - **forbidden dependencies**: No high-level package that would dictate AI call logic (CLI, generators, etc.) except via the orchestrator's public interface.
 - **public or internal**: Public
 - **exist now or later**: Now
@@ -208,7 +198,7 @@ Each package is described according to the following criteria:
 
 ## @dxgjs/plugins
 - **purpose**: Discovery, loading, and secure management of external plugins.
-- **responsibilities**: Plugin search in npm registry (packages with `dxg-plugin:true` field or following `dxg-plugin-*` convention), dynamic loading in a sandboxed environment (ESM with `importAttributes` or `vm2`), plugin manifest validation, extension points registration (commands, generators, hooks, AI providers, terminal extensions), plugin lifecycle management (activation, deactivation), provision of an API for plugins to access core services (logger, config, fs, etc.) via dependency injection.
+- **responsibilities**: Plugin search in npm registry (packages with `dxg-plugin:true` field or following `dxg-plugin-*` convention), dynamic loading in a sandboxed environment (ESM with `importAttributes` or `vm2`), plugin manifest validation, extension points registration (commands, generators, hooks, AI providers, terminal extensions), plugin lifecycle management (activation, deactivation), provision of an API for plugins to access core services (logger, fs, etc.) via dependency injection.
 - **public surface**: Function `loadPlugins(options?: {cwd?: string; allowUnsafe?: boolean}) => Promise<PluginLoadResult>`, classes allowing plugins to declare their manifest (`export const manifest: PluginManifest`), plugin API to register extensions (`registerCommand`, `registerGenerator`, `registerHook`, `registerAIProvider`, `registerTerminalExtension`).
 - **internal responsibilities**: Plugin package resolution, sandbox creation with limited access to authorized APIs only, manifest export function call, manifest schema validation, internal extension registration, unloading and cleanup management.
 - **allowed dependencies**: `@dxgjs/core` (to provide DI container and event bus to plugins), `@dxgjs/logger` (to log plugin loading), `@dxgjs/validation` (to validate plugin manifest), `@dxgjs/fs` (to verify plugin package existence on disk if loaded from local path).
@@ -247,7 +237,7 @@ Each package is described according to the following criteria:
 - The strict separation between `@dxgjs/terminal` and `@dxgjs/logger` is intentional: the terminal must **not** perform logging, and the logger must **not** know rendering concepts.
 - The `@dxgjs/core` package is intentionally minimal; it must **not** extend to include configuration, validation, or templating logic — these responsibilities belong to their own dedicated packages.
 - A global `@dxgjs/types` package is **not** created; types remain either in the concerned package, or in internal non-published contracts (see Type Architecture section below).
-- If two packages were to be merged (e.g., `@dxgjs/env` and `@dxgjs/config` share loading responsibilities), we decided to keep them separate because environment loading is a distinct concern from multi-source, multi-format configuration resolution.
+- If two packages were to be merged, we decided to keep them separate because environment loading is a distinct concern from multi-source, multi-format configuration resolution.
 - A missing package could be `@dxgjs/errors` for a typed error hierarchy, but we estimate that errors can be modeled as simple objects enriched with context, and each package can define its own error types if necessary; a dedicated package would add indirection without clear benefit.
 - The `@dxgjs/processus` package (subprocess life cycle management) is covered by `@dxgjs/fs` (temporary file creation) and by direct use of `child_process` in packages that need it (like `@dxgjs/git`, `@dxgjs/package-manager`); no additional abstraction is currently judged necessary.
 

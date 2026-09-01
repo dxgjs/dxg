@@ -49,7 +49,6 @@ Phase 6 — Auth Generator Implementation (IMPLEMENTED)
   - GeneratorContext
   - `@dxgjs/fs`
   - `@dxgjs/workspace`
-  - `@dxgjs/config`
   - `@dxgjs/prompts`
   - `@dxgjs/templates`
   - `@dxgjs/logger`
@@ -80,7 +79,6 @@ Phase 6 — Auth Generator Implementation (IMPLEMENTED)
   - GeneratorContext
   - `@dxgjs/fs`
   - `@dxgjs/workspace`
-  - `@dxgjs/config`
   - `@dxgjs/prompts`
   - `@dxgjs/templates`
   - `@dxgjs/logger`
@@ -109,7 +107,6 @@ Phase 6 — Auth Generator Implementation (IMPLEMENTED)
   - GeneratorContext
   - `@dxgjs/fs`
   - `@dxgjs/workspace`
-  - `@dxgjs/config`
   - `@dxgjs/prompts`
   - `@dxgjs/templates`
   - `@dxgjs/logger`
