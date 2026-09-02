@@ -346,6 +346,7 @@ export async function executeDatabase(
   updated: string[];
   skipped: string[];
   conflicts: { path: string; existsAs: "file" | "directory" }[];
+  wouldRun: string[];
 }> {
   const { fs } = ctx;
   const planToUse = plan ?? planDatabase(answers);
@@ -354,11 +355,13 @@ export async function executeDatabase(
     updated: string[];
     skipped: string[];
     conflicts: { path: string; existsAs: "file" | "directory" }[];
+    wouldRun: string[];
   } = {
     created: [],
     updated: [],
     skipped: [],
     conflicts: [],
+    wouldRun: [],
   };
 
   // Step 1: Install development dependencies
@@ -410,9 +413,11 @@ export async function executeDatabase(
       }
     }
   } else {
-    // In dry-run mode, note that we would install dependencies
+    // Dry-run: record the planned dev dependency install for the summary
     if (planToUse.devPackages.length > 0) {
-      note("[database] Dry-run: Would install dev dependencies");
+      result.wouldRun.push(
+        `install dev dependencies (${planToUse.devPackages.join(", ")})`,
+      );
     }
   }
 
@@ -465,9 +470,11 @@ export async function executeDatabase(
       }
     }
   } else {
-    // In dry-run mode, note that we would install dependencies
+    // Dry-run: record the planned dependency install for the summary
     if (planToUse.regularPackages.length > 0) {
-      note("[database] Dry-run: Would install dependencies");
+      result.wouldRun.push(
+        `install dependencies (${planToUse.regularPackages.join(", ")})`,
+      );
     }
   }
 
@@ -553,7 +560,7 @@ export async function executeDatabase(
       );
     }
   } else {
-    // In dry-run mode, report what would happen
+    // Dry-run: record the planned prisma init and the files Prisma owns
     const providerObj =
       providerData[planToUse.provider as keyof typeof providerData];
     // Reflect the DXG-owned skills decision in the planned command:
@@ -566,11 +573,10 @@ export async function executeDatabase(
     )
       .slice(1) // drop the "prisma@7" package spec for display
       .join(" ");
-    note(`[database] Dry-run: Would run: prisma ${plannedArgs}`);
-    note(`[database] Dry-run: Would create/update:`);
-    note(`[database]   - prisma/schema.prisma`);
-    note(`[database]   - prisma.config.ts`);
-    note(`[database]   - .env`);
+    result.wouldRun.push(`prisma ${plannedArgs}`);
+    result.wouldRun.push(
+      "create prisma/schema.prisma, prisma.config.ts, .env (Prisma-owned)",
+    );
   }
 
   // Step 5: Add Prisma scripts to package.json
@@ -619,40 +625,47 @@ export async function executeDatabase(
         PRISMA_SCRIPTS,
       );
 
-      // Log script results
+      // Record script results into the structured operation result —
+      // rendered once by summarizeDatabase, never narrated mid-run.
       if (scriptResult.added.length > 0) {
-        note(`Added Prisma scripts: ${scriptResult.added.join(", ")}`);
         // If we added scripts, we've updated package.json
         result.updated.push("package.json");
+        result.updated.push(
+          ...scriptResult.added.map(
+            (script) => `package.json scripts (${script})`,
+          ),
+        );
       }
       if (scriptResult.skipped.length > 0) {
-        note(
-          `Skipped Prisma scripts (already exist): ${scriptResult.skipped.join(", ")}`,
+        result.skipped.push(
+          ...scriptResult.skipped.map(
+            (script) => `package.json script ${script} (already exists)`,
+          ),
         );
       }
       if (scriptResult.conflicted.length > 0) {
         const conflictDetails = scriptResult.conflicted
           .map((c) => `${c.script} (existing: ${c.existingCommand})`)
           .join(", ");
-        note(`Prisma script conflicts: ${conflictDetails}`);
-        // If we have script conflicts and we're not forcing, we have a conflict on package.json
-        if (!ctx.force) {
-          result.conflicts.push({ path: "package.json", existsAs: "file" });
-        }
+        result.conflicts.push({
+          path: `package.json scripts (${conflictDetails})`,
+          existsAs: "file",
+        });
       }
     } catch (error) {
-      // Don't fail the whole generator for script issues - just note them
+      // Don't fail the whole generator for script issues — but a missing
+      // scripts section is actionable context the user needs to know about,
+      // so it earns a single dedicated note (not part of the success summary).
       note(
-        `Warning: Failed to add Prisma scripts: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to add Prisma scripts: ${error instanceof Error ? error.message : String(error)}`,
+        "Warning",
       );
     }
   } else {
-    // In dry-run mode, report what would happen
-    note(`[database] Dry-run: Would add Prisma scripts:`);
-    note(`[database]   - prisma:generate: prisma generate`);
-    note(`[database]   - prisma:migrate:dev: prisma migrate dev`);
-    note(`[database]   - prisma:seed: prisma db seed`);
-    note(`[database]   - prisma:studio: prisma studio`);
+    // Dry-run: record the planned script additions for the summary
+    result.wouldRun.push(
+      "add Prisma scripts to package.json (db:generate, db:pull, db:push, db:seed, db:studio)",
+    );
   }
 
   // Step 4: Handle DXG-owned application template (Prisma Client integration)
@@ -760,41 +773,59 @@ export async function verifyDatabase(
 }
 
 // Summarize function using Clack UX (replaces logger-based summarization).
-// Fully Clack-native: one coherent structured note, no logger output
-// (completion itself is communicated by the generator's outro).
+// Collect first, render once: the structured result — including the dry-run
+// plan — is consolidated into a single coherent Operation Summary note.
+// Fully Clack-native: no logger output (completion itself is communicated
+// by the generator's outro).
 export function summarizeDatabase(result: {
   created: string[];
   updated: string[];
   skipped: string[];
   conflicts: { path: string; existsAs: "file" | "directory" }[];
+  wouldRun?: string[];
 }): void {
-  const { created, updated, skipped, conflicts } = result;
+  const { created, updated, skipped, conflicts, wouldRun } = result;
 
-  const summary: string[] = [];
+  const sections: string[] = [];
 
   if (created.length) {
-    summary.push(`Created: ${created.join(", ")}`);
+    sections.push(
+      ["Created:", ...created.map((p) => `  • ${p}`)].join("\n"),
+    );
   }
 
   if (updated.length) {
-    summary.push(`Updated: ${updated.join(", ")}`);
+    sections.push(
+      ["Updated:", ...updated.map((p) => `  • ${p}`)].join("\n"),
+    );
   }
 
   if (skipped.length) {
-    summary.push(`Unchanged: ${skipped.join(", ")}`);
+    sections.push(
+      ["Skipped:", ...skipped.map((p) => `  • ${p}`)].join("\n"),
+    );
   }
 
   if (conflicts.length) {
-    const conflictDetails = conflicts
-      .map((c) => `${c.path} (${c.existsAs})`)
-      .join(", ");
+    sections.push(
+      [
+        "Conflicts:",
+        ...conflicts.map((c) => `  • ${c.path} (${c.existsAs})`),
+      ].join("\n"),
+    );
+  }
 
-    summary.push(`Conflicts: ${conflictDetails}`);
+  // Dry-run plan: the operations that WOULD be performed, described
+  // coherently instead of note-by-note narration.
+  if (wouldRun && wouldRun.length > 0) {
+    sections.push(
+      ["Would run:", ...wouldRun.map((op) => `  • ${op}`)].join("\n"),
+    );
   }
 
   // Only render the summary block when there is something to report.
-  if (summary.length > 0) {
-    note(summary.join("\n"), "Database setup");
+  if (sections.length > 0) {
+    note(sections.join("\n\n"), "Operation Summary");
   }
 }
 
@@ -866,9 +897,6 @@ export const databaseGenerator: Generator = {
       answers.installPrismaSkills = false;
     }
 
-    // Validate preconditions
-    await checkPreconditions(ctx);
-
     // Validate (interface compliance)
     if (!validateDatabase()) {
       // Use Clack cancel for validation failure
@@ -876,10 +904,14 @@ export const databaseGenerator: Generator = {
       throw new Error("Invalid responses for database generator");
     }
 
-    // Plan
-    const plan = planDatabase(answers);
-
     try {
+      // Validate preconditions (inside the try so precondition failures close
+      // the Clack frame via the catch's outro, like execution failures do)
+      await checkPreconditions(ctx);
+
+      // Plan
+      const plan = planDatabase(answers);
+
       // Execute
       const execResult = await executeDatabase(answers, ctx, plan);
 
@@ -900,8 +932,8 @@ export const databaseGenerator: Generator = {
         throw error;
       }
 
-      // Handle other errors
-      note(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      // Handle other errors — the CLI's error formatter prints the message;
+      // the outro marks the Clack boundary without duplicating it.
       outro(`Failed to setup database for ${answers.provider}`);
       throw error;
     }

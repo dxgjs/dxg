@@ -183,8 +183,9 @@ describe("Tailwind Generator", () => {
     // First prompt: customiseTailwind
     expect(prompts[0].name).toBe("customiseTailwind");
     expect(prompts[0].type).toBe("confirm");
+    // No "[y/N]" suffix: Clack's confirm already renders the Yes/No UI.
     expect(prompts[0].message).toBe(
-      "Do you want to customise Tailwind settings (content paths, theme, etc.)? [y/N]"
+      "Do you want to customise Tailwind settings (content paths, theme, etc.)?"
     );
     expect(prompts[0].default).toBe(false);
 
@@ -192,7 +193,7 @@ describe("Tailwind Generator", () => {
     expect(prompts[1].name).toBe("addPostcssPlugins");
     expect(prompts[1].type).toBe("confirm");
     expect(prompts[1].message).toBe(
-      "Do you want to add additional PostCSS plugins (e.g., for minification)? [y/N]"
+      "Do you want to add additional PostCSS plugins (e.g., for minification)?"
     );
     expect(prompts[1].default).toBe(false);
 
@@ -200,7 +201,7 @@ describe("Tailwind Generator", () => {
     expect(prompts[2].name).toBe("installAutoprefixer");
     expect(prompts[2].type).toBe("confirm");
     expect(prompts[2].message).toBe(
-      "Do you need to support legacy browsers (IE11, older Android)? [y/N]"
+      "Do you need to support legacy browsers (IE11, older Android)?"
     );
     expect(prompts[2].default).toBe(false);
   });
@@ -260,11 +261,12 @@ describe("Tailwind Generator", () => {
     // Verify that outro was called
     expect(prompts.outro).toHaveBeenCalledWith("Tailwind CSS setup completed!");
 
-    // Verify that note was called for user-facing messages
-    expect(prompts.note).toHaveBeenCalled();
-
-    // Verify that logger.debug was called for technical diagnostics
-    expect(mockLogger.debug).toHaveBeenCalled();
+    // Semantic summary UX: exactly ONE Operation Summary note renders the
+    // whole structured result — not one note per created/updated file.
+    const noteCalls = (prompts.note as Mock).mock.calls;
+    expect(noteCalls.length).toBe(1);
+    const summary = String(noteCalls[0][0]);
+    expect(summary).toContain("src/index.css");
 
     // Verify that fs.pathExists was called for package.json
     expect(fs.pathExists).toHaveBeenCalledWith("package.json");
@@ -341,10 +343,20 @@ describe("Tailwind Generator", () => {
     // And readFile should be called for package.json (framework detection)
     expect(fs.readFile).toHaveBeenCalledWith("package.json", { encoding: "utf8" });
 
-    // Verify that the dry-run message was noted
-    expect(prompts.note).toHaveBeenCalledWith(
-      "[tailwind] Dry-run: Would install dependencies"
-    );
+    // Semantic dry-run UX: the planned install AND the planned CSS
+    // entrypoint are reported inside ONE Operation Summary note (collect
+    // first, render once) — no per-step dry-run narration, no `[tailwind]`
+    // log-style prefix. Planned operations use the database-generator
+    // "Would run:" section, NOT "Skipped" (a planned operation is not an
+    // actually-skipped one).
+    const noteCalls = (prompts.note as Mock).mock.calls;
+    expect(noteCalls.length).toBe(1);
+    const summary = String(noteCalls[0][0]);
+    expect(summary).toContain("src/index.css");
+    expect(summary).toContain("Would run:");
+    expect(summary).toContain("install dependencies");
+    expect(summary).not.toContain("would install:");
+    expect(summary).not.toMatch(/Skipped:[^\n]*dependencies/);
   });
 
   test("tailwindGenerator should handle force mode", async () => {
@@ -562,6 +574,100 @@ describe("Tailwind Generator", () => {
     await expect(
       tailwindGenerator.run(answers, context)
     ).rejects.toThrow("package.json not found");
+  });
+
+  test("tailwindGenerator should use confirm defaults in non-interactive mode", async () => {
+    // Create a package.json so that preconditions pass
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+    await fs.mkdir("src", { recursive: true });
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+          return (data[key] ?? '') as string;
+        });
+      }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
+      dryRun: true, // dry-run implies non-interactive
+      force: false,
+      nonInteractive: true,
+    };
+
+    // Empty answers: all three confirms are absent → they must receive their
+    // declared defaults (false) instead of failing the run.
+    const cliAnswers = {};
+
+    await expect(
+      tailwindGenerator.run(cliAnswers, context)
+    ).resolves.not.toThrow();
+
+    // No prompting in non-interactive mode
+    expect(prompts.prompt).not.toHaveBeenCalled();
+
+    // The run still completes the whole pipeline (dry-run summary + outro)
+    expect(prompts.outro).toHaveBeenCalledWith("Tailwind CSS setup completed!");
+  });
+
+  test("tailwindGenerator should close the Clack frame on precondition failure", async () => {
+    // No package.json in the temp dir → checkPreconditions fails inside the try.
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockReturnValue("") },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
+      dryRun: false,
+      force: false,
+      nonInteractive: true,
+    };
+
+    const answers = {
+      customiseTailwind: false,
+      addPostcssPlugins: false,
+      installAutoprefixer: false,
+    };
+
+    // Precondition errors must reach the SAME error handling as execution
+    // errors (outro closes the frame; the error is rethrown for the CLI).
+    await expect(
+      tailwindGenerator.run(answers, context)
+    ).rejects.toThrow("package.json not found");
+
+    expect(prompts.outro).toHaveBeenCalledWith("Failed to setup Tailwind CSS");
   });
 
   test("tailwindGenerator should handle Node.js version < 18", async () => {

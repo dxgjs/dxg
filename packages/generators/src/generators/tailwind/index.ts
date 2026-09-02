@@ -42,21 +42,21 @@ export const tailwindPrompts = [
     type: "confirm" as const,
     name: "customiseTailwind",
     message:
-      "Do you want to customise Tailwind settings (content paths, theme, etc.)? [y/N]",
+      "Do you want to customise Tailwind settings (content paths, theme, etc.)?",
     default: false,
   },
   {
     type: "confirm" as const,
     name: "addPostcssPlugins",
     message:
-      "Do you want to add additional PostCSS plugins (e.g., for minification)? [y/N]",
+      "Do you want to add additional PostCSS plugins (e.g., for minification)?",
     default: false,
   },
   {
     type: "confirm" as const,
     name: "installAutoprefixer",
     message:
-      "Do you need to support legacy browsers (IE11, older Android)? [y/N]",
+      "Do you need to support legacy browsers (IE11, older Android)?",
     default: false,
   },
 ] satisfies {
@@ -159,26 +159,30 @@ export async function executeTailwind(
   updated: string[];
   skipped: string[];
   conflicts: { path: string; existsAs: "file" | "directory" }[];
+  wouldRun: string[];
 }> {
-  const { logger, fs } = ctx;
+  const { fs } = ctx;
   const planToUse = plan ?? planTailwind(answers);
   const result: {
     created: string[];
     updated: string[];
     skipped: string[];
     conflicts: { path: string; existsAs: "file" | "directory" }[];
+    wouldRun: string[];
   } = {
     created: [],
     updated: [],
     skipped: [],
     conflicts: [],
+    wouldRun: [],
   };
 
   // Check if Tailwind is already installed
   const tailwindInstalled = await isTailwindInstalled(fs);
   if (tailwindInstalled) {
-        note("Tailwind CSS already detected. Skipping dependency installation.");
-        logger.debug("[tailwind] Tailwind CSS already detected. Skipping dependency installation.");
+    // Operation result: recorded for the final summary, not narrated
+    // mid-run (the dependency is already up to date).
+    result.skipped.push("dependencies (already installed)");
   } else if (!ctx.dryRun) {
     // Install dependencies using @antfu/ni getCliCommand and executeCommand
     try {
@@ -220,8 +224,12 @@ export async function executeTailwind(
       );
     }
   } else {
-    // In dry-run mode, note that we would install dependencies
-        note("[tailwind] Dry-run: Would install dependencies");
+    // Dry-run: record the planned dependency install for the summary
+    // (wouldRun — the database-generator convention — not Skipped: a planned
+    // operation is not an operation that was actually skipped).
+    result.wouldRun.push(
+      `install dependencies (${planToUse.packages.join(", ")})`,
+    );
   }
 
   // Handle config files
@@ -324,43 +332,59 @@ export async function verifyTailwind(
   }
 }
 
-// Summarize function using Clack UX (replaces logger-based summarization)
+// Summarize function using Clack UX (replaces logger-based summarization).
+// Collect first, render once: the structured result is consolidated into a
+// single coherent Operation Summary note — no per-event narration.
 export function summarizeTailwind(
-  answers: Record<string, unknown>,
   result: {
     created: string[];
     updated: string[];
     skipped: string[];
     conflicts: { path: string; existsAs: "file" | "directory" }[];
+    wouldRun?: string[];
   },
-  ctx: GeneratorContext,
 ): void {
-  const { logger } = ctx;
-  const { created, updated, skipped, conflicts } = result;
+  const { created, updated, skipped, conflicts, wouldRun } = result;
+
+  const sections: string[] = [];
+
   if (created.length) {
-    note(`Created: ${created.join(", ")}`);
+    sections.push(
+      ["Created:", ...created.map((p) => `  • ${p}`)].join("\n"),
+    );
   }
   if (updated.length) {
-    note(`Updated: ${updated.join(", ")}`);
+    sections.push(
+      ["Updated:", ...updated.map((p) => `  • ${p}`)].join("\n"),
+    );
   }
   if (skipped.length) {
-    note(`Unchanged: ${skipped.join(", ")}`);
+    sections.push(
+      ["Skipped:", ...skipped.map((p) => `  • ${p}`)].join("\n"),
+    );
   }
   if (conflicts.length) {
-    const conflictDetails = conflicts
-      .map((c) => `${c.path} (${c.existsAs})`)
-      .join(", ");
-    note(`Conflicts: ${conflictDetails}`);
+    sections.push(
+      [
+        "Conflicts:",
+        ...conflicts.map((c) => `  • ${c.path} (${c.existsAs})`),
+      ].join("\n"),
+    );
   }
 
-  const customizations = [];
-  if (answers.customiseTailwind) customizations.push("customized");
-  if (answers.addPostcssPlugins) customizations.push("with PostCSS plugins");
-  if (answers.installAutoprefixer) customizations.push("with autoprefixer");
-  const customizationDesc = customizations.length > 0 ? ` (${customizations.join(", ")})` : "";
+  // Dry-run plan: the operations that WOULD be performed (same presentation
+  // as the database generator).
+  if (wouldRun && wouldRun.length > 0) {
+    sections.push(
+      ["Would run:", ...wouldRun.map((op) => `  • ${op}`)].join("\n"),
+    );
+  }
 
-  logger.debug(`Tailwind CSS setup completed${customizationDesc} (${created.length + updated.length + skipped.length + conflicts.length} files processed)`);
-  note(`Tailwind CSS setup completed${customizationDesc} (${created.length + updated.length + skipped.length + conflicts.length} files processed)`);
+  // Only render the summary block when there is something to report;
+  // completion itself is communicated by the generator's outro.
+  if (sections.length > 0) {
+    note(sections.join("\n\n"), "Operation Summary");
+  }
 }
 
 /**
@@ -379,10 +403,8 @@ async function determineCssEntrypoint(
       encoding: "utf8",
     });
     packageJsonContent = fileContent as string;
-  } catch (error) {
-    ctx.logger.warn(
-      `Could not read package.json for framework detection: ${error}`,
-    );
+  } catch {
+    // Not user-facing: the generic CSS fallback below still works.
     return null;
   }
 
@@ -390,7 +412,7 @@ async function determineCssEntrypoint(
   try {
     packageJson = JSON.parse(packageJsonContent);
   } catch {
-    ctx.logger.warn("Could not parse package.json");
+    // Not user-facing: the generic CSS fallback below still works.
     return null;
   }
 
@@ -649,16 +671,19 @@ export const tailwindGenerator: Generator = {
       }
       answers = { ...answers, ...promptAnswers };
     } else if ((needsCustomiseTailwind || needsAddPostcssPlugins || needsInstallAutoprefixer) && !shouldPrompt) {
-      // In non-interactive mode, throw error for missing required values
-      const missing = [];
-      if (needsCustomiseTailwind) missing.push("customiseTailwind");
-      if (needsAddPostcssPlugins) missing.push("addPostcssPlugins");
-      if (needsInstallAutoprefixer) missing.push("installAutoprefixer");
-      throw new Error(`Missing required values in non-interactive mode: ${missing.join(", ")}`);
+      // Non-interactive: defaultable confirm values receive their declared
+      // prompt defaults (database-generator convention) — none of them is a
+      // genuinely required value, so nothing fails the run.
+      if (needsCustomiseTailwind) {
+        answers.customiseTailwind = tailwindPrompts[0].default;
+      }
+      if (needsAddPostcssPlugins) {
+        answers.addPostcssPlugins = tailwindPrompts[1].default;
+      }
+      if (needsInstallAutoprefixer) {
+        answers.installAutoprefixer = tailwindPrompts[2].default;
+      }
     }
-
-    // Validate preconditions
-    await checkPreconditions(ctx);
 
     // Validate (interface compliance)
     if (!validateTailwind()) {
@@ -667,10 +692,14 @@ export const tailwindGenerator: Generator = {
       throw new Error("Invalid responses for tailwind generator");
     }
 
-    // Plan
-    const plan = planTailwind(answers);
-
     try {
+      // Validate preconditions (inside the try so precondition failures close
+      // the Clack frame via the catch's outro, like execution failures do)
+      await checkPreconditions(ctx);
+
+      // Plan
+      const plan = planTailwind(answers);
+
       // Execute
       const execResult = await executeTailwind(answers, ctx, plan);
 
@@ -680,7 +709,7 @@ export const tailwindGenerator: Generator = {
       }
 
       // Summarize using Clack UX
-      summarizeTailwind(answers, execResult, ctx);
+      summarizeTailwind(execResult);
 
       // Outro
       outro(`Tailwind CSS setup completed!`);
@@ -691,8 +720,8 @@ export const tailwindGenerator: Generator = {
         throw error;
       }
 
-      // Handle other errors
-      note(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      // Handle other errors — the CLI's error formatter prints the message;
+      // the outro marks the Clack boundary without duplicating it.
       outro(`Failed to setup Tailwind CSS`);
       throw error;
     }

@@ -191,30 +191,32 @@ export async function executeAuth(
   updated: string[];
   skipped: string[];
   conflicts: { path: string; existsAs: "file" | "directory" }[];
+  wouldRun: string[];
 }> {
-  const { logger, fs } = ctx;
+  const { fs } = ctx;
   const planToUse = plan ?? planAuth(answers);
   const result: {
     created: string[];
     updated: string[];
     skipped: string[];
     conflicts: { path: string; existsAs: "file" | "directory" }[];
+    wouldRun: string[];
   } = {
     created: [],
     updated: [],
     skipped: [],
     conflicts: [],
+    wouldRun: [],
   };
 
   // Check if auth dependency is already installed (skip in dry-run)
   const provider = answers.provider as string;
+  const authInstalled = await isAuthInstalled(fs, provider);
   if (!ctx.dryRun) {
-    const authInstalled = await isAuthInstalled(fs, provider);
-    if (authInstalled) {
-      note(`${provider} already detected. Skipping dependency installation.`);
-      logger.debug(
-        `[auth] ${provider} already detected. Skipping dependency installation.`,
-      );
+    if (authInstalled && planToUse.packages.length > 0) {
+      // Operation result: recorded for the final summary, not narrated
+      // mid-run (the dependency is already up to date).
+      result.skipped.push("dependencies (already installed)");
     } else if (answers.installDependencies) {
       // Install dependencies using @antfu/ni getCliCommand and executeCommand
       try {
@@ -259,10 +261,13 @@ export async function executeAuth(
       }
     }
   } else {
-    // In dry-run mode, just check if installation would be needed
-    const authInstalled = await isAuthInstalled(fs, provider);
+    // Dry-run: record the planned dependency install for the summary
+    // (wouldRun — the database-generator convention — not Skipped: a planned
+    // operation is not an operation that was actually skipped).
     if (!authInstalled && answers.installDependencies) {
-      logger.debug("[auth] Dry-run: Would install dependencies");
+      result.wouldRun.push(
+        `install dependencies (${planToUse.packages.join(", ")})`,
+      );
     }
   }
 
@@ -369,39 +374,59 @@ export async function verifyAuth(
   }
 }
 
-// Summarize function using Clack UX (replaces logger-based summarization)
+// Summarize function using Clack UX (replaces logger-based summarization).
+// Collect first, render once: the structured result is consolidated into a
+// single coherent Operation Summary note — no per-event narration.
 export function summarizeAuth(
-  answers: Record<string, unknown>,
   result: {
     created: string[];
     updated: string[];
     skipped: string[];
     conflicts: { path: string; existsAs: "file" | "directory" }[];
+    wouldRun?: string[];
   },
-  ctx: GeneratorContext,
 ): void {
-  const { logger } = ctx;
-  const { created, updated, skipped, conflicts } = result;
+  const { created, updated, skipped, conflicts, wouldRun } = result;
+
+  const sections: string[] = [];
+
   if (created.length) {
-    note(`Created: ${created.join(", ")}`);
+    sections.push(
+      ["Created:", ...created.map((p) => `  • ${p}`)].join("\n"),
+    );
   }
   if (updated.length) {
-    note(`Updated: ${updated.join(", ")}`);
+    sections.push(
+      ["Updated:", ...updated.map((p) => `  • ${p}`)].join("\n"),
+    );
   }
   if (skipped.length) {
-    note(`Unchanged: ${skipped.join(", ")}`);
+    sections.push(
+      ["Skipped:", ...skipped.map((p) => `  • ${p}`)].join("\n"),
+    );
   }
   if (conflicts.length) {
-    const conflictDetails = conflicts
-      .map((c) => `${c.path} (${c.existsAs})`)
-      .join(", ");
-    note(`Conflicts: ${conflictDetails}`);
+    sections.push(
+      [
+        "Conflicts:",
+        ...conflicts.map((c) => `  • ${c.path} (${c.existsAs})`),
+      ].join("\n"),
+    );
   }
 
-  logger.debug(
-    `Auth generator completed successfully (provider: ${answers.provider})`,
-  );
-  note(`Auth generator completed successfully (provider: ${answers.provider})`);
+  // Dry-run plan: the operations that WOULD be performed (same presentation
+  // as the database generator).
+  if (wouldRun && wouldRun.length > 0) {
+    sections.push(
+      ["Would run:", ...wouldRun.map((op) => `  • ${op}`)].join("\n"),
+    );
+  }
+
+  // Only render the summary block when there is something to report;
+  // completion itself is communicated by the generator's outro.
+  if (sections.length > 0) {
+    note(sections.join("\n\n"), "Operation Summary");
+  }
 }
 
 /**
@@ -470,18 +495,19 @@ export const authGenerator: Generator = {
         needsGenerateExampleConfig) &&
       !shouldPrompt
     ) {
-      // In non-interactive mode, throw error for missing required values
-      const missing = [];
-      if (needsProvider) missing.push("provider");
-      if (needsInstallDependencies) missing.push("installDependencies");
-      if (needsGenerateExampleConfig) missing.push("generateExampleConfig");
-      throw new Error(
-        `Missing required values in non-interactive mode: ${missing.join(", ")}`,
-      );
+      // Non-interactive: only genuinely required values without a declared
+      // default fail the run (database-generator convention). The confirm
+      // values receive their declared prompt defaults.
+      if (needsProvider) {
+        throw new Error("Missing required values in non-interactive mode: provider");
+      }
+      if (needsInstallDependencies) {
+        answers.installDependencies = authPrompts[1].default;
+      }
+      if (needsGenerateExampleConfig) {
+        answers.generateExampleConfig = authPrompts[2].default;
+      }
     }
-
-    // Validate preconditions
-    await checkPreconditions(ctx);
 
     // Validate (interface compliance)
     if (!validateAuth()) {
@@ -490,10 +516,14 @@ export const authGenerator: Generator = {
       throw new Error("Invalid responses for auth generator");
     }
 
-    // Plan
-    const plan = planAuth(answers);
-
     try {
+      // Validate preconditions (inside the try so precondition failures close
+      // the Clack frame via the catch's outro, like execution failures do)
+      await checkPreconditions(ctx);
+
+      // Plan
+      const plan = planAuth(answers);
+
       // Execute
       const execResult = await executeAuth(answers, ctx, plan);
 
@@ -503,7 +533,7 @@ export const authGenerator: Generator = {
       }
 
       // Summarize using Clack UX
-      summarizeAuth(answers, execResult, ctx);
+      summarizeAuth(execResult);
 
       // Outro
       outro(`Auth setup completed for ${answers.provider}!`);
@@ -514,8 +544,8 @@ export const authGenerator: Generator = {
         throw error;
       }
 
-      // Handle other errors
-      note(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      // Handle other errors — the CLI's error formatter prints the message;
+      // the outro marks the Clack boundary without duplicating it.
       outro(`Failed to setup auth for ${answers.provider}`);
       throw error;
     }

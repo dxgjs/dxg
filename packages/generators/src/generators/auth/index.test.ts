@@ -259,11 +259,12 @@ describe("Auth Generator", () => {
     // Verify that outro was called
     expect(prompts.outro).toHaveBeenCalledWith("Auth setup completed for better-auth!");
 
-    // Verify that note was called for user-facing messages
-    expect(prompts.note).toHaveBeenCalled();
-
-    // Verify that logger.debug was called for technical diagnostics
-    expect(mockLogger.debug).toHaveBeenCalled();
+    // Semantic summary UX: exactly ONE Operation Summary note renders the
+    // whole structured result — not one note per created/updated file.
+    const noteCalls = (prompts.note as Mock).mock.calls;
+    expect(noteCalls.length).toBe(1);
+    const summary = String(noteCalls[0][0]);
+    expect(summary).toContain("auth.config.ts");
 
     // Verify that fs.pathExists was called for package.json
     expect(fs.pathExists).toHaveBeenCalledWith("package.json");
@@ -335,10 +336,19 @@ describe("Auth Generator", () => {
     // And readFile should be called for package.json
     expect(fs.readFile).toHaveBeenCalledWith("package.json", { encoding: "utf8" });
 
-    // Verify that the dry-run message was logged as technical diagnostics
-    expect(mockLogger.debug).toHaveBeenCalledWith(
-      "[auth] Dry-run: Would install dependencies"
-    );
+    // Semantic dry-run UX: the planned install AND the planned config file
+    // are reported inside ONE Operation Summary note (collect first, render
+    // once) — no per-step dry-run narration, no `[auth]` log-style prefix.
+    // Planned operations use the database-generator "Would run:" section,
+    // NOT "Skipped" (a planned operation is not an actually-skipped one).
+    const noteCalls = (prompts.note as Mock).mock.calls;
+    expect(noteCalls.length).toBe(1);
+    const summary = String(noteCalls[0][0]);
+    expect(summary).toContain("auth.config.ts");
+    expect(summary).toContain("Would run:");
+    expect(summary).toContain("install dependencies");
+    expect(summary).not.toContain("would install:");
+    expect(summary).not.toMatch(/Skipped:[^\n]*dependencies/);
   });
 
   test("authGenerator should handle interactive prompts when CLI answers are incomplete", async () => {
@@ -498,6 +508,135 @@ describe("Auth Generator", () => {
     await expect(
       authGenerator.run(answers, context)
     ).rejects.toThrow("package.json not found");
+  });
+
+  test("authGenerator should use confirm defaults in non-interactive mode when only provider is given", async () => {
+    // Create a package.json so that preconditions pass
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+          return (data[key] ?? '') as string;
+        });
+      }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: { name: "next", detected: true },
+        language: { name: "typescript", detected: true },
+        packageManager: 'npm',
+        styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+        capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+        packageJson: { name: "test-project", version: "1.0.0", private: true }
+      },
+      dryRun: true, // dry-run implies non-interactive
+      force: false,
+      nonInteractive: true,
+    };
+
+    // Only the genuinely required value is supplied; the two confirms must
+    // receive their declared defaults (true) instead of failing the run.
+    const cliAnswers = { provider: "better-auth" };
+
+    await expect(
+      authGenerator.run(cliAnswers, context)
+    ).resolves.not.toThrow();
+
+    // No prompting in non-interactive mode
+    expect(prompts.prompt).not.toHaveBeenCalled();
+
+    // The run still completes the whole pipeline (dry-run summary + outro)
+    expect(prompts.outro).toHaveBeenCalledWith("Auth setup completed for better-auth!");
+  });
+
+  test("authGenerator should require provider in non-interactive mode", async () => {
+    // Create a package.json so that preconditions pass
+    await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockReturnValue("") },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: { name: "next", detected: true },
+        language: { name: "typescript", detected: true },
+        packageManager: 'npm',
+        styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+        capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+        packageJson: { name: "test-project", version: "1.0.0", private: true }
+      },
+      dryRun: true,
+      force: false,
+      nonInteractive: true,
+    };
+
+    // No provider → the only genuinely required value is missing → fail.
+    await expect(
+      authGenerator.run({}, context)
+    ).rejects.toThrow("Missing required values in non-interactive mode: provider");
+  });
+
+  test("authGenerator should close the Clack frame on precondition failure", async () => {
+    // No package.json in the temp dir → checkPreconditions fails inside the try.
+
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockReturnValue("") },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: { name: "next", detected: true },
+        language: { name: "typescript", detected: true },
+        packageManager: 'npm',
+        styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+        capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+        packageJson: { name: "test-project", version: "1.0.0", private: true }
+      },
+      dryRun: false,
+      force: false,
+      nonInteractive: true,
+    };
+
+    const answers = {
+      provider: "better-auth",
+      installDependencies: true,
+      generateExampleConfig: true,
+    };
+
+    // Precondition errors must reach the SAME error handling as execution
+    // errors (outro closes the frame; the error is rethrown for the CLI).
+    await expect(
+      authGenerator.run(answers, context)
+    ).rejects.toThrow("package.json not found");
+
+    expect(prompts.outro).toHaveBeenCalledWith("Failed to setup auth for better-auth");
   });
 
   test("authGenerator should handle Node.js version < 18", async () => {

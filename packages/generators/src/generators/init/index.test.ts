@@ -220,11 +220,15 @@ describe("Init Generator", () => {
     // Verify that outro was called
     expect(prompts.outro).toHaveBeenCalledWith("Project my-project initialized successfully!");
 
-    // Verify that note was called for user-facing messages
-    expect(prompts.note).toHaveBeenCalled();
-
-    // Verify that logger.debug was called for technical diagnostics
-    expect(mockLogger.debug).toHaveBeenCalled();
+    // Semantic summary UX: exactly ONE Operation Summary note renders the
+    // whole structured result — not one note per created/updated file.
+    const noteCalls = (prompts.note as Mock).mock.calls;
+    expect(noteCalls.length).toBe(1);
+    const summary = String(noteCalls[0][0]);
+    expect(summary).toContain("package.json");
+    expect(summary).toContain("tsconfig.json");
+    expect(summary).toContain("src/index.ts");
+    expect(summary).toContain(".gitignore");
 
     // Verify that fs.mkdir was called for the src directory (for src/index.ts)
     expect(fs.mkdir).toHaveBeenCalledWith("src", { recursive: true });
@@ -286,8 +290,15 @@ describe("Init Generator", () => {
     // And no directory should have been created in dry-run mode
     expect(fs.mkdir).not.toHaveBeenCalled();
 
-    // Verify that the dry-run summary notes what would have been created
-    expect(prompts.note).toHaveBeenCalledWith(expect.stringContaining("Created:"));
+    // Semantic dry-run UX: the planned files are reported inside ONE
+    // Operation Summary note (collect first, render once) — the file list
+    // is preserved without coupling the test to exact wording.
+    const noteCalls = (prompts.note as Mock).mock.calls;
+    expect(noteCalls.length).toBe(1);
+    expect(String(noteCalls[0][0])).toContain("package.json");
+    expect(String(noteCalls[0][0])).toContain("tsconfig.json");
+    expect(String(noteCalls[0][0])).toContain("src/index.ts");
+    expect(String(noteCalls[0][0])).toContain(".gitignore");
   });
 
   test("initGenerator should handle force mode", async () => {
@@ -477,5 +488,84 @@ describe("Init Generator", () => {
     await expect(
       initGenerator.run(answers, context)
     ).rejects.toThrow("Invalid project name provided");
+  });
+
+  test("initGenerator should accept a missing optional description in non-interactive mode", async () => {
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockImplementation((template: string, data: Record<string, unknown>) => {
+        return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+          return (data[key] ?? '') as string;
+        });
+      }) },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
+      dryRun: true, // dry-run implies non-interactive
+      force: false,
+      nonInteractive: true,
+    };
+
+    // Only the genuinely required value (`name`) is supplied; the optional
+    // `description` must default to "" instead of failing the run.
+    const cliAnswers = { name: "my-project" };
+
+    await expect(
+      initGenerator.run(cliAnswers, context)
+    ).resolves.not.toThrow();
+
+    // No prompting in non-interactive mode
+    expect(prompts.prompt).not.toHaveBeenCalled();
+
+    // The run still completes the whole pipeline (dry-run summary + outro)
+    expect(prompts.outro).toHaveBeenCalledWith("Project my-project initialized successfully!");
+  });
+
+  test("initGenerator should still require a project name in non-interactive mode", async () => {
+    const mockLogger = {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    } as unknown as Logger;
+
+    const context = {
+      logger: mockLogger,
+      fs: fs,
+      templates: { render: vi.fn().mockReturnValue("") },
+      awareness: {
+        projectRoot: '.',
+        workspaceRoot: '.',
+        framework: undefined,
+        language: undefined,
+        packageManager: 'npm',
+        styling: undefined,
+        capabilities: {},
+        packageJson: {}
+      },
+      dryRun: true,
+      force: false,
+      nonInteractive: true,
+    };
+
+    // `name` is genuinely required with no default → non-interactive fails.
+    await expect(
+      initGenerator.run({}, context)
+    ).rejects.toThrow("Missing required values in non-interactive mode: name");
   });
 });

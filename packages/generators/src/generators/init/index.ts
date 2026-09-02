@@ -194,30 +194,34 @@ export async function verifyInit(
   }
 }
 
-// Summarize function using Clack UX (replaces logger-based summarization)
+// Summarize function using Clack UX (replaces logger-based summarization).
+// Collect first, render once: the structured result is consolidated into a
+// single coherent Operation Summary note — no per-event narration.
 export function summarizeInit(
-  answers: Record<string, unknown>,
   result: { created: string[]; updated: string[]; skipped: string[]; conflicts: { path: string; existsAs: 'file' | 'directory' }[] },
-  ctx: GeneratorContext,
 ): void {
-  const { logger } = ctx;
   const { created, updated, skipped, conflicts } = result;
+
+  const sections: string[] = [];
+
   if (created.length) {
-    note(`Created: ${created.join(", ")}`);
+    sections.push(["Created:", ...created.map(p => `  • ${p}`)].join("\n"));
   }
   if (updated.length) {
-    note(`Updated: ${updated.join(", ")}`);
+    sections.push(["Updated:", ...updated.map(p => `  • ${p}`)].join("\n"));
   }
   if (skipped.length) {
-    note(`Unchanged: ${skipped.join(", ")}`);
+    sections.push(["Skipped:", ...skipped.map(p => `  • ${p}`)].join("\n"));
   }
   if (conflicts.length) {
-    const conflictDetails = conflicts.map(c => `${c.path} (${c.existsAs})`).join(", ");
-    note(`Conflicts: ${conflictDetails}`);
+    sections.push(["Conflicts:", ...conflicts.map(c => `  • ${c.path} (${c.existsAs})`)].join("\n"));
   }
-  const total = created.length + updated.length + skipped.length + conflicts.length;
-  logger.debug(`Initialization completed: ${answers.name} (${total} files processed)`);
-  note(`Initialization completed: ${answers.name} (${total} files processed)`);
+
+  // Only render the summary block when there is something to report;
+  // completion itself is communicated by the generator's outro.
+  if (sections.length > 0) {
+    note(sections.join("\n\n"), "Operation Summary");
+  }
 }
 
 /**
@@ -268,11 +272,15 @@ export const initGenerator: Generator = {
       }
       answers = { ...answers, ...promptAnswers };
     } else if ((needsName || needsDescription) && !shouldPrompt) {
-      // In non-interactive mode, throw error for missing required values
-      const missing = [];
-      if (needsName) missing.push("name");
-      if (needsDescription) missing.push("description");
-      throw new Error(`Missing required values in non-interactive mode: ${missing.join(", ")}`);
+      // Non-interactive: only genuinely required values without a declared
+      // default fail the run (database-generator convention). `description`
+      // is optional with a declared default of "" — apply it, don't demand it.
+      if (needsName) {
+        throw new Error("Missing required values in non-interactive mode: name");
+      }
+      if (needsDescription) {
+        answers.description = "";
+      }
     }
 
     // Validate
@@ -282,14 +290,15 @@ export const initGenerator: Generator = {
       throw new Error("Invalid project name provided");
     }
 
-    // Plan
-    const plan = planInit(answers);
-
     // Use spinner for file creation operations
     const s = spinner();
     s.start("Creating project files...");
 
     try {
+      // Plan (inside the try so plan failures close the Clack frame via the
+      // catch's outro, like execution failures do)
+      const plan = planInit(answers);
+
       // Execute
       const execResult = await executeInit(answers, ctx, plan);
 
@@ -302,7 +311,7 @@ export const initGenerator: Generator = {
       s.stop();
 
       // Summarize using Clack UX
-      summarizeInit(answers, execResult, ctx);
+      summarizeInit(execResult);
 
       // Outro
       outro(`Project ${answers.name} initialized successfully!`);
@@ -316,8 +325,8 @@ export const initGenerator: Generator = {
         throw error;
       }
 
-      // Handle other errors
-      note(`Error: ${error instanceof Error ? error.message : String(error)}`);
+      // Handle other errors — the CLI's error formatter prints the message;
+      // the outro marks the Clack boundary without duplicating it.
       outro(`Failed to initialize project ${answers.name}`);
       throw error;
     }

@@ -308,6 +308,12 @@ program
 
       // Natural exit (code 0)
     } catch (err) {
+      // A Clack cancellation (Ctrl+C during a prompt) is a clean user exit,
+      // not an error: the generator already rendered cancel("Operation
+      // cancelled"). Don't print the cancel symbol, don't fail the process.
+      if (isCancel(err)) {
+        return;
+      }
       console.error(formatDXGError(err));
       process.exitCode = 1;
     }
@@ -334,6 +340,11 @@ program
         throw new Error(`Unknown demo type: ${demoType}`);
       }
     } catch (err) {
+      // A Clack cancellation (Ctrl+C during a demo prompt) is a clean user
+      // exit — the demo already rendered its cancel message.
+      if (isCancel(err)) {
+        return;
+      }
       console.error(formatDXGError(err));
       process.exitCode = 1;
     }
@@ -391,7 +402,18 @@ program
         name: awareness.packageJson.name,
         version: awareness.packageJson.version
       };
-      const cliAnswers = { ...options, ...configAnswers };
+      // Map Commander flag names to the answer keys generators consume, so
+      // every option advertised by --help actually influences the run (and
+      // counts as already supplied — no redundant prompt). Only set when the
+      // flag was explicitly provided; absent flags fall through to the
+      // generator's default/prompt behavior.
+      const flagAnswers: Record<string, unknown> = {};
+      if (options.customise) flagAnswers.customiseTailwind = true;
+      if (options.postcss) flagAnswers.addPostcssPlugins = true;
+      if (options.autoprefixer) flagAnswers.installAutoprefixer = true;
+      if (options.installDeps) flagAnswers.installDependencies = true;
+      if (options.generateConfig) flagAnswers.generateExampleConfig = true;
+      const cliAnswers = { ...options, ...configAnswers, ...flagAnswers };
 
       // Run generator in project root directory
       await runInTargetDirectory(projectRoot, async () => {
@@ -400,6 +422,12 @@ program
 
       // Natural exit (code 0)
     } catch (err) {
+      // A Clack cancellation (Ctrl+C during a prompt) is a clean user exit,
+      // not an error: the generator already rendered cancel("Operation
+      // cancelled"). Don't print the cancel symbol, don't fail the process.
+      if (isCancel(err)) {
+        return;
+      }
       console.error(formatDXGError(err));
       process.exitCode = 1;
     }

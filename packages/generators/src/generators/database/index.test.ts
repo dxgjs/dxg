@@ -827,10 +827,14 @@ describe("Database Generator", () => {
         { provider: "sqlite", installPrismaSkills: false },
         baseContext({ dryRun: true }),
       );
-      const noNote = (noteMock as Mock).mock.calls.find((call) =>
-        String(call[0]).includes("Would run: prisma"),
-      );
-      expect(String(noNote?.[0])).toContain("--no-skills");
+
+      // Semantic dry-run UX: everything the run WOULD do is collected and
+      // rendered in ONE coherent Operation Summary note — no note-by-note
+      // narration of individual steps.
+      const noteCalls = (noteMock as Mock).mock.calls;
+      expect(noteCalls.length).toBe(1);
+      const summary = String(noteCalls[0][0]);
+      expect(summary).toContain("--no-skills");
       expect(fs.executeCommand).not.toHaveBeenCalled();
 
       (noteMock as Mock).mockClear();
@@ -839,11 +843,11 @@ describe("Database Generator", () => {
         { provider: "sqlite", installPrismaSkills: true },
         baseContext({ dryRun: true }),
       );
-      const yesNote = (noteMock as Mock).mock.calls.find((call) =>
-        String(call[0]).includes("Would run: prisma"),
-      );
-      expect(String(yesNote?.[0])).toContain("--datasource-provider sqlite");
-      expect(String(yesNote?.[0])).not.toContain("--no-skills");
+      const noteCallsYes = (noteMock as Mock).mock.calls;
+      expect(noteCallsYes.length).toBe(1);
+      const summaryYes = String(noteCallsYes[0][0]);
+      expect(summaryYes).toContain("--datasource-provider sqlite");
+      expect(summaryYes).not.toContain("--no-skills");
       expect(fs.executeCommand).not.toHaveBeenCalled();
     });
 

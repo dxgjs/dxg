@@ -66,9 +66,11 @@ describe("Prompts Package", () => {
     });
   });
 
-  // NOTE: the package re-exports @clack/prompts verbatim. Cancellation is NOT
-  // handled here - consumers call `isCancel(result)` themselves (see
-  // apps/cli/src/index.ts). These tests pin that passthrough contract.
+  // NOTE: the package re-exports @clack/prompts verbatim — the raw primitives
+  // stay passthrough (consumers call isCancel(result) themselves, e.g. the
+  // CLI showcase). The prompt() wrapper is different: it converts a resolved
+  // cancel symbol into a rejection so generators' catch { isCancel(error) }
+  // boundary actually runs.
   describe("Passthrough re-exports", () => {
 
     test("intro forwards the message unchanged", () => {
@@ -345,6 +347,65 @@ describe("Prompts Package", () => {
       await expect(prompts.prompt([bad])).rejects.toThrow(
         "Unsupported prompt type: radio",
       );
+    });
+
+    // Clack primitives RESOLVE with the cancel symbol on Ctrl+C — they never
+    // throw it themselves. The wrapper must convert it to a rejection so the
+    // generators' catch { isCancel(error) } cancellation boundary runs.
+    describe("cancellation propagation", () => {
+      test("input: rejects with the raw cancel symbol (isCancel-compatible)", async () => {
+        mockText.mockResolvedValue(CANCEL);
+        mockIsCancel.mockImplementation((v: unknown) => v === CANCEL);
+
+        const rejection = prompts.prompt([
+          { type: "input", name: "name", message: "Project name?" },
+        ]);
+
+        await expect(rejection).rejects.toBe(CANCEL);
+      });
+
+      test("confirm: rejects with the raw cancel symbol", async () => {
+        mockConfirm.mockResolvedValue(CANCEL);
+        mockIsCancel.mockImplementation((v: unknown) => v === CANCEL);
+
+        const rejection = prompts.prompt([
+          { type: "confirm", name: "ok", message: "Proceed?" },
+        ]);
+
+        await expect(rejection).rejects.toBe(CANCEL);
+      });
+
+      test("select: rejects with the raw cancel symbol", async () => {
+        mockSelect.mockResolvedValue(CANCEL);
+        mockIsCancel.mockImplementation((v: unknown) => v === CANCEL);
+
+        const rejection = prompts.prompt([
+          {
+            type: "select",
+            name: "db",
+            message: "Which database?",
+            choices: [{ name: "SQLite", value: "sqlite" }],
+          },
+        ]);
+
+        await expect(rejection).rejects.toBe(CANCEL);
+      });
+
+      test("stops asking subsequent questions after a cancellation", async () => {
+        mockText.mockResolvedValueOnce(CANCEL);
+        mockIsCancel.mockImplementation((v: unknown) => v === CANCEL);
+        mockConfirm.mockResolvedValue(true); // would be Q2 if reached
+
+        await expect(
+          prompts.prompt([
+            { type: "input", name: "name", message: "Project name?" },
+            { type: "confirm", name: "ok", message: "Proceed?" },
+          ]),
+        ).rejects.toBe(CANCEL);
+
+        // The second question was never asked — cancellation halts collection.
+        expect(mockConfirm).not.toHaveBeenCalled();
+      });
     });
   });
 });

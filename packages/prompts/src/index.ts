@@ -85,6 +85,12 @@ export async function prompt<T extends Record<string, unknown>>(
       default:
         throw new Error(`Unsupported prompt type: ${q.type}`);
     }
+    // Clack primitives RESOLVE with the cancel symbol on Ctrl+C (they do
+    // not throw). Propagate it so callers' `isCancel(error)` handling —
+    // the intended cancellation boundary — actually runs.
+    if (isCancel(result)) {
+      throw result;
+    }
     answers[q.name] = result;
   }
 

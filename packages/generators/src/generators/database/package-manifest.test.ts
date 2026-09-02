@@ -318,6 +318,19 @@ function notes(): string[] {
   return (noteMock as Mock).mock.calls.map((call) => String(call[0]));
 }
 
+/**
+ * The single Operation Summary note rendered by summarizeDatabase — the
+ * coherent result of the whole run (semantic contract: collect first,
+ * render once). `runs` is the number of generator runs the test performed:
+ * each run renders EXACTLY one note, and the helper returns the latest
+ * run's summary.
+ */
+function operationSummary(runs = 1): string {
+  const summaryNotes = notes();
+  expect(summaryNotes.length).toBe(runs);
+  return summaryNotes[runs - 1];
+}
+
 describe("package manifest invariant (dependencies survive script injection)", () => {
   let originalCwd: string;
   let tempDir: string;
@@ -469,11 +482,12 @@ describe("package manifest invariant (dependencies survive script injection)", (
     expect((fs.writeJson as Mock).mock.calls.length).toBe(
       writeCallsAfterFirstRun,
     );
-    const skippedNote = notes().find((n) =>
-      n.includes("Skipped Prisma scripts"),
-    );
-    expect(skippedNote).toBeDefined();
-    expect(skippedNote).toContain("db:generate");
+    // The skip is reported inside the single Operation Summary (semantic:
+    // skipped info is preserved, not its exact wording). Two runs → two
+    // notes, one per run; we assert on the second run's summary.
+    const secondRunSummary = operationSummary(2);
+    expect(secondRunSummary).toContain("db:generate");
+    expect(secondRunSummary.toLowerCase()).toContain("skip");
     // And the manifest still holds both dependencies and scripts.
     const final = readManifestFromDisk();
     expect(final.devDependencies.prisma).toBe("7.10.0");
@@ -495,18 +509,14 @@ describe("package manifest invariant (dependencies survive script injection)", (
       makeContext(manifest),
     );
 
-    const conflictNote = notes().find((n) =>
-      n.includes("Prisma script conflicts"),
-    );
-    expect(conflictNote).toBeDefined();
-    expect(conflictNote).toContain("db:generate");
-    expect(conflictNote).toContain("prisma generate --custom");
-    // The generator surfaces a package.json conflict in its summary.
-    expect(
-      notes().some(
-        (n) => n.includes("Conflicts") && n.includes("package.json"),
-      ),
-    ).toBe(true);
+    // Conflicts are reported inside the single Operation Summary, with both
+    // the conflicting script and the user's existing command preserved
+    // (semantic: conflict info is preserved, not its exact wording).
+    const conflictSummary = operationSummary();
+    expect(conflictSummary).toContain("db:generate");
+    expect(conflictSummary).toContain("prisma generate --custom");
+    expect(conflictSummary.toLowerCase()).toContain("conflict");
+    expect(conflictSummary).toContain("package.json");
 
     const final = readManifestFromDisk();
     // The user's own script command is never clobbered without --force...
