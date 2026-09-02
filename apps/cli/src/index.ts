@@ -1,6 +1,5 @@
 import { Command } from "commander";
 import { isCancel } from "@dxgjs/prompts";
-import { join } from "path";
 import { initGenerator } from "@dxgjs/generators";
 import { formatDXGError } from "./errors";
 import {
@@ -21,7 +20,8 @@ import pkg from "../package.json" with { type: "json" };
 export function createProgram(): Command {
   const program = new Command();
 
-  // Default command (no subcommand) - runs init generator
+  // Default command (no subcommand) - runs init generator on the current
+  // working directory
   program
     .name("dxg")
     .description("DXG CLI for generating project scaffolding")
@@ -34,14 +34,9 @@ export function createProgram(): Command {
     .option("--force", "Force overwrite of conflicting files")
     .option("--verbose", "Enable verbose logging")
     .option("--quiet", "Suppress non-essential output")
-    .argument(
-      "[directory]",
-      "target directory (default: current directory)",
-      ".",
-    )
-    .action(async (targetDirRaw: string, options: CommanderOptions) => {
+    .action(async (options: CommanderOptions) => {
       try {
-        const targetDir = join(process.cwd(), targetDirRaw);
+        const targetDir = process.cwd();
         const projectRoot = await findProjectRoot(targetDir);
 
         // Shared setup

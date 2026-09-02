@@ -7,8 +7,8 @@ DXG is a command-line interface for generating project scaffolding.
 You can use DXG directly via npx or pnpm without installing:
 
 ```bash
-npx @dxgjs/cli init
-pnpm dlx @dxgjs/cli init
+npx @dxgjs/cli
+pnpm dlx @dxgjs/cli
 ```
 
 To install globally:
@@ -22,8 +22,8 @@ pnpm add -g @dxgjs/cli
 ## Usage
 
 ```bash
-dxg init          # Initialize a new project
-dxg add <generator> [directory]  # Add a generator to a project
+dxg               # Initialize a new project in the current directory
+dxg add <generator>  # Add a generator to the current project
 ```
 
 ## Available Generators
@@ -35,15 +35,14 @@ dxg add <generator> [directory]  # Add a generator to a project
 
 ## Options
 
-Common options (available on `dxg add <generator>`):
+Common options (available on `dxg` and `dxg add <generator>`):
 
-- `--non-interative` – Do not prompt for input; fail if required values are missing
-- `--provider <value>` – Specify provider (for database: sqlite|postgresql|mysql; for auth: better-auth|auth.js|clerk|lucia)
-- `--customise` – Customise Tailwind settings (content paths, theme, etc.)
-- `--postcss` – Add additional PostCSS plugins (e.g., for minification)
-- `--autoprefixer` – Support legacy browsers (IE11, older Android)
-- `--install-deps` – Install dependencies after generation
-- `--generate-config` – Generate example configuration file
+- `--non-interactive` – Do not prompt for input; fail if required values are missing
+- `--dry-run` – Perform a dry run without making any changes
+- `--force` – Force overwrite of conflicting files
+- `--verbose` – Enable verbose logging
+- `--quiet` – Suppress non-essential output
+- `--provider <value>` – Specify provider (for database: sqlite|postgresql|mysql; for auth: better-auth|auth.js|clerk|lucia) — `dxg add` only
 
 ## Requirements
 
