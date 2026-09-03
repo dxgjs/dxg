@@ -11,6 +11,7 @@ import {
   spinner,
   note,
   prompt,
+  multiselect,
 } from "@dxgjs/prompts";
 
 import { fileURLToPath } from "url";
@@ -27,7 +28,7 @@ const __dirname = dirname(__filename);
 // In bundled context, we need to adjust the path to point to generators/database/templates/
 const isBundled =
   __dirname.endsWith(`${sep}dist`) || __dirname.endsWith("/dist");
-let templateBasePath;
+let templateBasePath: string;
 if (isBundled) {
   // In bundle, templates are under generators/<generator-name>/templates/
   templateBasePath = join(__dirname, "generators", "database", "templates");
@@ -161,6 +162,9 @@ export const providerData = {
     templatePath: join(templateBasePath, "prisma-client-lib-planetscale.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
+    // Prisma migrations (migrate dev/reset) are unsupported on Vitess:
+    // schema changes go through PlanetScale's own workflow instead.
+    supportsMigrations: false,
     notes:
       "PlanetScale is a serverless database platform built on Vitess. Requires relationMode = 'prisma' in schema.prisma for MySQL variant.",
   },
@@ -188,6 +192,89 @@ export const providerData = {
   },
 };
 
+// Database script contract — owned by the database domain.
+//
+// Every entry must have a concrete, immediately-useful purpose after
+// `dxg add database`. Deliberately NOT exposed as scripts:
+// - db:reset — destructive (prisma migrate reset); developers who adopt
+//   the migrations workflow already know the prisma CLI.
+//
+// db:seed is opt-in (customize only): selecting it generates a
+// prisma/seed.ts skeleton, adds `tsx` (the seed runner) and configures
+// `migrations.seed` in prisma7.config.ts — where Prisma 7's `db seed`
+// reads the seed command (verified against the prisma@7.10.0 CLI: it
+// resolves migrations.seed from the config file ONLY; the
+// `prisma.seed` package.json field is read by the init flow's
+// "Seed the database?" prompt, never by db seed). The recommended set
+// stays minimal and seed stays opt-in because seeding is
+// workflow-dependent.
+const SEED_SCRIPT_NAME = "db:seed";
+const SEED_FILE_PATH = "prisma/seed.ts";
+const SEED_CONFIG_COMMAND = `tsx ${SEED_FILE_PATH}`;
+// The Prisma 7 config file written at the project root by `prisma init`
+// (first candidate in @prisma/config's search order, before the legacy
+// prisma.config.* names).
+const PRISMA_CONFIG_PATH = "prisma7.config.ts";
+
+export const databaseScriptCatalog: Record<
+  string,
+  { command: string; hint: string; recommended: boolean }
+> = {
+  "db:generate": {
+    command: "prisma generate",
+    hint: "Generate Prisma Client",
+    recommended: true,
+  },
+  "db:push": {
+    command: "prisma db push",
+    hint: "Push the Prisma schema to the database",
+    recommended: true,
+  },
+  "db:studio": {
+    command: "prisma studio",
+    hint: "Open Prisma Studio",
+    recommended: true,
+  },
+  "db:migrate": {
+    command: "prisma migrate dev",
+    hint: "Create and apply Prisma migrations",
+    recommended: false,
+  },
+  "db:pull": {
+    command: "prisma db pull",
+    hint: "Pull the database schema into Prisma schema",
+    recommended: false,
+  },
+  [SEED_SCRIPT_NAME]: {
+    command: "prisma db seed",
+    hint: "Seed the database",
+    recommended: false,
+  },
+};
+
+/** Scripts offered for a given provider key (provider-aware filtering). */
+export function providerScripts(providerKey: string): string[] {
+  const provider = providerData[providerKey as keyof typeof providerData];
+  // Providers without Prisma-migrations support (e.g. PlanetScale on
+  // Vitess) never see the migrate entry — the knowledge stays in the
+  // provider table, not in a generic capability framework. The flag is
+  // optional: every provider that does not opt out keeps the full catalogue.
+  const excludeMigrations =
+    (provider as { supportsMigrations?: boolean } | undefined)
+      ?.supportsMigrations === false;
+  return Object.keys(databaseScriptCatalog).filter(
+    (name) =>
+      !(excludeMigrations && name === "db:migrate"),
+  );
+}
+
+/** The recommended script names for a given provider key. */
+export function recommendedScripts(providerKey: string): string[] {
+  return providerScripts(providerKey).filter(
+    (name) => databaseScriptCatalog[name].recommended,
+  );
+}
+
 // Prompt questions for the database generator
 export const databasePrompts = [
   {
@@ -209,6 +296,19 @@ export const databasePrompts = [
     name: "installPrismaSkills",
     message: "Install Prisma agent skills?",
     default: false,
+  },
+  {
+    // Database scripts phase: decides which db:* npm scripts land in the
+    // project's package.json. Default is the recommended set.
+    type: "select" as const,
+    name: "databaseScripts",
+    message: "Configure database scripts?",
+    default: "recommended",
+    choices: [
+      { name: "Recommended", value: "recommended" },
+      { name: "Customize", value: "customize" },
+      { name: "Skip", value: "skip" },
+    ],
   },
 ] satisfies {
   type: "input" | "confirm" | "select";
@@ -314,6 +414,17 @@ export function planDatabase(answers: Record<string, unknown>) {
   const devPackages = [...provider.devDependencies];
   const regularPackages = [...provider.dependencies];
 
+  // The seed script only works end-to-end when its three parts travel
+  // together: the runner (tsx, devDependency), the seed file, and the
+  // `prisma.seed` config Prisma reads. Selected here, materialized below.
+  const seedSelected =
+    resolveDatabaseScripts(answers.databaseScripts, provider.key).includes(
+      SEED_SCRIPT_NAME,
+    );
+  if (seedSelected && !devPackages.includes("tsx")) {
+    devPackages.push("tsx");
+  }
+
   // Determine files to create - only DXG-owned application templates
   const filesToCreate = [
     {
@@ -322,6 +433,13 @@ export function planDatabase(answers: Record<string, unknown>) {
       data,
     },
   ];
+  if (seedSelected) {
+    filesToCreate.push({
+      path: SEED_FILE_PATH,
+      templatePath: join(templateBasePath, "prisma-seed.tmpl"),
+      data,
+    });
+  }
 
   return {
     ...data,
@@ -330,10 +448,173 @@ export function planDatabase(answers: Record<string, unknown>) {
     // DXG-owned Prisma agent skills decision (from the confirm prompt).
     // Defaults to false (skip) — see buildPrismaInitArgs.
     installPrismaSkills: answers.installPrismaSkills === true,
+    seedSelected,
     devPackages,
     regularPackages,
     filesToCreate,
   };
+}
+
+/**
+ * Resolves the interactive database scripts decision into the final script
+ * names to add. Owned by the database domain.
+ *
+ * - "recommended" → the provider's recommended set.
+ * - "customize"   → a Clack multiselect over the provider-appropriate
+ *   catalogue (each option shows what the script does).
+ * - "skip"        → no scripts.
+ * - undefined     → "recommended" (non-interactive / dry-run / CI default:
+ *   the generator stays deterministic without a TTY).
+ *
+ * Throws the Clack cancel symbol when the user cancels the multiselect
+ * (existing cancellation convention: primitives resolve with the symbol,
+ * `prompt()` throws it, `run` catches isCancel).
+ */
+export function resolveDatabaseScripts(
+  decision: unknown,
+  providerKey: string,
+): string[] {
+  if (decision === "skip") {
+    return [];
+  }
+  if (decision === "recommended") {
+    return recommendedScripts(providerKey);
+  }
+  if (Array.isArray(decision)) {
+    // Pre-resolved selection (tests / programmatic answers).
+    const offered = new Set(providerScripts(providerKey));
+    return decision.filter(
+      (name): name is string => typeof name === "string" && offered.has(name),
+    );
+  }
+  return recommendedScripts(providerKey);
+}
+
+/** Runs the interactive part of the customize branch (the multiselect). */
+async function promptCustomScripts(providerKey: string): Promise<string[]> {
+  const offered = providerScripts(providerKey);
+  const selected = await multiselect({
+    message: "Select database scripts to add",
+    options: offered.map((name) => ({
+      value: name,
+      label: name,
+      hint: databaseScriptCatalog[name].hint,
+    })),
+    initialValues: recommendedScripts(providerKey),
+    required: false,
+  });
+  if (isCancel(selected)) {
+    throw selected;
+  }
+  return selected as string[];
+}
+
+/**
+ * Inserts the seed entry into the `migrations` block of a Prisma 7 config
+ * file's raw text, preserving every other byte (comments, imports, the
+ * `process.env["DATABASE_URL"]` datasource form, formatting).
+ *
+ * This is a deliberately narrow, domain-local text transform — a
+ * temporary mechanism owned by the database generator. A robust,
+ * reusable transformer for user-owned files (prisma7.config.ts, Better
+ * Auth configs, layouts...) is deferred to a separate architectural
+ * task; this one intentionally handles only the single shape `prisma
+ * init` writes (verified against the prisma@7.10.0 CLI bundle).
+ */
+function insertSeedIntoPrismaConfig(configText: string): string | undefined {
+  // A pre-existing seed line is REPLACED in place (the --force path —
+  // a conflict was already reported for the different value, force
+  // resolves it by overwriting, exactly like conflicting scripts).
+  const existingSeed = configText.match(/^[ \t]*seed\s*:\s*["'][^"']*["'],?[ \t]*$/m);
+  if (existingSeed) {
+    const replacement = existingSeed[0].replace(
+      /(["']).*?\1/,
+      `"${SEED_CONFIG_COMMAND}"`,
+    );
+    return configText.replace(existingSeed[0], replacement);
+  }
+  // Fresh insert: anchored on the migrations block `path` line prisma
+  // init always writes. A string replace (not regex) keeps the match
+  // literal and the rest of the file untouched. The seed entry is
+  // formatted exactly like the surrounding prisma init entries
+  // (4-space indent inside migrations).
+  const pathLine = '    path: "prisma/migrations",';
+  const anchor = configText.indexOf(pathLine);
+  if (anchor === -1) {
+    return undefined;
+  }
+  const insertAt = anchor + pathLine.length;
+  return (
+    configText.slice(0, insertAt) +
+    "\n" +
+    `    seed: "${SEED_CONFIG_COMMAND}",` +
+    configText.slice(insertAt)
+  );
+}
+
+/**
+ * Extracts the existing `migrations.seed` command from a Prisma config
+ * file's raw text, if one is configured. Returns the trimmed command
+ * string (e.g. `"node custom-seed.js"`) or undefined.
+ */
+function readSeedFromPrismaConfig(configText: string): string | undefined {
+  const match = configText.match(/seed\s*:\s*["']([^"']+)["']/);
+  return match ? match[1] : undefined;
+}
+
+/**
+ * Applies the Prisma 7 seed contract to the prisma7.config.ts file:
+ * `migrations.seed = "tsx prisma/seed.ts"` — the ONLY place `prisma db
+ * seed` reads the seed command. Semantics mirror addPackageScripts
+ * (@dxgjs/fs): identical → already satisfied (skipped), different →
+ * conflict preserved unless force. The rest of the config file is
+ * preserved byte-for-byte. Domain-local on purpose — Prisma seed-config
+ * knowledge belongs to the database domain.
+ */
+async function applySeedConfigToPrismaFile(
+  fs: GeneratorContext["fs"],
+  projectRoot: string,
+  force: boolean,
+): Promise<
+  | { added: false; skipped: true; conflictExisting?: undefined }
+  | { added: false; skipped: false; conflictExisting: string }
+  | { added: true; skipped: false; conflictExisting?: undefined }
+> {
+  const configPath = join(projectRoot, PRISMA_CONFIG_PATH);
+  // Fresh read from disk: prisma init (executeDatabase step 3) wrote the
+  // file moments ago; ctx.awareness snapshots predate it. Missing file →
+  // empty string (the transform reports a missing anchor, not a crash —
+  // prisma init owns that file and any failure there surfaced earlier).
+  const current =
+    ((await fs.readFile(configPath, { encoding: "utf8" })) as
+      | string
+      | undefined) ?? "";
+
+  const existing = readSeedFromPrismaConfig(current);
+  if (existing !== undefined) {
+    if (existing === SEED_CONFIG_COMMAND) {
+      return { added: false, skipped: true };
+    }
+    // The user configured their own seed command — never clobber it
+    // without --force (same contract as conflicting scripts).
+    if (!force) {
+      return { added: false, skipped: false, conflictExisting: existing };
+    }
+  }
+
+  const updated = insertSeedIntoPrismaConfig(current);
+  if (updated === undefined) {
+    // The migrations block anchor is missing (user restructured the
+    // config) — report as a conflict rather than guessing where to
+    // insert, so nothing is silently misplaced.
+    return {
+      added: false,
+      skipped: false,
+      conflictExisting: "migrations.path (missing anchor)",
+    };
+  }
+  await fs.writeFile(configPath, updated, "utf8");
+  return { added: true, skipped: false };
 }
 
 // Execution function
@@ -575,29 +856,33 @@ export async function executeDatabase(
       .join(" ");
     result.wouldRun.push(`prisma ${plannedArgs}`);
     result.wouldRun.push(
-      "create prisma/schema.prisma, prisma.config.ts, .env (Prisma-owned)",
+      "create prisma/schema.prisma, prisma7.config.ts, .env (Prisma-owned)",
     );
   }
 
-  // Step 5: Add Prisma scripts to package.json
-  if (!ctx.dryRun) {
+  // Step 5: Add the selected database scripts to package.json
+  const selectedScripts = resolveDatabaseScripts(
+    answers.databaseScripts,
+    planToUse.provider,
+  );
+  if (selectedScripts.length === 0) {
+    // "Skip" (or an empty customize selection): package.json is left
+    // untouched; the summary makes the skip visible.
+    result.skipped.push("database scripts (skipped)");
+  } else if (!ctx.dryRun) {
+    // Declared with let (not const) because addPackageScripts is the
+    // sole assignment; the initial value documents the empty-result shape
+    // for the catch path below.
     let scriptResult: {
       added: string[];
       skipped: string[];
       conflicted: { script: string; existingCommand: string }[];
-    } = {
-      added: [],
-      skipped: [],
-      conflicted: [],
     };
     try {
-      const PRISMA_SCRIPTS: Record<string, string> = {
-        "db:generate": "prisma generate",
-        "db:pull": "prisma db pull",
-        "db:push": "prisma db push",
-        "db:seed": "prisma db seed",
-        "db:studio": "prisma studio",
-      };
+      const scriptsToAdd: Record<string, string> = {};
+      for (const name of selectedScripts) {
+        scriptsToAdd[name] = databaseScriptCatalog[name].command;
+      }
 
       // Read package.json FRESH from disk. Steps 1-2 of this run executed the
       // package manager, which persists the newly installed dependencies into
@@ -622,8 +907,33 @@ export async function executeDatabase(
           readJson: ctx.fs.readJson,
           writeJson: ctx.fs.writeJson,
         },
-        PRISMA_SCRIPTS,
+        scriptsToAdd,
       );
+
+      // Seed support (Prisma 7 contract): `prisma db seed` resolves its
+      // command from `migrations.seed` in prisma7.config.ts — never from
+      // package.json. Applied as its own file write, separate from the
+      // scripts write-back (different file, different semantics): the
+      // rest of the Prisma-owned config is preserved byte-for-byte.
+      if (planToUse.seedSelected) {
+        const seedConfigResult = await applySeedConfigToPrismaFile(
+          ctx.fs,
+          ctx.awareness.projectRoot,
+          ctx.force ?? false,
+        );
+        if (seedConfigResult.conflictExisting !== undefined) {
+          result.conflicts.push({
+            path: `${PRISMA_CONFIG_PATH} migrations.seed (existing: ${seedConfigResult.conflictExisting})`,
+            existsAs: "file",
+          });
+        } else if (seedConfigResult.added) {
+          result.updated.push(
+            `${PRISMA_CONFIG_PATH} migrations.seed (${SEED_CONFIG_COMMAND})`,
+          );
+        }
+        // skipped → already configured identically; the summary reports
+        // it through the script result (db:seed already exists).
+      }
 
       // Record script results into the structured operation result —
       // rendered once by summarizeDatabase, never narrated mid-run.
@@ -657,14 +967,14 @@ export async function executeDatabase(
       // scripts section is actionable context the user needs to know about,
       // so it earns a single dedicated note (not part of the success summary).
       note(
-        `Failed to add Prisma scripts: ${error instanceof Error ? error.message : String(error)}`,
+        `Failed to add database scripts: ${error instanceof Error ? error.message : String(error)}`,
         "Warning",
       );
     }
   } else {
     // Dry-run: record the planned script additions for the summary
     result.wouldRun.push(
-      "add Prisma scripts to package.json (db:generate, db:pull, db:push, db:seed, db:studio)",
+      `add database scripts to package.json (${selectedScripts.join(", ")})`,
     );
   }
 
@@ -768,7 +1078,7 @@ export async function verifyDatabase(
     }
   }
 
-  // Note: We don't verify prisma-owned files (schema.prisma, prisma.config.ts, .env)
+  // Note: We don't verify prisma-owned files (schema.prisma, prisma7.config.ts, .env)
   // as they are managed by Prisma CLI, not DXG
 }
 
@@ -849,15 +1159,17 @@ export const databaseGenerator: Generator = {
     // Check if we need to prompt for missing required fields
     const needsProvider = answers.provider === undefined;
     const needsSkillsAnswer = answers.installPrismaSkills === undefined;
+    const needsScriptsAnswer = answers.databaseScripts === undefined;
 
     // Only prompt in interactive mode (not dry-run and not CI)
     const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
 
-    if (shouldPrompt && (needsProvider || needsSkillsAnswer)) {
+    if (shouldPrompt && (needsProvider || needsSkillsAnswer || needsScriptsAnswer)) {
       // Use interactive prompts for missing fields. DXG owns the Prisma
       // agent skills decision ("Install Prisma agent skills?") — it is asked
       // here, after the provider selection, so the Prisma CLI itself never
-      // has to ask it.
+      // has to ask it. The database scripts phase question follows: it
+      // decides which db:* npm scripts land in package.json.
       const promptQuestions = [];
 
       if (needsProvider) {
@@ -865,6 +1177,9 @@ export const databaseGenerator: Generator = {
       }
       if (needsSkillsAnswer) {
         promptQuestions.push(databasePrompts[1]); // skills prompt
+      }
+      if (needsScriptsAnswer) {
+        promptQuestions.push(databasePrompts[2]); // database scripts prompt
       }
 
       let promptAnswers: Record<string, unknown>;
@@ -895,6 +1210,24 @@ export const databaseGenerator: Generator = {
       // of .claude/skills/, .windsurf/skills/, .agents/skills/ and
       // skills-lock.json unless explicitly requested (see buildPrismaInitArgs).
       answers.installPrismaSkills = false;
+    }
+
+    // Database scripts phase — interactive customize branch. The user chose
+    // "Customize": show the provider-appropriate script catalogue (each
+    // option carries its hint) with the recommended set preselected. Clack
+    // primitives resolve with the cancel symbol; throw it so the existing
+    // cancellation boundary (run's isCancel catch → the CLI's clean exit)
+    // handles it. Asked AFTER database setup answers, BEFORE execution —
+    // cancelling here leaves package.json completely untouched.
+    if (answers.databaseScripts === "customize") {
+      try {
+        answers.databaseScripts = await promptCustomScripts(answers.provider as string);
+      } catch (error) {
+        if (isCancel(error)) {
+          cancel("Operation cancelled");
+        }
+        throw error;
+      }
     }
 
     // Validate (interface compliance)

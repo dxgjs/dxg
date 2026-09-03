@@ -360,7 +360,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       makeContext(),
     );
 
@@ -399,16 +399,15 @@ describe("package manifest invariant (dependencies survive script injection)", (
       typescript: "^5",
     });
 
-    // Prisma scripts are added alongside the untouched existing scripts.
+    // The recommended database scripts are added alongside the untouched
+    // existing scripts (recommended set: generate, push, studio).
     expect(final.scripts).toEqual({
       dev: "next dev",
       build: "next build",
       start: "next start",
       lint: "eslint",
       "db:generate": "prisma generate",
-      "db:pull": "prisma db pull",
       "db:push": "prisma db push",
-      "db:seed": "prisma db seed",
       "db:studio": "prisma studio",
     });
   });
@@ -417,7 +416,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       makeContext(),
     );
 
@@ -437,7 +436,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
       await seedProject();
 
       await databaseGenerator.run(
-        { provider: provider.key, installPrismaSkills: false },
+        { provider: provider.key, installPrismaSkills: false, databaseScripts: "recommended" },
         makeContext(),
       );
 
@@ -467,14 +466,14 @@ describe("package manifest invariant (dependencies survive script injection)", (
     const context = makeContext();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       context,
     );
     const writeCallsAfterFirstRun = (fs.writeJson as Mock).mock.calls.length;
     expect(writeCallsAfterFirstRun).toBeGreaterThan(0);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       context,
     );
 
@@ -505,7 +504,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       makeContext(manifest),
     );
 
@@ -522,7 +521,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     // The user's own script command is never clobbered without --force...
     expect(final.scripts["db:generate"]).toBe("prisma generate --custom");
     // ...the remaining scripts are still added...
-    expect(final.scripts["db:pull"]).toBe("prisma db pull");
+    expect(final.scripts["db:push"]).toBe("prisma db push");
     expect(final.scripts["db:studio"]).toBe("prisma studio");
     // ...and the installed dependencies survive the write-back.
     expect(final.dependencies["@prisma/client"]).toBe("7.10.0");
@@ -540,14 +539,14 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       makeContext(manifest, { force: true }),
     );
 
     const final = readManifestFromDisk();
     // --force overwrites the conflicting script with the DXG command.
     expect(final.scripts["db:generate"]).toBe("prisma generate");
-    expect(final.scripts["db:pull"]).toBe("prisma db pull");
+    expect(final.scripts["db:push"]).toBe("prisma db push");
     // No conflict reported when forcing.
     expect(notes().some((n) => n.includes("Prisma script conflicts"))).toBe(
       false,
@@ -565,7 +564,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     const before = fsMockStore._files.get("package.json");
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       makeContext(MY_APP_PACKAGE_JSON, { dryRun: true }),
     );
 
@@ -586,7 +585,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       makeContext(manifest),
     );
 
@@ -603,7 +602,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     const context = makeContext();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       context,
     );
 
@@ -622,7 +621,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
       makeContext(),
     );
 

@@ -1,0 +1,24 @@
+// Database seed script — run with `npm run db:seed` (or `pnpm db:seed`).
+// The shared Prisma Client (lib/prisma.ts) already loads .env variables.
+import { prisma } from "../lib/prisma";
+
+async function main() {
+  // Write your seed data here — use upsert so the seed is re-runnable:
+  //
+  // await prisma.user.upsert({
+  //   where: { email: "alice@prisma.io" },
+  //   update: {},
+  //   create: { email: "alice@prisma.io", name: "Alice" },
+  // });
+  console.log("Seed script ready — add your seed data in prisma/seed.ts");
+}
+
+main()
+  .then(async () => {
+    await prisma.$disconnect();
+  })
+  .catch(async (e) => {
+    console.error(e);
+    await prisma.$disconnect();
+    process.exit(1);
+  });

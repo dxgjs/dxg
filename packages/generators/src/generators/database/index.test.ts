@@ -880,6 +880,7 @@ describe("Database Generator", () => {
       (promptMock as unknown as Mock).mockResolvedValue({
         provider: "postgresql",
         installPrismaSkills: false,
+        databaseScripts: "recommended",
       });
 
       await databaseGenerator.run({}, baseContext());
@@ -893,10 +894,14 @@ describe("Database Generator", () => {
       expect(questions.map((q) => q.name)).toEqual([
         "provider",
         "installPrismaSkills",
+        "databaseScripts",
       ]);
       expect(questions[1].type).toBe("confirm");
       expect(questions[1].message).toBe("Install Prisma agent skills?");
       expect(questions[1].default).toBe(false);
+      // The database scripts phase question follows the skills question.
+      expect(questions[2].type).toBe("select");
+      expect(questions[2].default).toBe("recommended");
 
       // The "No" answer flows through to the Prisma arguments.
       expect(getPrismaInitArgs()).toContain("--no-skills");
@@ -908,6 +913,7 @@ describe("Database Generator", () => {
       });
       (promptMock as unknown as Mock).mockResolvedValue({
         installPrismaSkills: true,
+        databaseScripts: "recommended",
       });
 
       await databaseGenerator.run({ provider: "sqlite" }, baseContext());
@@ -915,7 +921,10 @@ describe("Database Generator", () => {
       const questions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
         name: string;
       }>;
-      expect(questions.map((q) => q.name)).toEqual(["installPrismaSkills"]);
+      expect(questions.map((q) => q.name)).toEqual([
+        "installPrismaSkills",
+        "databaseScripts",
+      ]);
 
       // "Yes" → no --no-skills flag (Prisma installs skills non-interactively).
       expect(getPrismaInitArgs()).not.toContain("--no-skills");

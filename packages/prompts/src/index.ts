@@ -2,6 +2,7 @@ import {
   text,
   confirm,
   select,
+  multiselect,
   intro,
   outro,
   isCancel,
@@ -97,4 +98,4 @@ export async function prompt<T extends Record<string, unknown>>(
   return answers as T;
 }
 
-export { text, confirm, select, intro, outro, isCancel, cancel, spinner, note };
+export { text, confirm, select, multiselect, intro, outro, isCancel, cancel, spinner, note };
