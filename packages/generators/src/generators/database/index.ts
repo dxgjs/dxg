@@ -17,8 +17,13 @@ import {
 import { fileURLToPath } from "url";
 import { dirname, join, sep } from "path";
 import { executeCommand } from "@dxgjs/fs";
-import { parseNi, parseNlx, getCliCommand } from "@antfu/ni";
+import { parseNlx, getCliCommand } from "@antfu/ni";
 import pc from "picocolors";
+import type {
+  DependencyPlan,
+  DependencyInstallResult,
+} from "../../install/types";
+import { installerFailureHint } from "../../install/installer";
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
@@ -49,10 +54,14 @@ export const providerData = {
     adapterClass: "PrismaBetterSqlite3",
     driverPackage: "better-sqlite3",
     devDependencies: ["prisma@7.10.0", "@types/node", "@types/better-sqlite3"],
+    // better-sqlite3 is PINNED to ^12.6.0: @prisma/adapter-better-sqlite3@7.10.0
+    // requires ^12.6.0, and latest (13.x) changed distribution models (no
+    // install script at all). Unpinned, the two constraints could diverge
+    // into a double-copy hazard.
     dependencies: [
       "@prisma/client@7.10.0",
       "@prisma/adapter-better-sqlite3",
-      "better-sqlite3",
+      "better-sqlite3@^12.6.0",
       "dotenv",
     ],
     templatePath: join(templateBasePath, "prisma-client-lib-sqlite.tmpl"),
@@ -371,29 +380,6 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
   await ctx.fs.readFile("package.json", { encoding: "utf8" });
 }
 
-// Check if prisma dependency is already installed in package.json
-export async function isPrismaInstalled(
-  fs: GeneratorContext["fs"],
-): Promise<boolean> {
-  try {
-    const packageJsonExists = await fs.pathExists("package.json");
-    if (!packageJsonExists) {
-      return false;
-    }
-    const content = await fs.readFile("package.json", { encoding: "utf8" });
-    const pkg = JSON.parse(content as string);
-
-    // Check for prisma package
-    const result =
-      (pkg.devDependencies && pkg.devDependencies["prisma@7"]) ||
-      (pkg.dependencies && pkg.dependencies["prisma@7"]);
-    return !!result;
-  } catch {
-    // If we can't read or parse, assume not installed
-    return false;
-  }
-}
-
 // Planning function
 export function planDatabase(answers: Record<string, unknown>) {
   const providerKey = answers.provider as string;
@@ -425,6 +411,52 @@ export function planDatabase(answers: Record<string, unknown>) {
     devPackages.push("tsx");
   }
 
+  // Domain-owned build knowledge (data-driven, provider-local): which
+  // packages in this provider's plan run install lifecycle scripts that
+  // build native artifacts. prisma's preinstall is a Node-version guard;
+  // @prisma/engines' postinstall downloads the schema engine binary
+  // (required for migrate/db push); better-sqlite3@12 compiles/links the
+  // .node binding. tsx, @types/*, dotenv, pg and the adapters have none.
+  const requiresBuild = (spec: string): boolean =>
+    /^prisma@/.test(spec) ||
+    spec === "@prisma/engines" ||
+    /^better-sqlite3@/.test(spec);
+  // The adapter pulls @prisma/engines transitively — its build approval is
+  // needed even though it never appears as a direct spec.
+  const buildApprovalNames = ["prisma", "@prisma/engines"];
+  if (provider.key === "sqlite") {
+    buildApprovalNames.push("better-sqlite3");
+  }
+
+  // DependencyPlan consumed by the installer seam (ctx.installer): the
+  // generator declares WHAT needs building; the per-manager adapters own
+  // the HOW (pnpm allowBuilds / npm allowScripts / yarn berry
+  // dependenciesMeta / bun default-trust).
+  const dependencyPlan: DependencyPlan = {
+    devDependencies: devPackages.map((spec) => ({
+      spec,
+      requiresBuild: requiresBuild(spec),
+    })),
+    dependencies: [
+      ...regularPackages.map((spec) => ({
+        spec,
+        requiresBuild: requiresBuild(spec),
+      })),
+      // Approval-only entry: @prisma/engines is a TRANSITIVE dependency of
+      // prisma (never installed directly by name), but its postinstall is
+      // exactly what build-approval gates must cover. approvalOnly keeps it
+      // out of the install command args while its name reaches the approval
+      // map — validated in lab e2e-pnpm (allowBuilds with '@prisma/engines'
+      // → postinstall downloads the schema-engine binary).
+      {
+        spec: "@prisma/engines",
+        requiresBuild: true,
+        reason: "postinstall downloads the schema-engine binary",
+        approvalOnly: true,
+      },
+    ],
+  };
+
   // Determine files to create - only DXG-owned application templates
   const filesToCreate = [
     {
@@ -451,6 +483,8 @@ export function planDatabase(answers: Record<string, unknown>) {
     seedSelected,
     devPackages,
     regularPackages,
+    dependencyPlan,
+    buildApprovalNames,
     filesToCreate,
   };
 }
@@ -645,116 +679,108 @@ export async function executeDatabase(
     wouldRun: [],
   };
 
-  // Step 1: Install development dependencies
+  // Steps 1-2: Install dependencies through the installer seam. The seam
+  // (built in prepareContext from the detected agent) resolves the command,
+  // pre-writes the manager's build approvals for exactly the plan's
+  // requiresBuild names, runs with buffered output, and classifies. This
+  // generator holds ZERO package-manager logic — no if (pm === "pnpm"),
+  // ever. The spinner stays Clack-native: it runs above the buffered
+  // install and the captured output is echoed on completion.
   if (!ctx.dryRun) {
-    if (planToUse.devPackages.length > 0) {
-      try {
-        const resolved = await getCliCommand(
-          parseNi,
-          ["-D", ...planToUse.devPackages],
-          {
-            cwd: process.cwd(),
-            programmatic: true,
-          },
-        );
-
-        if (!resolved) {
-          throw new Error(
-            "Failed to resolve package manager command for adding dev dependencies",
-          );
-        }
-
-        const { command: cmd, args, cwd: resolvedCwd } = resolved;
-        const executeCwd = resolvedCwd ?? process.cwd();
-
-        const s = spinner();
-        s.start(
-          `Installing dev dependencies: ${planToUse.devPackages.join(", ")}`,
-        );
-        try {
-          await executeCommand(cmd, args, {
-            cwd: executeCwd,
-            stdio: "inherit",
-          });
-          s.stop(
-            `Successfully installed dev dependencies: ${planToUse.devPackages.join(", ")}`,
-          );
-        } catch (executeError) {
-          s.stop(`Failed to install dev dependencies`);
-          throw new Error(
-            `Failed to install dev dependencies: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
-            { cause: executeError },
-          );
-        }
-      } catch (error) {
-        throw new Error(
-          `Failed to install dev dependencies: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error },
-        );
-      }
-    }
-  } else {
-    // Dry-run: record the planned dev dependency install for the summary
-    if (planToUse.devPackages.length > 0) {
-      result.wouldRun.push(
-        `install dev dependencies (${planToUse.devPackages.join(", ")})`,
+    if (!ctx.installer) {
+      throw new Error(
+        "Dependency installer unavailable: the generator context was built without one (package manager could not be detected).",
       );
     }
-  }
+    if (
+      planToUse.devPackages.length > 0 ||
+      planToUse.regularPackages.length > 0
+    ) {
+      const installLabel = [
+        planToUse.devPackages.length > 0
+          ? `dev: ${planToUse.devPackages.join(", ")}`
+          : null,
+        planToUse.regularPackages.length > 0
+          ? `deps: ${planToUse.regularPackages.join(", ")}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" | ");
 
-  // Step 2: Install regular dependencies
-  if (!ctx.dryRun) {
-    if (planToUse.regularPackages.length > 0) {
+      const s = spinner();
+      s.start(`Installing dependencies (${installLabel})`);
+      let installResult: DependencyInstallResult;
       try {
-        const resolved = await getCliCommand(
-          parseNi,
-          [...planToUse.regularPackages],
-          {
-            cwd: process.cwd(),
-            programmatic: true,
-          },
-        );
-
-        if (!resolved) {
-          throw new Error(
-            "Failed to resolve package manager command for adding dependencies",
-          );
-        }
-
-        const { command: cmd, args, cwd: resolvedCwd } = resolved;
-        const executeCwd = resolvedCwd ?? process.cwd();
-
-        const s = spinner();
-        s.start(
-          `Installing dependencies: ${planToUse.regularPackages.join(", ")}`,
-        );
-        try {
-          await executeCommand(cmd, args, {
-            cwd: executeCwd,
-            stdio: "inherit",
-          });
-          s.stop(
-            `Successfully installed dependencies: ${planToUse.regularPackages.join(", ")}`,
-          );
-        } catch (executeError) {
-          s.stop(`Failed to install dependencies`);
-          throw new Error(
-            `Failed to install dependencies: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
-            { cause: executeError },
-          );
-        }
+        installResult = await ctx.installer.install(planToUse.dependencyPlan, {
+          cwd: ctx.awareness.projectRoot,
+        });
       } catch (error) {
+        s.stop("Failed to install dependencies");
         throw new Error(
           `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
           { cause: error },
         );
       }
+
+      if (!installResult.success) {
+        s.stop("Failed to install dependencies");
+        // Normalized failure: reason is machine-usable, hint/suggestion
+        // carry the manager's own remediation. A build-script-blocked
+        // outcome is reported as what it is — an approval gap, not a
+        // broken install.
+        const hint = installerFailureHint(installResult);
+        throw new Error(
+          `Failed to install dependencies (${installResult.reason}): ${installResult.output.trim().split("\n").slice(-8).join("\n")}${hint ? `\n${hint}` : ""}`,
+          {
+            cause:
+              installResult.reason === "build-script-blocked"
+                ? new Error(hint)
+                : undefined,
+          },
+        );
+      }
+
+      s.stop(`Successfully installed dependencies (${installLabel})`);
+
+      // Even on success, silently-blocked builds are surfaced — the
+      // silent-drift hazard (npm/bun/yarn-berry exit 0 with scripts
+      // skipped). A note (not a spinner line) because the install itself
+      // succeeded; the user must still know their native artifacts may be
+      // missing until they approve.
+      if (installResult.blockedBuilds.length > 0) {
+        note(
+          [
+            "Some dependency build scripts were blocked by your package manager:",
+            ...installResult.blockedBuilds.map((name) => `  • ${name}`),
+            "Native artifacts (e.g. .node bindings) may be missing until the builds are approved.",
+          ].join("\n"),
+          "Install scripts blocked",
+        );
+        result.skipped.push(
+          `build scripts for ${installResult.blockedBuilds.join(", ")} (blocked by package manager)`,
+        );
+      }
+      if (installResult.approvedBuilds.length > 0) {
+        result.updated.push(
+          `pre-approved build scripts for ${installResult.approvedBuilds.join(", ")}`,
+        );
+      }
     }
   } else {
-    // Dry-run: record the planned dependency install for the summary
+    // Dry-run: record the planned installs for the summary
+    if (planToUse.devPackages.length > 0) {
+      result.wouldRun.push(
+        `install dev dependencies (${planToUse.devPackages.join(", ")})`,
+      );
+    }
     if (planToUse.regularPackages.length > 0) {
       result.wouldRun.push(
         `install dependencies (${planToUse.regularPackages.join(", ")})`,
+      );
+    }
+    if (planToUse.buildApprovalNames.length > 0) {
+      result.wouldRun.push(
+        `pre-approve build scripts (${planToUse.buildApprovalNames.join(", ")})`,
       );
     }
   }
@@ -840,6 +866,70 @@ export async function executeDatabase(
         { cause: error },
       );
     }
+
+    // Step 3b: Generate the Prisma Client. Prisma 7 has NO auto-generate —
+    // @prisma/client ships a stub that throws "did not initialize yet" at
+    // import time until `prisma generate` runs, and no install-lifecycle
+    // script triggers it. Without this step the generated lib/prisma.ts
+    // would import a path that does not exist yet. Resolved through the
+    // SAME dlx mechanism as init (getCliCommand(parseNlx, ["prisma@7",
+    // "generate"]) → pnpm dlx / npx / yarn dlx / bun x), guarded by the
+    // same "dlx resolved as add" mis-resolution workaround as init.
+    try {
+      const s = spinner();
+      s.start("Generating Prisma Client (prisma generate)");
+
+      const generateResolved = await getCliCommand(
+        parseNlx,
+        ["prisma@7", "generate"],
+        {
+          cwd: process.cwd(),
+          programmatic: true,
+        },
+      );
+      if (!generateResolved) {
+        throw new Error("Failed to resolve prisma generate command");
+      }
+
+      const {
+        command: generateCmdInitial,
+        args: generateArgsInitial,
+        cwd: generateResolvedCwd,
+      } = generateResolved;
+
+      let generateCmd = generateCmdInitial;
+      let generateArgs = generateArgsInitial;
+
+      // Same @antfu/ni "dlx resolved as add" mis-resolution guard as init,
+      // with the same shape: the check runs on the RESOLVED args ("add"
+      // present = mis-resolved), the rewrite restores the INTENDED args
+      // (the original contract — here a literal, same as init's
+      // originalArgs). Checking resolved args[0] === "prisma@7" would never
+      // fire: a mis-resolved command starts with "add".
+      if (generateArgs.includes("add")) {
+        generateCmd = "npx";
+        generateArgs = ["prisma@7", "generate"];
+      }
+
+      try {
+        await executeCommand(generateCmd, generateArgs, {
+          cwd: generateResolvedCwd ?? process.cwd(),
+          stdio: "inherit",
+        });
+        s.stop("Prisma Client generated");
+      } catch (executeError) {
+        s.stop(`Failed to generate Prisma Client`);
+        throw new Error(
+          `Failed to generate Prisma Client: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
+          { cause: executeError },
+        );
+      }
+    } catch (error) {
+      throw new Error(
+        `Failed to generate Prisma Client: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
   } else {
     // Dry-run: record the planned prisma init and the files Prisma owns
     const providerObj =
@@ -855,6 +945,7 @@ export async function executeDatabase(
       .slice(1) // drop the "prisma@7" package spec for display
       .join(" ");
     result.wouldRun.push(`prisma ${plannedArgs}`);
+    result.wouldRun.push("prisma generate");
     result.wouldRun.push(
       "create prisma/schema.prisma, prisma7.config.ts, .env (Prisma-owned)",
     );
@@ -1078,8 +1169,52 @@ export async function verifyDatabase(
     }
   }
 
+  // Prisma-owned artifact: the generated client. `prisma init --output
+  // ../lib/generated/prisma` + `prisma generate` produce client.ts there
+  // (prisma-client generator writes INTO the project, not node_modules).
+  // Missing client.ts = the "did not initialize yet" stub at import time —
+  // verified empirically in lab e2e-pnpm/e2e-npm.
+  const generatedClientPath = "lib/generated/prisma/client.ts";
+  if (!(await fs.pathExists(generatedClientPath))) {
+    throw new Error(
+      `Prisma Client was not generated: ${generatedClientPath} is missing. Run "npm run db:generate" (prisma generate) and try again.`,
+    );
+  }
+
+  // Native-driver artifact (SQLite only): the better-sqlite3 binding.
+  // Version-aware (lab-verified): 12.x resolves lazily through the
+  // `bindings` package → build/Release/better_sqlite3.node; 13.x ships
+  // N-API prebuilds inside the tarball → prebuilds/<platform>-<arch>.node.
+  // The plan pins ^12.6.0 (adapter requirement), but verification must
+  // accept either layout — a user may have resolved a different major.
+  // A missing binding is EXACTLY what a blocked install script leaves
+  // behind: install exits 0 (npm/bun) or 1-with-tree-installed (pnpm),
+  // `require("better-sqlite3")` still succeeds, and the failure only
+  // surfaces at `new Database()` with "Could not locate the bindings file".
+  if (planToUse.provider === "sqlite" && !ctx.dryRun) {
+    const bindingCandidates = [
+      "node_modules/better-sqlite3/build/Release/better_sqlite3.node", // 12.x
+      // 13.x prebuilds: platform-arch named (win32-x64, linux-arm64, …) —
+      // glob-less probe: the directory itself is the signal.
+      "node_modules/better-sqlite3/prebuilds",
+    ];
+    let bindingFound = false;
+    for (const candidate of bindingCandidates) {
+      if (await fs.pathExists(candidate)) {
+        bindingFound = true;
+        break;
+      }
+    }
+    if (!bindingFound) {
+      throw new Error(
+        'better-sqlite3 native binding is missing (expected node_modules/better-sqlite3/build/Release/better_sqlite3.node or prebuilds/). The install script was likely blocked by your package manager — approve the build and rebuild, e.g. "pnpm approve-builds" / "npm install-scripts approve better-sqlite3 && npm rebuild better-sqlite3" / "bun pm trust better-sqlite3".',
+      );
+    }
+  }
+
   // Note: We don't verify prisma-owned files (schema.prisma, prisma7.config.ts, .env)
-  // as they are managed by Prisma CLI, not DXG
+  // as they are managed by Prisma CLI, not DXG — but the generated client
+  // IS verified because lib/prisma.ts imports it.
 }
 
 // Summarize function using Clack UX (replaces logger-based summarization).

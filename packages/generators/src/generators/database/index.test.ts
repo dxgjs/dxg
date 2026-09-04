@@ -15,6 +15,79 @@ import { note as noteMock, prompt as promptMock } from "@dxgjs/prompts";
 import * as path from "path";
 import * as os from "os";
 import { getCliCommand } from "@antfu/ni";
+import { createDependencyInstaller } from "../../install";
+
+// Hoisted shared mock storage: the @dxgjs/fs mock factory needs it at
+// hoisted time (vi.mock factories run before module scope), and the
+// side-effecting executeCommand fake must reach the SAME store the fs
+// seam serves — called as a bare imported function, it gets no `this`.
+const fsMockStore = vi.hoisted(() => {
+  return {
+    _files: new Map<string, string>(),
+    _directories: new Set<string>(),
+  } as unknown as {
+    _files: Map<string, string>;
+    _directories: Set<string>;
+  };
+});
+
+// The DEFAULT side-effecting subprocess fake, hoisted so the @dxgjs/fs
+// factory can install it and beforeEach can REINSTALL it: vi.clearAllMocks
+// resets call history but preserves custom implementations, so a scenario
+// fake a test installs (e.g. the blocked-install one) would otherwise leak
+// into every later test.
+const defaultExecuteFake = vi.hoisted(() => {
+  return async (command: string, args: string[]) => {
+    const specs = args.filter(
+      (a: string) =>
+        !["install", "add", "-D"].includes(a) && !a.startsWith("-"),
+    );
+    if (
+      command === "npm-mock" &&
+      (args[0] === "install" || args[0] === "add")
+    ) {
+      const isDev = args.includes("-D");
+      const section = isDev ? "devDependencies" : "dependencies";
+      const pkg = JSON.parse(fsMockStore._files.get("package.json") ?? "{}");
+      pkg[section] = {
+        ...(pkg[section] ?? {}),
+        ...Object.fromEntries(specs.map((s: string) => [s, "latest"])),
+      };
+      fsMockStore._files.set("package.json", JSON.stringify(pkg));
+      // better-sqlite3's (approved) install script lands the binding —
+      // the native artifact the verification probes. Spec-prefix match:
+      // the plan pins "better-sqlite3@^12.6.0".
+      if (specs.some((s: string) => s.startsWith("better-sqlite3"))) {
+        fsMockStore._files.set(
+          "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+          "<binary>",
+        );
+      }
+      return { all: "added packages", stdout: "", stderr: "" };
+    }
+    if (command === "npx" && args[0] === "prisma@7" && args[1] === "init") {
+      fsMockStore._files.set(
+        "prisma/schema.prisma",
+        'generator client {\n  provider = "prisma-client"\n}\ndatasource db {\n  provider = "sqlite"\n}',
+      );
+      fsMockStore._files.set(
+        "prisma7.config.ts",
+        'import { defineConfig } from "prisma/config";\nexport default defineConfig({\n  migrations: {\n    path: "prisma/migrations",\n  },\n});\n',
+      );
+      fsMockStore._files.set(".env", 'DATABASE_URL="file:./dev.db"\n');
+      return { all: "prisma init ok", stdout: "", stderr: "" };
+    }
+    if (command === "npx" && args[0] === "prisma@7" && args[1] === "generate") {
+      fsMockStore._files.set(
+        "lib/generated/prisma/client.ts",
+        "// generated prisma client\n",
+      );
+      fsMockStore._directories.add("lib/generated/prisma");
+      return { all: "prisma generate ok", stdout: "", stderr: "" };
+    }
+    return { all: "", stdout: "", stderr: "" };
+  };
+});
 
 // We need to mock the modules before importing the databaseGenerator
 vi.mock("@dxgjs/prompts", async () => {
@@ -38,60 +111,50 @@ vi.mock("@dxgjs/fs", async () => {
   const actual = await vi.importActual<typeof import("@dxgjs/fs")>("@dxgjs/fs");
   const _mock = {
     ...actual,
-    _files: new Map<string, string>(),
-    _directories: new Set<string>(),
-    pathExists: vi.fn().mockImplementation(async function (
-      this: any,
-      path: string,
-    ) {
+    pathExists: vi.fn().mockImplementation(async (path: string) => {
       // Check if we have this file in our mock storage
-      if (this._files.has(path)) {
+      if (fsMockStore._files.has(path)) {
         return true;
       }
       // Check if we have this directory in our mock storage
-      if (this._directories.has(path)) {
+      if (fsMockStore._directories.has(path)) {
         return true;
       }
       // Fall back to actual implementation for other paths
       return actual.pathExists(path);
     }),
-    readFile: vi.fn().mockImplementation(async function (
-      this: any,
-      path: string,
-      options?: any,
-    ) {
+    readFile: vi.fn().mockImplementation(async (path: string, options?: any) => {
       // Check if we have this file in our mock storage
-      if (this._files.has(path)) {
-        return this._files.get(path);
+      if (fsMockStore._files.has(path)) {
+        return fsMockStore._files.get(path);
       }
       // Fall back to actual implementation for other paths
       return actual.readFile(path, options);
     }),
-    writeFile: vi.fn().mockImplementation(async function (
-      this: any,
+    writeFile: vi.fn().mockImplementation(async (
       path: string,
       data: string | Buffer,
       options?: any,
-    ) {
+    ) => {
       // Store the file in our mock storage
-      this._files.set(path, data.toString());
+      fsMockStore._files.set(path, data.toString());
       // Also ensure parent directories are tracked
       const dir = path.split("/").slice(0, -1).join("/");
       if (dir) {
-        this._directories.add(dir);
+        fsMockStore._directories.add(dir);
       }
       // Call actual writeFile (though in test env this might not do anything)
       return actual.writeFile(path, data, options);
     }),
-    stat: vi.fn().mockImplementation(async function (this: any, path: string) {
+    stat: vi.fn().mockImplementation(async (path: string) => {
       // Check if it's a file we have
-      if (this._files.has(path)) {
+      if (fsMockStore._files.has(path)) {
         return {
           isDirectory: () => false,
         };
       }
       // Check if it's a directory we have
-      if (this._directories.has(path)) {
+      if (fsMockStore._directories.has(path)) {
         return {
           isDirectory: () => true,
         };
@@ -99,22 +162,41 @@ vi.mock("@dxgjs/fs", async () => {
       // Fall back to actual implementation
       return actual.stat(path);
     }),
-    mkdir: vi.fn().mockImplementation(async function (
-      this: any,
-      path: string,
-      options?: any,
-    ) {
+    mkdir: vi.fn().mockImplementation(async (path: string, options?: any) => {
       // Track the directory as created
-      this._directories.add(path);
+      fsMockStore._directories.add(path);
       // Also track parent directories
       const parentDir = path.split("/").slice(0, -1).join("/");
       if (parentDir) {
-        this._directories.add(parentDir);
+        fsMockStore._directories.add(parentDir);
       }
       // Call actual mkdir (though in test env this might not do anything)
       return actual.mkdir(path, options);
     }),
-    executeCommand: vi.fn().mockResolvedValue(undefined),
+    // Storage-backed JSON seam (the approval writers and the scripts phase
+    // go through readJson/writeJson — backing them by the SAME store as
+    // the rest of the mock keeps one coherent project image; the real
+    // implementations would write to disk while every other read comes
+    // from the store, and the two would diverge mid-run).
+    readJson: vi.fn().mockImplementation(async (path: string) => {
+      const raw = fsMockStore._files.get(path);
+      return raw ? JSON.parse(raw) : undefined;
+    }),
+    writeJson: vi.fn().mockImplementation(async (
+      path: string,
+      data: unknown,
+    ) => {
+      fsMockStore._files.set(path, JSON.stringify(data, null, 2));
+      const dir = path.split("/").slice(0, -1).join("/");
+      if (dir) {
+        fsMockStore._directories.add(dir);
+      }
+      return actual.writeJson(path, data);
+    }),
+    // Fake side-effecting subprocess (hoisted defaultExecuteFake): installs
+    // the default fake; scenario tests override it and beforeEach
+    // reinstalls this default so implementations never leak between tests.
+    executeCommand: vi.fn().mockImplementation(defaultExecuteFake),
   };
   return _mock;
 });
@@ -133,25 +215,26 @@ vi.mock("@dxgjs/templates", async () => {
 });
 
 let triggerPrismaInitWorkaround = false;
+let triggerPrismaGenerateWorkaround = false;
 
 vi.mock("@antfu/ni", () => {
   return {
     parseNlx: vi.fn().mockReturnValue("npx"),
-    parseNi: vi.fn().mockReturnValue("npm"),
+    parseNi: vi.fn().mockReturnValue("npm-mock"),
     getCliCommand: vi
       .fn()
       .mockImplementation((parseNiFn: any, args: string[], ctx: any) => {
         // Use the parameters to avoid TS6133
         parseNiFn;
         ctx;
-        // Simulate the behavior of getCliCommand for npm project
+        // Simulate the behavior of getCliCommand for an npm project.
         if (!args || args.length === 0) {
-          return { command: "npm", args: [] };
+          return { command: "npm-mock", args: [] };
         }
-        // For prisma init command — keyed to the EXACT production argument
-        // shape (executeDatabase calls getCliCommand(parseNlx,
-        // ["prisma@7", "init", ...])). This branch MUST be evaluated before
-        // the dependency-install branches, whose "-D"/"add" heuristics would
+        // For prisma init — keyed to the EXACT production argument shape
+        // (executeDatabase calls getCliCommand(parseNlx, ["prisma@7",
+        // "init", ...])). This branch MUST be evaluated before the
+        // dependency-install branches, whose "-D"/"add" heuristics would
         // otherwise swallow the prisma args. Real @antfu/ni resolves this
         // command with a verbatim args passthrough (npx / pnpm dlx /
         // yarn dlx / bun x), so the mock must never transform or drop args
@@ -172,22 +255,30 @@ vi.mock("@antfu/ni", () => {
           // Real ni behavior: verbatim passthrough after the executable.
           return { command: "npx", args: [...args] };
         }
+        // prisma generate — same dlx passthrough semantics as init, and
+        // equally BEFORE the install heuristics: ["prisma@7", "generate"]
+        // carries no "-D", so the plain-specs branch below would otherwise
+        // mis-resolve it into "npm-mock install prisma@7 generate".
+        if (args[0] === "prisma@7" && args[1] === "generate") {
+          if (triggerPrismaGenerateWorkaround) {
+            return {
+              command: "some-agent",
+              args: ["add", ...args],
+            };
+          }
+          return { command: "npx", args: [...args] };
+        }
         // For dependency installation commands
         if (args.includes("-D") && !args.includes("add")) {
-          return { command: "npm", args: ["install", "-D", ...args] };
+          return {
+            command: "npm-mock",
+            args: ["install", "-D", ...args.slice(1)],
+          };
         }
         if (!args.includes("-D") && !args.includes("add")) {
-          return { command: "npm", args: ["install", ...args] };
+          return { command: "npm-mock", args: ["install", ...args] };
         }
-        // For prisma generate command
-        if (
-          args.includes("dlx") &&
-          args.includes("prisma") &&
-          args.includes("generate")
-        ) {
-          return { command: "npx", args: ["prisma", "generate"] };
-        }
-        return { command: "npm", args: [...args] };
+        return { command: "npm-mock", args: [...args] };
       }),
     executeCommand: vi.fn().mockResolvedValue(undefined),
   };
@@ -207,11 +298,19 @@ beforeAll(async () => {
   validateDatabase = indexModule.validateDatabase;
 });
 
-// Direct access to the @dxgjs/fs mock storage (see the vi.mock factory above)
-const fsMockStore = fs as unknown as {
-  _files: Map<string, string>;
-  _directories: Set<string>;
-};
+// The @dxgjs/fs mock's storage is the hoisted fsMockStore (above). The fs
+// import stays for the seam (context.fs) and the mock-call assertions.
+
+/**
+ * The installer seam as production builds it (prepareContext): a real
+ * createDependencyInstaller bound to the npm agent and the mocked fs. The
+ * generator flow under test then runs through the SAME seam users get —
+ * its batches hit the faked executeCommand, its npm approval write hits
+ * the in-memory store.
+ */
+function makeInstaller() {
+  return createDependencyInstaller({ agent: "npm", fs: fs as any });
+}
 
 describe("Database Generator", () => {
   let originalCwd: string;
@@ -230,8 +329,14 @@ describe("Database Generator", () => {
     fs.mkdirSync(tempDir, { recursive: true });
     // Change to the temporary directory
     process.chdir(tempDir);
-    // Reset mock storage and call history between tests
+    // Reset mock storage and call history between tests. The executeCommand
+    // fake is REINSTALLED explicitly: vi.clearAllMocks() clears history but
+    // PRESERVES custom implementations, so a scenario fake a test installed
+    // (e.g. the blocked-install one) would otherwise leak into later tests.
     vi.clearAllMocks();
+    (fs.executeCommand as unknown as Mock).mockImplementation(
+      defaultExecuteFake as (...a: unknown[]) => unknown,
+    );
     fsMockStore._files.clear();
     fsMockStore._directories.clear();
   });
@@ -517,6 +622,7 @@ describe("Database Generator", () => {
         logger: mockLogger,
         fs: fs,
         templates: templatesMock,
+        installer: makeInstaller(),
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
@@ -583,9 +689,9 @@ describe("Database Generator", () => {
       expect(getCliCommand).toHaveBeenCalled();
 
       // Verify that executeCommand was called for: dev dependencies install,
-      // regular dependencies install, and prisma init. (prisma generate is no
-      // longer part of the generator flow, so 3 commands total.)
-      expect(fs.executeCommand).toHaveBeenCalledTimes(3);
+      // regular dependencies install, prisma init, and prisma generate —
+      // 4 commands total through the installer seam + Prisma steps.
+      expect(fs.executeCommand).toHaveBeenCalledTimes(4);
 
       // The summary is fully Clack-native: the generator flow must not emit
       // logger output into the interactive UX (no logger.debug from summary).
@@ -614,6 +720,27 @@ describe("Database Generator", () => {
         logger: mockLogger,
         fs: fs,
         templates: templatesMock,
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: { name: 'unknown', detected: false },
+          language: { name: 'javascript', detected: true },
+          packageManager: 'npm',
+          styling: { name: 'none', detected: false, version: null, configFile: null },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false
+          },
+          packageJson: {
+            name: 'test-project',
+            version: '1.0.0',
+            private: true
+          }
+        },
         dryRun: false,
         force: false,
       };
@@ -659,6 +786,7 @@ describe("Database Generator", () => {
         logger: mockLogger,
         fs: fs,
         templates: templatesMock,
+        installer: makeInstaller(),
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
@@ -695,8 +823,8 @@ describe("Database Generator", () => {
 
       // Expect that the workaround was triggered: command should be "npx" and args should be the original args
       // (which include --no-skills)
-      expect(fs.executeCommand).toHaveBeenCalledTimes(3); // deps, deps, prisma init
-      // The last call to executeCommand should be for prisma init
+      expect(fs.executeCommand).toHaveBeenCalledTimes(4); // deps, deps, prisma init, prisma generate
+      // The third call to executeCommand is the prisma init invocation
       const prismaInitCall = (fs.executeCommand as Mock).mock.calls[2];
       expect(prismaInitCall[0]).toBe("npx");
       expect(prismaInitCall[1]).toEqual([
@@ -708,6 +836,229 @@ describe("Database Generator", () => {
         "--output",
         "../lib/generated/prisma"
       ]);
+    });
+
+    test("install failure surfaces the normalized reason and the manager's own remediation", async () => {
+      // Create a package.json so that validation passes
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      // Simulate pnpm's hard policy error on the FIRST install batch: the
+      // tree installs, the build scripts are skipped, exit 1.
+      (fs.executeCommand as Mock).mockRejectedValueOnce({
+        exitCode: 1,
+        all: "ERR_PNPM_IGNORED_BUILDS  Ignored build scripts: @prisma/engines@7.10.0, prisma@7.10.0.",
+        message: "Command failed with exit code 1",
+      });
+
+      const context = {
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        fs,
+        templates: { render: vi.fn(realRender) },
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: { name: 'unknown', detected: false },
+          language: { name: 'javascript', detected: true },
+          packageManager: 'pnpm',
+          styling: { name: 'none', detected: false, version: null, configFile: null },
+          capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
+          packageJson: { name: 'test-project', version: '1.0.0', private: true },
+        },
+        dryRun: false,
+        force: false,
+        nonInteractive: true,
+      };
+
+      // The generator wraps the normalized failure: reason + output tail +
+      // the manager's remediation hint, as ONE error the CLI formatter
+      // renders. No silent swallowing, no raw stack dump.
+      await expect(
+        databaseGenerator.run({ provider: "sqlite" }, context),
+      ).rejects.toThrow(/Failed to install dependencies \(build-script-blocked\)/);
+      // The install aborted before Prisma steps: init never ran.
+      const calls = (fs.executeCommand as Mock).mock.calls;
+      expect(
+        calls.some((c: unknown[]) => Array.isArray(c[1]) && c[1][0] === "prisma@7"),
+      ).toBe(false);
+    });
+
+    test("silently blocked builds on a successful install surface as a Clack note, then verification catches the missing binding", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      // npm exits 0 but warns: better-sqlite3's script was skipped — the
+      // silent-drift hazard this pipeline exists to catch. The default fake
+      // is overridden so NO binding lands on disk (the script was blocked),
+      // while prisma init/generate still produce their artifacts.
+      (fs.executeCommand as Mock).mockImplementation(
+        async (command: string, args: string[]) => {
+          if (command === "npm-mock" && args[0] === "install") {
+            const isDev = args.includes("-D");
+            if (isDev) {
+              return { all: "added packages", stdout: "", stderr: "" };
+            }
+            return {
+              all: [
+                "added 22 packages",
+                "npm warn install-scripts 2 packages had install scripts blocked",
+                "npm warn install-scripts   better-sqlite3@12.6.0 (install: prebuild-install || node-gyp rebuild)",
+              ].join("\n"),
+              stdout: "",
+              stderr: "",
+            };
+          }
+          if (command === "npx" && args[1] === "init") {
+            fsMockStore._files.set("prisma/schema.prisma", "schema");
+            fsMockStore._files.set("prisma7.config.ts", "config");
+            fsMockStore._files.set(".env", "DATABASE_URL=x");
+            return { all: "init ok", stdout: "", stderr: "" };
+          }
+          if (command === "npx" && args[1] === "generate") {
+            fsMockStore._files.set("lib/generated/prisma/client.ts", "// client");
+            fsMockStore._directories.add("lib/generated/prisma");
+            return { all: "generate ok", stdout: "", stderr: "" };
+          }
+          return { all: "", stdout: "", stderr: "" };
+        },
+      );
+
+      const context = {
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        fs,
+        templates: { render: vi.fn(realRender) },
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: { name: 'unknown', detected: false },
+          language: { name: 'javascript', detected: true },
+          packageManager: 'npm',
+          styling: { name: 'none', detected: false, version: null, configFile: null },
+          capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
+          packageJson: { name: 'test-project', version: '1.0.0', private: true },
+        },
+        dryRun: false,
+        force: false,
+      };
+
+      // Two layers catch the hazard in order: the install surfaces the
+      // blocked build as a Clack note (exit-0 scan)…
+      const runPromise = databaseGenerator.run({ provider: "sqlite" }, context);
+      // …and the run ultimately FAILS: verification detects the missing
+      // native binding — "exit 0" never masquerades as "operational".
+      await expect(runPromise).rejects.toThrow(
+        /better-sqlite3 native binding is missing/,
+      );
+
+      const blockedNote = (noteMock as Mock).mock.calls.find(
+        (call: unknown[]) => String(call[1]).includes("Install scripts blocked"),
+      );
+      expect(blockedNote).toBeDefined();
+      expect(String(blockedNote![0])).toContain("better-sqlite3");
+      // The remediation message carries the per-manager commands.
+      const verifyError = await runPromise.catch((e: Error) => e);
+      expect(verifyError.message).toContain("pnpm approve-builds");
+    });
+
+    test("prisma generate mis-resolved as 'add' falls back to npx with the original args", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+      // The generate resolution returns "<agent> add prisma@7 generate" —
+      // the production guard must rewrite it to npx + ["prisma@7",
+      // "generate"].
+      triggerPrismaGenerateWorkaround = true;
+
+      const context = {
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        fs,
+        templates: { render: vi.fn(realRender) },
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: { name: 'unknown', detected: false },
+          language: { name: 'javascript', detected: true },
+          packageManager: 'npm',
+          styling: { name: 'none', detected: false, version: null, configFile: null },
+          capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
+          packageJson: { name: 'test-project', version: '1.0.0', private: true },
+        },
+        dryRun: false,
+        force: false,
+        nonInteractive: true,
+      };
+
+      try {
+        await databaseGenerator.run({ provider: "postgresql" }, context);
+
+        // The generate call must have been rewritten to npx + original args.
+        const calls = (fs.executeCommand as Mock).mock.calls;
+        const generateCall = calls.find(
+          (c: unknown[]) =>
+            Array.isArray(c[1]) && c[1][0] === "prisma@7" && c[1][1] === "generate",
+        );
+        expect(generateCall).toBeDefined();
+        expect(generateCall![0]).toBe("npx");
+        expect(generateCall![1]).toEqual(["prisma@7", "generate"]);
+      } finally {
+        triggerPrismaGenerateWorkaround = false;
+      }
+    });
+
+    test("the plan's approval-only @prisma/engines entry is pre-approved but never installed", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+      vi.clearAllMocks();
+
+      const context = {
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        fs,
+        templates: { render: vi.fn(realRender) },
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: { name: 'unknown', detected: false },
+          language: { name: 'javascript', detected: true },
+          packageManager: 'npm',
+          styling: { name: 'none', detected: false, version: null, configFile: null },
+          capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
+          packageJson: { name: 'test-project', version: '1.0.0', private: true },
+        },
+        dryRun: false,
+        force: false,
+      };
+
+      await databaseGenerator.run({ provider: "sqlite" }, context);
+
+      // Installed specs never contain the bare transitive name…
+      const calls = (fs.executeCommand as Mock).mock.calls;
+      const installCalls = calls.filter(
+        (c: unknown[]) =>
+          c[0] === "npm-mock" && (c[1] as string[])[0] === "install",
+      );
+      expect(installCalls.length).toBe(2);
+      const allSpecs = installCalls.flatMap((c: unknown[]) => c[1] as string[]);
+      expect(allSpecs).not.toContain("@prisma/engines");
+      // …but its npm approval WAS pre-written (allowScripts in package.json).
+      // The npm approval writer goes through readJson/writeJson — real fs
+      // functions in this mock (only the storage-backed methods are faked)
+      // — so the written manifest lives on disk in the temp dir, not in the
+      // mock store.
+      const pkg = JSON.parse(
+        String(await fs.readFile("package.json", { encoding: "utf8" })),
+      );
+      expect(pkg.allowScripts).toMatchObject({
+        prisma: true,
+        "better-sqlite3": true,
+        "@prisma/engines": true,
+      });
     });
   });
 
@@ -724,6 +1075,9 @@ describe("Database Generator", () => {
         // Real renderer semantics (delegates to @dxgjs/templates render).
         render: vi.fn(realRender),
       },
+      // The seam prepareContext builds in production; tests bind it to the
+      // npm agent + the mocked fs (see makeInstaller).
+      installer: makeInstaller(),
       awareness: {
         projectRoot: ".",
         workspaceRoot: ".",
@@ -750,10 +1104,15 @@ describe("Database Generator", () => {
       ...overrides,
     });
 
-    /** The last executeCommand call is the prisma init invocation. */
+    /**
+     * The second-to-last executeCommand call is the prisma init invocation:
+     * the flow now runs install (dev), install (deps), prisma init, prisma
+     * generate — init is 3rd of 4, generate last.
+     */
     function getPrismaInitArgs(): string[] {
       const calls = (fs.executeCommand as Mock).mock.calls;
-      return calls[calls.length - 1][1] as string[];
+      expect(calls.length).toBeGreaterThanOrEqual(4);
+      return calls[calls.length - 2][1] as string[];
     }
 
     test("user selects No → prisma init receives --no-skills", async () => {

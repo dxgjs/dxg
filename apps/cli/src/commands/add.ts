@@ -44,7 +44,7 @@ export function registerAddCommand(program: Command): void {
 
         // Shared setup
         const awareness = await detectProjectAwarenessSilently(projectRoot);
-        const context = prepareContext(options, awareness);
+        const context = await prepareContext(options, awareness);
 
         // Get generator instance
         const generatorMap: Record<string, Generator> = {

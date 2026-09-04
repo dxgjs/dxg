@@ -1,5 +1,6 @@
 import { Logger } from "@dxgjs/logger";
 import type { ProjectAwareness } from "@dxgjs/workspace";
+import type { DependencyInstaller } from "./install/types";
 type FS = typeof import("@dxgjs/fs");
 
 export interface FSInterface {
@@ -26,6 +27,16 @@ export interface GeneratorContext {
   force?: boolean;
   /** Whether to run in non-interactive mode (no prompts) */
   nonInteractive?: boolean;
+  /**
+   * Dependency-installation seam (optional — additive, existing generators
+   * keep working without it). Built by the CLI in prepareContext: resolves
+   * the package-manager command via @antfu/ni, pre-writes build approvals
+   * for exactly the packages a generator's plan marks requiresBuild, and
+   * normalizes the outcome so "install exited 0" can be told apart from
+   * "the project is operational". Generators describe WHAT they need; this
+   * owns the per-manager HOW.
+   */
+  installer?: DependencyInstaller;
 }
 
 export interface GeneratorPrompt {

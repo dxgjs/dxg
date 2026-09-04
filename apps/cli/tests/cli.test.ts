@@ -11,6 +11,10 @@ vi.mock("@dxgjs/generators", () => ({
   tailwindGenerator: { run: vi.fn() },
   databaseGenerator: { run: vi.fn() },
   authGenerator: { run: vi.fn() },
+  // prepareContext calls this before building the generator context; the
+  // mocked return nulls the installer (no PM detected) so contexts stay
+  // lightweight — matches the real CLI's "cannot detect" path.
+  detectPackageManagerAgent: vi.fn().mockResolvedValue(null),
 }));
 
 // A stand-in for Clack's internal cancel symbol. vi.mock factories are

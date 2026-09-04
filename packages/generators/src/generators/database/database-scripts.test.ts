@@ -46,6 +46,7 @@ import {
   multiselect as multiselectMock,
   cancel as cancelMock,
 } from "@dxgjs/prompts";
+import { createDependencyInstaller } from "../../install/installer";
 import * as path from "path";
 import * as os from "os";
 
@@ -193,7 +194,23 @@ vi.mock("@dxgjs/fs", async () => {
           _files.set("prisma7.config.ts", _prismaInitConfig);
           _directories.add("prisma");
         }
-        return undefined;
+        // Simulate `prisma generate`: emits the generated client at the
+        // generator's output path (lib/generated/prisma — see schema).
+        if (
+          command === "npx" &&
+          args[0] === "prisma@7" &&
+          args[1] === "generate"
+        ) {
+          _files.set(
+            "lib/generated/prisma/client.ts",
+            "// generated prisma client\n",
+          );
+          _directories.add("lib/generated/prisma");
+          return { all: "prisma generate ok", stdout: "", stderr: "" };
+        }
+        // All paths return an execa-shaped result ({ all }) — the
+        // installer's output capture requires the real contract.
+        return { all: "", stdout: "", stderr: "" };
       },
     ),
   };
@@ -210,7 +227,9 @@ vi.mock("@antfu/ni", () => {
         if (!args || args.length === 0) {
           return { command: "npm", args: [] };
         }
-        if (args[0] === "prisma@7" && args[1] === "init") {
+        // prisma init / prisma generate: verbatim dlx passthrough (never an
+        // install) — matches ni's real npm resolution (npx prisma@7 …).
+        if (args[0] === "prisma@7") {
           return { command: "npx", args: [...args] };
         }
         if (args[0] === "-D") {
@@ -313,6 +332,10 @@ function makeContext(overrides: Record<string, unknown> = {}) {
       },
       packageJson: JSON.parse(JSON.stringify(MY_APP_PACKAGE_JSON)),
     },
+    // The real installer bound to the mocked fs + npm agent (matching the
+    // @antfu/ni and executeCommand mocks above) — executeDatabase requires
+    // one; approvals land in the same in-memory store as everything else.
+    installer: createDependencyInstaller({ agent: "npm", fs: fs as any }),
     dryRun: false,
     force: false,
     nonInteractive: false,
@@ -469,9 +492,19 @@ describe("interactive database scripts phase", () => {
       makeContext(),
     );
 
-    // The scripts phase never wrote the manifest (dependency installs by the
-    // package manager legitimately change it — those are not script writes).
-    expect(fs.writeJson).not.toHaveBeenCalled();
+    // The scripts phase never wrote the manifest. Dependency installs by
+    // the package manager legitimately change it (allowScripts
+    // pre-approval, the simulated `npm install` persistence) — those are
+    // not script writes. What the contract pins: no writeJson payload
+    // ever carries a db:* script.
+    const manifestWrites = (fs.writeJson as Mock).mock.calls.filter(
+      (call: unknown[]) => call[0] === "package.json",
+    );
+    for (const [, data] of manifestWrites) {
+      const scripts = (data as Record<string, any>).scripts ?? {};
+      const dbKeys = Object.keys(scripts).filter((k) => k.startsWith("db:"));
+      expect(dbKeys).toEqual([]);
+    }
     const final = readManifestFromDisk();
     // No db:* scripts were added.
     const dbScriptKeys = Object.keys(final.scripts ?? {}).filter((k) =>

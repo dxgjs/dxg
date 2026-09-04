@@ -41,7 +41,7 @@ export function createProgram(): Command {
 
         // Shared setup
         const awareness = await detectProjectAwarenessSilently(projectRoot);
-        const context = prepareContext(options, awareness);
+        const context = await prepareContext(options, awareness);
 
         // Build initial answers from CLI options and package.json
         const configAnswers = {

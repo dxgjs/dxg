@@ -46,6 +46,7 @@ import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import { render as realRender } from "@dxgjs/templates";
 import { note as noteMock, prompt as promptMock } from "@dxgjs/prompts";
+import { createDependencyInstaller } from "../../install/installer";
 import * as path from "path";
 import * as os from "os";
 
@@ -168,9 +169,54 @@ vi.mock("@dxgjs/fs", async () => {
             section[name] = at > 0 ? spec.slice(at + 1) : "*";
           }
           _files.set("package.json", JSON.stringify(manifest, null, 2));
+          // Installing better-sqlite3 with an approved build script runs
+          // its native compilation — the binding lands on disk. This is
+          // what verifyDatabase checks for sqlite providers.
+          if (
+            packages.some(
+              (spec: string) =>
+                spec === "better-sqlite3" || spec.startsWith("better-sqlite3@"),
+            )
+          ) {
+            _files.set(
+              "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+              "<binary>",
+            );
+          }
         }
-        // prisma init (npx prisma@7 init ...) and anything else: no-op.
-        return undefined;
+        // Simulate `prisma init` (non-bun runtime): owns and writes the
+        // prisma scaffolding. Only when the project doesn't already have
+        // one — the real CLI refuses to run in an existing Prisma project.
+        if (
+          command === "npx" &&
+          args[0] === "prisma@7" &&
+          args[1] === "init" &&
+          !_files.has("prisma/schema.prisma")
+        ) {
+          _files.set(
+            "prisma/schema.prisma",
+            "generator client {\n  output = \"../lib/generated/prisma\"\n}\n",
+          );
+          _directories.add("prisma");
+        }
+        // Simulate `prisma generate`: emits the generated client at the
+        // generator's output path (see schema.prisma above).
+        if (
+          command === "npx" &&
+          args[0] === "prisma@7" &&
+          args[1] === "generate"
+        ) {
+          _files.set(
+            "lib/generated/prisma/client.ts",
+            "// generated prisma client\n",
+          );
+          _directories.add("lib/generated/prisma");
+          return { all: "prisma generate ok", stdout: "", stderr: "" };
+        }
+        // Everything else: no-op. All paths return an execa-shaped result
+        // ({ all }) — the installer's output capture requires the real
+        // contract.
+        return { all: "", stdout: "", stderr: "" };
       },
     ),
   };
@@ -187,8 +233,9 @@ vi.mock("@antfu/ni", () => {
         if (!args || args.length === 0) {
           return { command: "npm", args: [] };
         }
-        // prisma init: verbatim dlx passthrough (never an install).
-        if (args[0] === "prisma@7" && args[1] === "init") {
+        // prisma init / prisma generate: verbatim dlx passthrough (never an
+        // install) — matches ni's real npm resolution (npx prisma@7 …).
+        if (args[0] === "prisma@7") {
           return { command: "npx", args: [...args] };
         }
         // Dependency installation: `ni add -D <pkgs>` / `ni add <pkgs>`.
@@ -308,6 +355,10 @@ function makeContext(
       // the disk. This object MUST NOT be what gets written back.
       packageJson: JSON.parse(JSON.stringify(manifest)),
     },
+    // The real installer bound to the mocked fs + npm agent (matching the
+    // @antfu/ni and executeCommand mocks above) — executeDatabase requires
+    // one; approvals land in the same in-memory store as everything else.
+    installer: createDependencyInstaller({ agent: "npm", fs: fs as any }),
     dryRun: false,
     force: false,
     ...overrides,

@@ -9,6 +9,10 @@ import authGenerator from './generators/auth';
 // Import the Generator type
 import type { Generator } from './types';
 
+// Dependency-installation engine (internal module, re-exported for the CLI
+// which builds the installer seam in prepareContext)
+export * from './install';
+
 export { initGenerator, tailwindGenerator, databaseGenerator, authGenerator, Generator };
 
 // Default export for convenience (keep existing behavior)

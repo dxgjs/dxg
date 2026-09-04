@@ -12,6 +12,10 @@ import {
   writeJson,
 } from "@dxgjs/fs";
 import { render as templatesRender } from "@dxgjs/templates";
+import {
+  createDependencyInstaller,
+  detectPackageManagerAgent,
+} from "@dxgjs/generators";
 
 /**
  * Options shared by the root command and the `add` command.
@@ -59,7 +63,7 @@ export async function detectProjectAwarenessSilently(targetDir: string): Promise
 /**
  * Prepares the generator context with logger, fs, and templates
  */
-export function prepareContext(options: CommanderOptions, awareness: ProjectAwareness) {
+export async function prepareContext(options: CommanderOptions, awareness: ProjectAwareness) {
   // Determine log level based on verbosity options
   let minLevel: LogLevel = "info";
   if (options.verbose) {
@@ -70,14 +74,30 @@ export function prepareContext(options: CommanderOptions, awareness: ProjectAwar
 
   const logger = new Logger({ minLevel });
   // Provide stat and readdir functions (not used by all generators but required by type)
+  const fs = { readFile, writeFile, pathExists, stat, readdir, mkdir, readJson, writeJson };
+
+  // Dependency-installer seam. Detection uses the same @antfu/ni detector
+  // the install commands resolve through (fine-grained agent — yarn classic
+  // vs berry — never awareness.packageManager, which is a coarse display
+  // name). When no agent is detectable the seam stays absent: generators
+  // fall back to their own error, and nothing here blocks scaffolding.
+  let installer;
+  if (!options.dryRun) {
+    const agent = await detectPackageManagerAgent(awareness.projectRoot).catch(() => null);
+    if (agent) {
+      installer = createDependencyInstaller({ agent, fs });
+    }
+  }
+
   return {
     logger,
-    fs: { readFile, writeFile, pathExists, stat, readdir, mkdir, readJson, writeJson },
+    fs,
     templates: { render: templatesRender },
     awareness,
     dryRun: options.dryRun ?? false,
     force: options.force ?? false,
     nonInteractive: options.nonInteractive ?? false,
+    ...(installer ? { installer } : {}),
   };
 }
 
