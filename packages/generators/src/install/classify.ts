@@ -3,10 +3,10 @@
  * normalized `DependencyInstallFailureReason`.
  *
  * Every signature below was captured empirically (lab runs against the
- * real pnpm 11.18.0 / npm 12.0.1 / bun 1.3.14 on this machine; yarn lines
- * are documented behavior, not locally verified). Matching is anchored on
- * stable machine markers (error CODES, manager-owned line prefixes), never
- * on full prose, so a reworded message cannot silently break detection.
+ * real pnpm 11.18.0 / npm 12.0.1 / bun 1.3.14 / yarn classic 1.22.22 /
+ * yarn berry 4.1.1 on this machine). Matching is anchored on stable
+ * machine markers (error CODES, manager-owned line prefixes), never on
+ * full prose, so a reworded message cannot silently break detection.
  *
  * Critical asymmetry this module exists for:
  *   - pnpm ≥11 BLOCKS LOUDLY: exit 1 + ERR_PNPM_IGNORED_BUILDS on stdout,
@@ -95,8 +95,10 @@ export function isBunBlockedPostinstall(output: string): boolean {
 
 /**
  * yarn berry disabled-build warning (exit 0): YN0004 — "…lists build
- * scripts, but all build scripts have been disabled". Documented berry
- * behavior (not verified locally: yarn unavailable).
+ * scripts, but all build scripts have been disabled". Verified locally
+ * (yarn 4.1.1, lab adversarial): enableScripts:false blocks OUT-OF-PLAN
+ * packages (sharp stayed YN0004-blocked) while dependenciesMeta built:true
+ * entries keep the plan's own packages building.
  */
 export function isYarnDisabledBuildScripts(output: string): boolean {
   return /YN0004/.test(output);

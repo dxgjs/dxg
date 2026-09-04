@@ -1004,7 +1004,7 @@ describe("Database Generator", () => {
         );
         expect(generateCall).toBeDefined();
         expect(generateCall![0]).toBe("npx");
-        expect(generateCall![1]).toEqual(["prisma@7", "generate"]);
+        expect(generateCall![1]).toEqual(["prisma@7", "generate", "--no-hints"]);
       } finally {
         triggerPrismaGenerateWorkaround = false;
       }

@@ -228,7 +228,10 @@ describe("prisma generate dlx resolution (real @antfu/ni, all agents)", () => {
       const fixtureDir = createFixtureProject(scenario.files);
       const resolved = await getCliCommand(
         parseNlx,
-        ["prisma@7", "generate"],
+        // The exact production shape (executeDatabase): --no-hints is
+        // Prisma's official flag suppressing the interactive agent-skills
+        // offer and NPS survey while keeping errors/warnings printed.
+        ["prisma@7", "generate", "--no-hints"],
         {
           cwd: fixtureDir,
           programmatic: true,
@@ -247,6 +250,7 @@ describe("prisma generate dlx resolution (real @antfu/ni, all agents)", () => {
       expect(resolved.args.slice(scenario.expectedDlxPrefix.length)).toEqual([
         "prisma@7",
         "generate",
+        "--no-hints",
       ]);
       // The mis-resolution signature the production guard checks for.
       expect(resolved.args).not.toContain("add");
@@ -255,7 +259,12 @@ describe("prisma generate dlx resolution (real @antfu/ni, all agents)", () => {
       expect(serializeCommand(resolved)).toBe(
         serializeCommand({
           command: scenario.expectedDlxCommand,
-          args: [...scenario.expectedDlxPrefix, "prisma@7", "generate"],
+          args: [
+            ...scenario.expectedDlxPrefix,
+            "prisma@7",
+            "generate",
+            "--no-hints",
+          ],
         }),
       );
     }

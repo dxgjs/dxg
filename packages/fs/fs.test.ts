@@ -19,7 +19,8 @@ import {
   appendFile,
   appendFileSync,
   glob,
-  globSync
+  globSync,
+  readJson
 } from './src/index';
 import {
   join,
@@ -86,6 +87,26 @@ describe('FS Abstraction Layer', () => {
     const stats = statSync(filePath);
     expect(stats.isFile()).toBe(true);
     expect(stats.size).toBeGreaterThan(0);
+  });
+
+  test('readJson parses a BOM-prefixed JSON file (Windows PowerShell writes BOMs)', async () => {
+    // Node's utf8 decoding keeps the BOM; JSON.parse would throw
+    // "Unexpected token". npm tolerates BOM'd package.json — DXG must too
+    // (observed live: PowerShell 5.1 Out-File writes UTF-8 BOMs).
+    const filePath = join(TEST_DIR, 'bom-package.json');
+    fs.writeFileSync(filePath, '﻿{"name":"bom-project","private":true}', 'utf8');
+
+    const parsed = await readJson<{ name: string; private: boolean }>(filePath);
+    expect(parsed.name).toBe('bom-project');
+    expect(parsed.private).toBe(true);
+  });
+
+  test('readJson parses a clean JSON file unchanged', async () => {
+    const filePath = join(TEST_DIR, 'clean-package.json');
+    fs.writeFileSync(filePath, '{"name":"clean-project"}', 'utf8');
+
+    const parsed = await readJson<{ name: string }>(filePath);
+    expect(parsed.name).toBe('clean-project');
   });
 
   test('should readdir a directory', async () => {

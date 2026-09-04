@@ -3,10 +3,10 @@
  *
  * The core principle this module encodes: **package-manager exit code 0 does
  * NOT mean the resulting project is operational.** Modern package managers
- * (pnpm ≥10, npm ≥12, yarn berry ≥4.14, bun) block dependency lifecycle
- * scripts by default — silently on some, loudly on others — so a native
- * addon can end up installed-but-unbuilt. The types below separate the
- * layers that used to be conflated under "did `install` exit 0":
+ * (pnpm ≥10, npm ≥12, yarn berry, bun) block dependency lifecycle scripts
+ * by default or per-config — silently on some, loudly on others — so a
+ * native addon can end up installed-but-unbuilt. The types below separate
+ * the layers that used to be conflated under "did `install` exit 0":
  *
  *   dependency resolution  →  installation  →  lifecycle execution  →
  *   generated artifacts   →  post-install verification

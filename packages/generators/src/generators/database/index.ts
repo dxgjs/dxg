@@ -873,15 +873,20 @@ export async function executeDatabase(
     // script triggers it. Without this step the generated lib/prisma.ts
     // would import a path that does not exist yet. Resolved through the
     // SAME dlx mechanism as init (getCliCommand(parseNlx, ["prisma@7",
-    // "generate"]) → pnpm dlx / npx / yarn dlx / bun x), guarded by the
-    // same "dlx resolved as add" mis-resolution workaround as init.
+    // "generate", "--no-hints"]) → pnpm dlx / npx / yarn dlx / bun x),
+    // guarded by the same "dlx resolved as add" mis-resolution workaround
+    // as init. `--no-hints` is Prisma's official documented flag (since
+    // 5.16.0): it suppresses the interactive agent-skills offer and the NPS
+    // survey — both of which render a 30s timeout prompt when stdin stays
+    // TTY-attached through the npx shim — while errors and warnings are
+    // still printed (verified against the prisma@7.10.0 CLI bundle).
     try {
       const s = spinner();
       s.start("Generating Prisma Client (prisma generate)");
 
       const generateResolved = await getCliCommand(
         parseNlx,
-        ["prisma@7", "generate"],
+        ["prisma@7", "generate", "--no-hints"],
         {
           cwd: process.cwd(),
           programmatic: true,
@@ -908,7 +913,7 @@ export async function executeDatabase(
       // fire: a mis-resolved command starts with "add".
       if (generateArgs.includes("add")) {
         generateCmd = "npx";
-        generateArgs = ["prisma@7", "generate"];
+        generateArgs = ["prisma@7", "generate", "--no-hints"];
       }
 
       try {
@@ -945,7 +950,7 @@ export async function executeDatabase(
       .slice(1) // drop the "prisma@7" package spec for display
       .join(" ");
     result.wouldRun.push(`prisma ${plannedArgs}`);
-    result.wouldRun.push("prisma generate");
+    result.wouldRun.push("prisma generate --no-hints");
     result.wouldRun.push(
       "create prisma/schema.prisma, prisma7.config.ts, .env (Prisma-owned)",
     );

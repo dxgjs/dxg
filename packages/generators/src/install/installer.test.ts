@@ -196,6 +196,29 @@ describe("createDependencyInstaller", () => {
       });
     });
 
+    test("npm: an explicit user denial (false) is never flipped to true", async () => {
+      // Security contract, same rule as the pnpm merge: an existing entry
+      // is never touched. A user's {better-sqlite3: false} stands — the
+      // install proceeds, npm blocks that package's scripts, and the
+      // blocked-builds scan / artifact verification reports it honestly.
+      await fsStore.writeFile(
+        "/proj/package.json",
+        JSON.stringify({ allowScripts: { "better-sqlite3": false } }),
+      );
+      const installer = createDependencyInstaller({ agent: "npm", fs: fsStore });
+      (executeCommand as Mock).mockResolvedValue({ all: "added 3 packages" });
+
+      await installer.install(defaultPlan, { cwd: "/proj" });
+
+      const pkg = JSON.parse(fsStore.read("/proj/package.json"));
+      expect(pkg.allowScripts["better-sqlite3"]).toBe(false);
+      expect(pkg.allowScripts).toEqual({
+        "better-sqlite3": false,
+        prisma: true,
+        "@prisma/engines": true,
+      });
+    });
+
     test("yarn@berry: writes dependenciesMeta built:true into package.json", async () => {
       const installer = createDependencyInstaller({
         agent: "yarn@berry",
@@ -211,6 +234,37 @@ describe("createDependencyInstaller", () => {
         "better-sqlite3": { built: true },
         "@prisma/engines": { built: true },
       });
+    });
+
+    test("yarn@berry: an explicit user denial (built:false) is never flipped, other meta fields preserved", async () => {
+      // Security contract, same rule as pnpm/npm: `built` is set ONLY when
+      // absent. An existing {built: false} denial stands, and unrelated
+      // meta fields on another package's entry survive the write.
+      await fsStore.writeFile(
+        "/proj/package.json",
+        JSON.stringify({
+          dependenciesMeta: {
+            "better-sqlite3": { built: false },
+            sharp: { built: true, unplanned: "keep" },
+          },
+        }),
+      );
+      const installer = createDependencyInstaller({
+        agent: "yarn@berry",
+        fs: fsStore,
+      });
+      (executeCommand as Mock).mockResolvedValue({ all: "Done in 1s" });
+
+      await installer.install(defaultPlan, { cwd: "/proj" });
+
+      const pkg = JSON.parse(fsStore.read("/proj/package.json"));
+      expect(pkg.dependenciesMeta["better-sqlite3"]).toEqual({ built: false });
+      expect(pkg.dependenciesMeta.sharp).toEqual({
+        built: true,
+        unplanned: "keep",
+      });
+      expect(pkg.dependenciesMeta.prisma).toEqual({ built: true });
+      expect(pkg.dependenciesMeta["@prisma/engines"]).toEqual({ built: true });
     });
 
     test("bun and yarn classic: write NOTHING (bun trustedDependencies would REPLACE the default-trusted list)", async () => {

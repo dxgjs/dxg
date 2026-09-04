@@ -24,13 +24,20 @@ import { readFile, readFileSync } from "./readFile";
 
   /**
    * Reads and parses a JSON file.
+   * Strips a leading UTF-8 BOM before parsing: Node's utf8 decoder keeps
+   * the BOM in the string and JSON.parse throws "Unexpected token" on it —
+   * a Windows hazard (PowerShell 5.1 Out-File/Set-Content write BOMs) that
+   * npm itself tolerates, so a BOM'd package.json must not crash DXG.
    * @param filePath - Absolute path to the JSON file.
    * @returns Promise resolving to the parsed JSON object.
    */
   export async function readJson<T = unknown>(filePath: string): Promise<T> {
     const content = await readFile(filePath, { encoding: "utf8" });
     // Ensure content is a string before parsing
-    const contentString = typeof content === 'string' ? content : content.toString();
+    let contentString = typeof content === 'string' ? content : content.toString();
+    if (contentString.charCodeAt(0) === 0xfeff) {
+      contentString = contentString.slice(1);
+    }
     return JSON.parse(contentString) as T;
   }
 

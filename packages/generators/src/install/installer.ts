@@ -9,10 +9,11 @@
  * berry) print their "scripts blocked" notices on stdout/stderr while
  * exiting 0. Inherit would stream those straight past the Clack spinner
  * AND make them invisible to classification. So installs run piped; the
- * spinner stays alive (the Clack convention survives), and on completion
- * the captured output is echoed once so the user still sees the manager's
- * progress/result lines. `prisma init`/`prisma generate` keep `inherit` —
- * they are tool output the user wants live.
+ * spinner stays alive (the Clack convention survives). The captured
+ * output rides the result: on failure the caller embeds the tail in the
+ * thrown error, on success the blocked-builds note names the affected
+ * packages. `prisma init`/`prisma generate` keep `inherit` — they are
+ * tool output the user wants live.
  *
  * Non-interactivity: every getCliCommand call passes `programmatic: true`
  * — verified in ni's source: the "Would you like to globally install yarn?"

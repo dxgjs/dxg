@@ -11,7 +11,7 @@
  *   - Nothing outside the plan's requiresBuild names is touched.
  *
  * Every mechanic below was validated empirically on this machine (pnpm
- * 11.18.0, npm 12.0.1, bun 1.3.14) except yarn (unavailable locally):
+ * 11.18.0, npm 12.0.1, bun 1.3.14, yarn classic 1.22.22, yarn berry 4.1.1):
  *   - pnpm 11: `allowBuilds` map in pnpm-workspace.yaml, name → true|false.
  *     Pre-writing {pkg: true} BEFORE install = scripts run inline, exit 0.
  *     (Lab e2e-pnpm: full database plan, zero ERR_PNPM_IGNORED_BUILDS.)
@@ -20,11 +20,18 @@
  *   - npm 12: `allowScripts` map in package.json. Name-only entries work
  *     pre-written (lab npm-nameonly: script ran, binding created, no
  *     warning) — the pkg@version pinning npm's CLI applies by default is
- *     NOT required for pre-approval.
- *   - yarn berry ≥4.14: `dependenciesMeta` {pkg: {built: true}} in
- *     package.json is the documented allow-list path when enableScripts is
- *     false (default for fresh lockfiles). Classic (v1): scripts run by
- *     default — nothing to write.
+ *     NOT required for pre-approval. NOTE (live-verified, npm 12): when
+ *     the map is ABSENT, npm silently blocks scripts with a warn line and
+ *     exit 0 — DXG pre-writes the map for exactly the plan's packages.
+ *   - yarn berry: `dependenciesMeta` {pkg: {built: true}} in package.json
+ *     is the documented allow-list path when enableScripts is false.
+ *     Verified live on yarn 4.1.1: it overrides enableScripts:false
+ *     PER PACKAGE (the plan's prisma/engines built while out-of-plan sharp
+ *     stayed YN0004-blocked), and enableScripts defaults to TRUE for fresh
+ *     projects — the map is written so the plan's builds survive either
+ *     default. Classic (v1): scripts run by default, nothing to write
+ *     (verified live: full sqlite plan, binding + engines binary on disk,
+ *     zero approval config written by DXG).
  *   - bun: its default-trusted list covers the packages DXG's database plan
  *     needs (lab bun-full: zero blocked). Writing `trustedDependencies`
  *     would REPLACE the default list (bun semantics) — a hazard — so the
@@ -133,8 +140,11 @@ function unquoteYamlKey(key: string): string {
 
 /**
  * npm 12: pre-write `allowScripts` {name: true} into package.json.
- * Name-only entries — additive, existing entries (including user denials,
- * `false`) are never touched.
+ * Name-only entries. STRICTLY ADDITIVE — the same rule as the pnpm merge:
+ * a name that already has an entry is never touched, so an explicit user
+ * denial (`false`) stands. The install then blocks/skips that package's
+ * scripts and the blocked-builds scan (or artifact verification) surfaces
+ * it honestly — never a silent flip.
  */
 export async function applyNpmAllowScripts(
   fs: FSInterface,
@@ -147,7 +157,7 @@ export async function applyNpmAllowScripts(
   const allowScripts = (pkg.allowScripts ?? {}) as Record<string, boolean>;
   let changed = false;
   for (const name of packageNames) {
-    if (allowScripts[name] !== true) {
+    if (allowScripts[name] === undefined) {
       allowScripts[name] = true;
       changed = true;
     }
@@ -160,10 +170,13 @@ export async function applyNpmAllowScripts(
 /**
  * yarn berry: pre-write `dependenciesMeta` {name: {built: true}} into
  * package.json — the documented allow-list when enableScripts is false
- * (berry ≥4.14 default on fresh lockfiles). Additive: existing meta for a
- * package keeps its other fields; `built` is set only when absent/false.
- * NEVER `onlyBuiltDependencies` (pnpm-only name; and writing unknown keys
- * into berry's .yarnrc.yml would abort under enableStrictSettings).
+ * (per-package override, live-verified on yarn 4.1.1: the plan's packages
+ * built while out-of-plan sharp stayed YN0004-blocked). STRICTLY ADDITIVE
+ * — same rule as pnpm/npm: `built` is set ONLY when the field is absent.
+ * An explicit denial (`built: false`) stands; other meta fields on an
+ * existing entry are always preserved. NEVER `onlyBuiltDependencies`
+ * (pnpm-only name; and writing unknown keys into berry's .yarnrc.yml would
+ * abort under enableStrictSettings).
  */
 export async function applyYarnBerryDependenciesMeta(
   fs: FSInterface,
@@ -180,7 +193,7 @@ export async function applyYarnBerryDependenciesMeta(
   let changed = false;
   for (const name of packageNames) {
     const entry = (meta[name] ?? {}) as Record<string, unknown>;
-    if (entry.built !== true) {
+    if (entry.built === undefined) {
       entry.built = true;
       meta[name] = entry;
       changed = true;
