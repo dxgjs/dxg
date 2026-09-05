@@ -45,9 +45,13 @@ import { stat } from "@dxgjs/fs";
     const packageJson = await getPackageInfo(projectRoot);
 
     // Detect package manager (using the fs package's function, but preserving old behavior)
+    // Bounded to the workspace root: a stray package.json above the workspace
+    // (e.g. in the user's home directory) must not leak into the result.
     let packageManager: string;
     try {
-      const pm = await detectPackageManagerFs(projectRoot);
+      const pm = await detectPackageManagerFs(projectRoot, {
+        stopDir: workspaceRoot,
+      });
       // Map bun to unknown to preserve old behavior (old did not support bun)
       if (pm === "bun") {
         packageManager = "unknown";

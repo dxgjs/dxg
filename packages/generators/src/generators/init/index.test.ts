@@ -110,9 +110,31 @@ import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
 import initGenerator from "./index";
+import type { ProjectAwareness } from "@dxgjs/workspace";
 
 // Direct access to the @dxgjs/fs mock storage (see the vi.mock factory above)
 const fsMockStore = fs as unknown as { _files: Map<string, string>; _directories: Set<string> };
+
+/**
+ * Builds a fully-typed ProjectAwareness mock. Inline object literals infer
+ * `string` for literal-union fields (framework.name, styling.version...),
+ * which fails GeneratorContext assignability.
+ */
+function makeAwareness(
+  overrides: Partial<ProjectAwareness> = {},
+): ProjectAwareness {
+  return {
+    projectRoot: ".",
+    workspaceRoot: ".",
+    framework: { name: "next", detected: true },
+    language: { name: "typescript", detected: true },
+    packageManager: "npm",
+    styling: { name: "tailwindcss", detected: true, version: "v4", configFile: "tailwind.config.ts" },
+    capabilities: { hasTests: true, hasLinting: true, hasFormatter: true, hasCI: true, hasDocker: false },
+    packageJson: { name: "test-project", version: "1.0.0", private: true },
+    ...overrides,
+  };
+}
 
 describe("Init Generator", () => {
   let originalCwd: string;
@@ -193,16 +215,7 @@ describe("Init Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
-      awareness: {
-        projectRoot: '.',
-        workspaceRoot: '.',
-        framework: undefined,
-        language: undefined,
-        packageManager: 'npm',
-        styling: undefined,
-        capabilities: {},
-        packageJson: {}
-      },
+      awareness: makeAwareness(),
     };
 
     const answers = {
@@ -258,16 +271,7 @@ describe("Init Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
-      awareness: {
-        projectRoot: '.',
-        workspaceRoot: '.',
-        framework: undefined,
-        language: undefined,
-        packageManager: 'npm',
-        styling: undefined,
-        capabilities: {},
-        packageJson: {}
-      },
+      awareness: makeAwareness(),
       dryRun: true, // Dry run mode
     };
 
@@ -321,16 +325,7 @@ describe("Init Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
-      awareness: {
-        projectRoot: '.',
-        workspaceRoot: '.',
-        framework: undefined,
-        language: undefined,
-        packageManager: 'npm',
-        styling: undefined,
-        capabilities: {},
-        packageJson: {}
-      },
+      awareness: makeAwareness(),
       dryRun: false,
       force: true, // Force mode
     };
@@ -379,16 +374,7 @@ describe("Init Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
-      awareness: {
-        projectRoot: '.',
-        workspaceRoot: '.',
-        framework: undefined,
-        language: undefined,
-        packageManager: 'npm',
-        styling: undefined,
-        capabilities: {},
-        packageJson: {}
-      },
+      awareness: makeAwareness(),
       dryRun: false,
       force: false,
     };
@@ -430,16 +416,7 @@ describe("Init Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: templatesMock,
-      awareness: {
-        projectRoot: '.',
-        workspaceRoot: '.',
-        framework: undefined,
-        language: undefined,
-        packageManager: 'npm',
-        styling: undefined,
-        capabilities: {},
-        packageJson: {}
-      },
+      awareness: makeAwareness(),
       dryRun: false,
       force: false,
     };
@@ -467,16 +444,7 @@ describe("Init Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: { render: vi.fn().mockReturnValue("") },
-      awareness: {
-        projectRoot: '.',
-        workspaceRoot: '.',
-        framework: undefined,
-        language: undefined,
-        packageManager: 'npm',
-        styling: undefined,
-        capabilities: {},
-        packageJson: {}
-      },
+      awareness: makeAwareness(),
     };
 
     const answers = {
@@ -506,16 +474,7 @@ describe("Init Generator", () => {
           return (data[key] ?? '') as string;
         });
       }) },
-      awareness: {
-        projectRoot: '.',
-        workspaceRoot: '.',
-        framework: undefined,
-        language: undefined,
-        packageManager: 'npm',
-        styling: undefined,
-        capabilities: {},
-        packageJson: {}
-      },
+      awareness: makeAwareness(),
       dryRun: true, // dry-run implies non-interactive
       force: false,
       nonInteractive: true,
@@ -548,16 +507,7 @@ describe("Init Generator", () => {
       logger: mockLogger,
       fs: fs,
       templates: { render: vi.fn().mockReturnValue("") },
-      awareness: {
-        projectRoot: '.',
-        workspaceRoot: '.',
-        framework: undefined,
-        language: undefined,
-        packageManager: 'npm',
-        styling: undefined,
-        capabilities: {},
-        packageJson: {}
-      },
+      awareness: makeAwareness(),
       dryRun: true,
       force: false,
       nonInteractive: true,

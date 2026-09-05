@@ -184,17 +184,18 @@ import { readFile, readFileSync } from "./readFile";
    * @param startDir - Optional starting directory (defaults to current working directory).
    * @param options - Optional configuration object.
    * @param options.withFallback - Whether to fall back to npm when detection fails or returns unknown. Defaults to false.
+   * @param options.stopDir - Optional directory path to stop traversing upwards. Detection is bounded to this directory.
    * @returns Promise resolving to the detected package manager.
    */
   export async function detectPackageManager(
     startDir?: string,
-    options: { withFallback?: boolean } = {},
+    options: { withFallback?: boolean; stopDir?: string } = {},
   ): Promise<"npm" | "pnpm" | "yarn" | "bun"> {
-    const { withFallback = false } = options;
+    const { withFallback = false, stopDir } = options;
     const cwd = startDir ?? process.cwd();
 
     // 1. Attempt detection via project files (lockfiles, package.json)
-    const result = await detect({ cwd });
+    const result = await detect({ cwd, stopDir });
 
     // Define allowed package managers matching the return type signature
     const supportedManagers = ["npm", "pnpm", "yarn", "bun"] as const;
