@@ -1,6 +1,6 @@
 // Database seed script — run with `npm run db:seed` (or `pnpm db:seed`).
 // The shared Prisma Client (lib/prisma.ts) already loads .env variables.
-import { prisma } from "../lib/prisma";
+import { prisma } from "{{helperImportFromSeed}}";
 
 async function main() {
   // Write your seed data here — use upsert so the seed is re-runnable:

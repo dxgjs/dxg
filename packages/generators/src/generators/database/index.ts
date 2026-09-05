@@ -24,6 +24,17 @@ import type {
   DependencyInstallResult,
 } from "../../install/types";
 import { installerFailureHint } from "../../install/installer";
+import {
+  specName,
+  DEFAULT_GENERATOR_OUTPUT,
+  DEFAULT_HELPER_PATH,
+  PRISMA_PINNED_VERSION,
+  computeFileImport,
+  computeRelativeImport,
+  inspectDatabase,
+  normalizeHelperPath,
+  validateHelperPath,
+} from "./inspect";
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
@@ -319,6 +330,16 @@ export const databasePrompts = [
       { name: "Skip", value: "skip" },
     ],
   },
+  {
+    // Helper path (decision document, section 6): where the DXG-owned
+    // Prisma singleton helper lands. Relative to the project root;
+    // backslashes, leading ./ and a missing .ts are normalized, and
+    // protected Prisma/DXG paths are rejected by planDatabase.
+    type: "input" as const,
+    name: "helperPath",
+    message: "Where should the Prisma client helper be created?",
+    default: DEFAULT_HELPER_PATH,
+  },
 ] satisfies {
   type: "input" | "confirm" | "select";
   name: string;
@@ -381,7 +402,10 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
 }
 
 // Planning function
-export function planDatabase(answers: Record<string, unknown>) {
+export function planDatabase(
+  answers: Record<string, unknown>,
+  inspection?: import("./inspect").DatabaseInspection,
+) {
   const providerKey = answers.provider as string;
   const provider = providerData[providerKey as keyof typeof providerData];
 
@@ -389,16 +413,78 @@ export function planDatabase(answers: Record<string, unknown>) {
     throw new Error(`Unsupported provider: ${providerKey}`);
   }
 
+  // Helper path resolution (decision document, section 6). Deterministic
+  // order: an explicit answer (CLI or prompt) wins; otherwise a helper
+  // candidate discovered by the inspection is REUSED (a re-run must not
+  // duplicate the helper at a second location); otherwise the default.
+  // Non-interactive mode without an answer lands on the default — never a
+  // prompt. Normalization + validation are inspect.ts's single ownership.
+  const helperPath =
+    typeof answers.helperPath === "string" && answers.helperPath.trim() !== ""
+      ? normalizeHelperPath(answers.helperPath)
+      : inspection !== undefined && inspection.helperCandidates.length > 0
+        ? inspection.helperCandidates[0]
+        : DEFAULT_HELPER_PATH;
+  const helperError = validateHelperPath(helperPath);
+  if (helperError !== undefined) {
+    throw new Error(`Invalid helper path "${helperPath}": ${helperError}`);
+  }
+
+  // Dynamic imports (decision document, section 7): computed here, in the
+  // planning layer, from the helper path and the generator output — never
+  // hardcoded in the templates. The seed imports the helper with a relative
+  // specifier from its own directory (prisma/).
+  const generatedClientImport = computeRelativeImport(
+    helperPath,
+    inspection?.generatorOutput ?? DEFAULT_GENERATOR_OUTPUT,
+  );
+  const helperImportFromSeed = computeFileImport(
+    "prisma/seed.ts",
+    helperPath.replace(/\.ts$/, ""),
+  );
+
   const data = {
     provider: provider.key,
     providerName: provider.displayName,
     year: new Date().getFullYear(),
+    generatedClientImport,
+    helperImportFromSeed,
     ...provider, // Spread provider data for template use
   };
 
-  // Determine packages to install - separate dev and regular dependencies
+  // Determine packages to install - separate dev and regular dependencies.
+  // State-aware (idempotence): when the inspection reports the Prisma
+  // declarations already satisfied, the pinned prisma/@prisma/client specs
+  // are dropped from the install batches — the second run must not
+  // reinstall what the project already declares at the verified pin.
+  // Non-Prisma provider deps (adapters, drivers, dotenv, tsx) stay in the
+  // batch unless already declared: the installer's own dependency
+  // resolution then makes the reinstall cheap/no-op, and MISSING entries
+  // self-heal. Every omission is reported through the summary (skipped).
   const devPackages = [...provider.devDependencies];
   const regularPackages = [...provider.dependencies];
+
+  const prismaSatisfied =
+    inspection !== undefined &&
+    inspection.prismaVersion === "satisfied" &&
+    inspection.clientVersion === "satisfied";
+
+  if (prismaSatisfied) {
+    // Both pinned Prisma packages are declared at the verified pin: drop
+    // them from the install batches by NAME (a declared "7.10.0" and a
+    // batch "prisma@7.10.0" are the same package — literal-spec comparison
+    // would never match). Non-Prisma provider deps (adapters, drivers,
+    // dotenv) stay in the batch: the installer's own resolution makes the
+    // reinstall cheap/no-op, and MISSING entries self-heal.
+    for (const list of [devPackages, regularPackages]) {
+      for (let i = list.length - 1; i >= 0; i--) {
+        const name = specName(list[i]);
+        if (name === "prisma" || name === "@prisma/client") {
+          list.splice(i, 1);
+        }
+      }
+    }
+  }
 
   // The seed script only works end-to-end when its three parts travel
   // together: the runner (tsx, devDependency), the seed file, and the
@@ -457,10 +543,12 @@ export function planDatabase(answers: Record<string, unknown>) {
     ],
   };
 
-  // Determine files to create - only DXG-owned application templates
+  // Determine files to create - only DXG-owned application templates.
+  // The helper lands at the RESOLVED helper path (user answer, discovered
+  // candidate, or default) — never hardcoded lib/prisma.ts.
   const filesToCreate = [
     {
-      path: provider.templateOutputPath,
+      path: helperPath,
       templatePath: provider.templatePath,
       data,
     },
@@ -472,6 +560,16 @@ export function planDatabase(answers: Record<string, unknown>) {
       data,
     });
   }
+
+  // State-aware decision markers (idempotence). Derived from the inspection
+  // when present; a missing inspection (legacy callers, unit tests) keeps the
+  // historical fresh-run behavior so nothing changes for existing callers.
+  const initRequired =
+    inspection === undefined
+      ? true // fresh-run default: run init unconditionally (historical behavior)
+      : !(inspection.schemaExists || inspection.configExists);
+  const prismaDeclarationsSatisfied =
+    inspection === undefined ? false : prismaSatisfied;
 
   return {
     ...data,
@@ -486,6 +584,18 @@ export function planDatabase(answers: Record<string, unknown>) {
     dependencyPlan,
     buildApprovalNames,
     filesToCreate,
+    // Idempotence markers consumed by executeDatabase's gates and the
+    // operation summary. initRequired=false means schema.prisma OR
+    // prisma7.config.ts already exists: init would clobber user-owned
+    // config (verified empirically), so it is skipped instead.
+    initRequired,
+    prismaDeclarationsSatisfied,
+    generatorOutput: inspection?.generatorOutput ?? DEFAULT_GENERATOR_OUTPUT,
+    envExists: inspection?.envExists ?? false,
+    envNeedsDatabaseUrl: inspection?.envHasDatabaseUrl === false,
+    helperPath,
+    generatedClientImport,
+    helperImportFromSeed,
   };
 }
 
@@ -692,6 +802,19 @@ export async function executeDatabase(
         "Dependency installer unavailable: the generator context was built without one (package manager could not be detected).",
       );
     }
+    // Reconciliation visibility: the Prisma packages were intentionally
+    // left out of the install batches (already declared at the verified
+    // pin) — surfaced in the summary so a second run reads as a no-op for
+    // them, not as a silent omission.
+    if (
+      planToUse.prismaDeclarationsSatisfied &&
+      (planToUse.devPackages.length > 0 ||
+        planToUse.regularPackages.length > 0)
+    ) {
+      result.skipped.push(
+        "prisma@7.10.0 and @prisma/client@7.10.0 reinstall (already declared at the verified pin)",
+      );
+    }
     if (
       planToUse.devPackages.length > 0 ||
       planToUse.regularPackages.length > 0
@@ -785,12 +908,20 @@ export async function executeDatabase(
     }
   }
 
-  // Step 3: Execute Prisma initialization
-  if (!ctx.dryRun) {
+  // Step 3: Execute Prisma initialization — GATED (idempotence). init runs
+  // ONLY when both prisma/schema.prisma AND prisma7.config.ts are absent:
+  // `prisma init` exits 1 when any prisma/ folder exists (even empty) and
+  // CLOBBERS an existing prisma7.config.ts (both verified empirically).
+  // A second run therefore never re-inits; the skip is surfaced below.
+  const providerObj =
+    providerData[planToUse.provider as keyof typeof providerData];
+  if (!ctx.dryRun && !planToUse.initRequired) {
+    result.skipped.push(
+      "Prisma initialization (schema.prisma or prisma7.config.ts already exists)",
+    );
+  } else if (!ctx.dryRun) {
     try {
       const s = spinner();
-      const providerObj =
-        providerData[planToUse.provider as keyof typeof providerData];
       s.start(
         `Initializing Prisma with provider ${providerObj.prismaProvider}...`,
       );
@@ -866,6 +997,16 @@ export async function executeDatabase(
         { cause: error },
       );
     }
+  }
+
+  // Step 3b: Generate the Prisma Client — ALWAYS (decision document,
+  // section "always-generate"): `prisma generate` is byte-stable on an
+  // unchanged schema (verified empirically, identical sha256 across runs)
+  // and costs 300-700 ms, while skipping on client-existence alone is
+  // indefensible (a model added between two runs would leave a stale
+  // client — the staleness case). The command therefore runs on every
+  // reconcile, fresh OR existing, after a skipped OR executed init.
+  if (!ctx.dryRun) {
 
     // Step 3b: Generate the Prisma Client. Prisma 7 has NO auto-generate —
     // @prisma/client ships a stub that throws "did not initialize yet" at
@@ -936,24 +1077,89 @@ export async function executeDatabase(
       );
     }
   } else {
-    // Dry-run: record the planned prisma init and the files Prisma owns
-    const providerObj =
-      providerData[planToUse.provider as keyof typeof providerData];
+    // Dry-run: record the planned prisma init and the files Prisma owns.
+    // The gated path (initRequired=false) shows the skip instead — the
+    // wouldRun entries below reflect only what would actually execute.
+    if (!planToUse.initRequired) {
+      result.skipped.push(
+        "Prisma initialization (schema.prisma or prisma7.config.ts already exists)",
+      );
+    }
     // Reflect the DXG-owned skills decision in the planned command:
     // No (default) → "--no-skills" is part of the planned arguments;
     // Yes → the flag is omitted (prisma@7 then installs skills
     // non-interactively). Nothing is executed in dry-run mode.
-    const plannedArgs = buildPrismaInitArgs(
-      providerObj.prismaProvider,
-      planToUse.installPrismaSkills === true,
-    )
-      .slice(1) // drop the "prisma@7" package spec for display
-      .join(" ");
-    result.wouldRun.push(`prisma ${plannedArgs}`);
+    if (planToUse.initRequired) {
+      const plannedArgs = buildPrismaInitArgs(
+        providerObj.prismaProvider,
+        planToUse.installPrismaSkills === true,
+      )
+        .slice(1) // drop the "prisma@7" package spec for display
+        .join(" ");
+      result.wouldRun.push(`prisma ${plannedArgs}`);
+    }
     result.wouldRun.push("prisma generate --no-hints");
-    result.wouldRun.push(
-      "create prisma/schema.prisma, prisma7.config.ts, .env (Prisma-owned)",
-    );
+    if (planToUse.initRequired) {
+      result.wouldRun.push(
+        "create prisma/schema.prisma, prisma7.config.ts, .env (Prisma-owned)",
+      );
+    }
+  }
+
+  // Step 4b: .env additive reconciliation (decision document, section 5).
+  // `prisma init` preserves an existing .env byte-for-byte but NEVER adds
+  // DATABASE_URL to it (verified empirically) — the historical false
+  // success: green run, broken runtime. DXG owns the gap:
+  // - .env absent + init will run → init creates it; nothing to do here.
+  // - .env absent + init skipped → create a minimal one.
+  // - .env present without DATABASE_URL → APPEND one line; every existing
+  //   byte is preserved.
+  // - .env already defines DATABASE_URL → untouched.
+  if (planToUse.envNeedsDatabaseUrl) {
+    if (ctx.dryRun) {
+      result.wouldRun.push(
+        planToUse.envExists === false && planToUse.initRequired
+          ? "create .env with DATABASE_URL (via prisma init)"
+          : `${planToUse.envExists === false ? "create" : "append to"} .env a minimal DATABASE_URL line`,
+      );
+    } else {
+      const envPath = join(ctx.awareness.projectRoot, ".env");
+      // envExists comes from the inspection (pre-run truth); when init
+      // just created .env it holds DATABASE_URL already (marker false).
+      const envText = planToUse.envExists
+        ? ((await fs.readFile(envPath, {
+            encoding: "utf8",
+          })) as string | undefined)
+        : undefined;
+      if (typeof envText !== "string") {
+        // No .env at all: minimal file (init skipped means nothing else
+        // would create it).
+        await fs.writeFile(
+          envPath,
+          [
+            "# Environment variables — declared by the database layer",
+            "DATABASE_URL=",
+            "",
+          ].join("\n"),
+          "utf8",
+        );
+        result.created.push(".env (minimal, DATABASE_URL placeholder)");
+      } else if (
+        !/^\s*(?:export\s+)?DATABASE_URL\s*=/m.test(envText)
+      ) {
+        // Byte-preserving append: original content first, untouched, then
+        // the new declaration on its own line.
+        const needsLeadingNewline =
+          envText.length > 0 && !envText.endsWith("\n");
+        await fs.writeFile(
+          envPath,
+          `${envText}${needsLeadingNewline ? "\n" : ""}DATABASE_URL=\n`,
+          "utf8",
+        );
+        result.updated.push(".env (appended DATABASE_URL)");
+      }
+      // envHasDatabaseUrl=true never reaches here (marker false).
+    }
   }
 
   // Step 5: Add the selected database scripts to package.json
@@ -1174,12 +1380,14 @@ export async function verifyDatabase(
     }
   }
 
-  // Prisma-owned artifact: the generated client. `prisma init --output
-  // ../lib/generated/prisma` + `prisma generate` produce client.ts there
-  // (prisma-client generator writes INTO the project, not node_modules).
-  // Missing client.ts = the "did not initialize yet" stub at import time —
-  // verified empirically in lab e2e-pnpm/e2e-npm.
-  const generatedClientPath = "lib/generated/prisma/client.ts";
+  // Prisma-owned artifact: the generated client. The path is DYNAMIC —
+  // parsed from the schema's generator block when the project owns its
+  // schema (custom output), the DXG default otherwise. `prisma generate`
+  // writes client.ts at that output (prisma-client generator writes INTO
+  // the project, not node_modules). Missing client.ts = the "did not
+  // initialize yet" stub at import time — verified empirically in lab
+  // e2e-pnpm/e2e-npm.
+  const generatedClientPath = `${planToUse.generatorOutput}/client.ts`;
   if (!(await fs.pathExists(generatedClientPath))) {
     throw new Error(
       `Prisma Client was not generated: ${generatedClientPath} is missing. Run "npm run db:generate" (prisma generate) and try again.`,
@@ -1300,16 +1508,19 @@ export const databaseGenerator: Generator = {
     const needsProvider = answers.provider === undefined;
     const needsSkillsAnswer = answers.installPrismaSkills === undefined;
     const needsScriptsAnswer = answers.databaseScripts === undefined;
+    const needsHelperPath = answers.helperPath === undefined;
 
     // Only prompt in interactive mode (not dry-run and not CI)
     const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
 
-    if (shouldPrompt && (needsProvider || needsSkillsAnswer || needsScriptsAnswer)) {
+    if (shouldPrompt && (needsProvider || needsSkillsAnswer || needsScriptsAnswer || needsHelperPath)) {
       // Use interactive prompts for missing fields. DXG owns the Prisma
       // agent skills decision ("Install Prisma agent skills?") — it is asked
       // here, after the provider selection, so the Prisma CLI itself never
       // has to ask it. The database scripts phase question follows: it
-      // decides which db:* npm scripts land in package.json.
+      // decides which db:* npm scripts land in package.json. The helper
+      // path question (where the Prisma client singleton lands) completes
+      // the phase; its default is lib/prisma.ts.
       const promptQuestions = [];
 
       if (needsProvider) {
@@ -1320,6 +1531,9 @@ export const databaseGenerator: Generator = {
       }
       if (needsScriptsAnswer) {
         promptQuestions.push(databasePrompts[2]); // database scripts prompt
+      }
+      if (needsHelperPath) {
+        promptQuestions.push(databasePrompts[3]); // helper path prompt
       }
 
       let promptAnswers: Record<string, unknown>;
@@ -1382,8 +1596,60 @@ export const databaseGenerator: Generator = {
       // the Clack frame via the catch's outro, like execution failures do)
       await checkPreconditions(ctx);
 
-      // Plan
-      const plan = planDatabase(answers);
+      // Inspect BEFORE planning: every gate below reasons about the real
+      // on-disk state, never about what a previous run may have left.
+      const inspection = await inspectDatabase(ctx, answers.provider as string);
+
+      // GATE 1 (fail early, before ANY installation): `prisma init` exits 1
+      // when any prisma/ folder exists — even an empty one (verified
+      // empirically). A prisma/ directory without schema.prisma is therefore
+      // unrecoverable for this generator: it must neither install (the user
+      // decides the resolution) nor init (it would fail anyway).
+      if (inspection.prismaDirEmpty) {
+        throw new Error(
+          [
+            "The prisma/ directory exists but contains no schema.prisma.",
+            "Prisma init refuses to run when a prisma/ folder already exists,",
+            "so DXG cannot reconcile this state automatically.",
+            "Either create prisma/schema.prisma yourself or remove the prisma/",
+            "directory, then run dxg add database again.",
+          ].join("\n"),
+        );
+      }
+
+      // GATE 2 (fail early, before ANY installation): an incompatible Prisma
+      // declaration (6.x, 8.x, another 7.x, a prerelease range) is a user
+      // decision DXG must not overturn silently — npm flips a declared
+      // 6.20.0 to ^7.10.0 without any warning (verified empirically). The
+      // user resolves the version conflict explicitly; nothing is touched.
+      if (
+        inspection.prismaVersion === "incompatible" ||
+        inspection.clientVersion === "incompatible"
+      ) {
+        const declared = [
+          inspection.prismaDeclaredSpec !== undefined
+            ? `prisma: ${inspection.prismaDeclaredSpec}`
+            : null,
+          inspection.clientDeclaredSpec !== undefined
+            ? `@prisma/client: ${inspection.clientDeclaredSpec}`
+            : null,
+        ]
+          .filter(Boolean)
+          .join(", ");
+        throw new Error(
+          [
+            `Prisma version conflict: this project declares ${declared},`,
+            `but DXG verifies against prisma@${PRISMA_PINNED_VERSION} (exact pin).`,
+            "DXG will not silently upgrade or downgrade an existing Prisma",
+            "declaration. Align the declared version to 7.10.0 (or a range that",
+            "contains exactly it, e.g. ^7.10.0) and run dxg add database again.",
+          ].join("\n"),
+        );
+      }
+
+      // Plan (state-aware: the inspection drives init/install gating and
+      // the dynamic imports for the template files)
+      const plan = planDatabase(answers, inspection);
 
       // Execute
       const execResult = await executeDatabase(answers, ctx, plan);

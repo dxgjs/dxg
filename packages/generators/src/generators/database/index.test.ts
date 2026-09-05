@@ -1223,6 +1223,20 @@ describe("Database Generator", () => {
       expect(args[args.indexOf("--datasource-provider") + 1]).toBe("mysql");
       expect(args).not.toContain("--no-skills");
 
+      // State-aware second run: reset the Prisma artifacts the first run
+      // created so init executes again (a same-state re-run now SKIPS init —
+      // idempotence). The mapping assertion must hold on a FRESH init too.
+      for (const p of [
+        "prisma/schema.prisma",
+        "prisma7.config.ts",
+        ".env",
+        "lib/generated/prisma/client.ts",
+      ]) {
+        fsMockStore._files.delete(p);
+      }
+      fsMockStore._directories.delete("prisma");
+      (fs.executeCommand as Mock).mockClear();
+
       await databaseGenerator.run(
         { provider: "planetscale", installPrismaSkills: false },
         baseContext(),
@@ -1240,6 +1254,7 @@ describe("Database Generator", () => {
         provider: "postgresql",
         installPrismaSkills: false,
         databaseScripts: "recommended",
+        helperPath: "lib/prisma.ts",
       });
 
       await databaseGenerator.run({}, baseContext());
@@ -1254,6 +1269,7 @@ describe("Database Generator", () => {
         "provider",
         "installPrismaSkills",
         "databaseScripts",
+        "helperPath",
       ]);
       expect(questions[1].type).toBe("confirm");
       expect(questions[1].message).toBe("Install Prisma agent skills?");
@@ -1261,6 +1277,10 @@ describe("Database Generator", () => {
       // The database scripts phase question follows the skills question.
       expect(questions[2].type).toBe("select");
       expect(questions[2].default).toBe("recommended");
+      // The helper path question closes the phase; its default is the
+      // canonical DXG helper location.
+      expect(questions[3].type).toBe("input");
+      expect(questions[3].default).toBe("lib/prisma.ts");
 
       // The "No" answer flows through to the Prisma arguments.
       expect(getPrismaInitArgs()).toContain("--no-skills");
@@ -1273,6 +1293,7 @@ describe("Database Generator", () => {
       (promptMock as unknown as Mock).mockResolvedValue({
         installPrismaSkills: true,
         databaseScripts: "recommended",
+        helperPath: "lib/prisma.ts",
       });
 
       await databaseGenerator.run({ provider: "sqlite" }, baseContext());
@@ -1283,6 +1304,7 @@ describe("Database Generator", () => {
       expect(questions.map((q) => q.name)).toEqual([
         "installPrismaSkills",
         "databaseScripts",
+        "helperPath",
       ]);
 
       // "Yes" → no --no-skills flag (Prisma installs skills non-interactively).

@@ -182,7 +182,9 @@ vi.mock("@dxgjs/fs", async () => {
           _files.set("package.json", JSON.stringify(manifest, null, 2));
         }
         // Simulate `prisma init` (prisma@7.10.0, non-bun): it owns and
-        // writes the root prisma7.config.ts plus the prisma/ scaffolding.
+        // writes the root prisma7.config.ts plus the prisma/ scaffolding
+        // (schema.prisma included — the real CLI always writes it; the
+        // inspection's prismaDirEmpty gate depends on that fidelity).
         // Only when the project doesn't already have one — mirroring the
         // real CLI, which refuses to run in an existing Prisma project.
         if (
@@ -191,7 +193,22 @@ vi.mock("@dxgjs/fs", async () => {
           args[1] === "init" &&
           !_files.has("prisma7.config.ts")
         ) {
+          _files.set(
+            "prisma/schema.prisma",
+            [
+              "generator client {",
+              "  provider = \"prisma-client\"",
+              "  output = \"../lib/generated/prisma\"",
+              "}",
+              "",
+              "datasource db {",
+              "  provider = \"sqlite\"",
+              "}",
+              "",
+            ].join("\n"),
+          );
           _files.set("prisma7.config.ts", _prismaInitConfig);
+          _files.set(".env", 'DATABASE_URL="file:./dev.db"\n');
           _directories.add("prisma");
         }
         // Simulate `prisma generate`: emits the generated client at the
@@ -425,7 +442,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
       makeContext(),
     );
 
@@ -488,7 +505,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "skip" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "skip", helperPath: "lib/prisma.ts" },
       makeContext(),
     );
 
@@ -529,7 +546,7 @@ describe("interactive database scripts phase", () => {
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
       makeContext(manifest),
     );
 
@@ -558,7 +575,7 @@ describe("interactive database scripts phase", () => {
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
       makeContext(manifest),
     );
 
@@ -577,6 +594,7 @@ describe("interactive database scripts phase", () => {
       provider: "postgresql",
       installPrismaSkills: false,
       databaseScripts: "recommended",
+      helperPath: "lib/prisma.ts",
     };
     const context = makeContext();
     await databaseGenerator.run(answers, context);
@@ -597,7 +615,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
       makeContext(),
     );
 
@@ -687,7 +705,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
       makeContext(),
     );
 
@@ -731,6 +749,7 @@ describe("interactive database scripts phase", () => {
         provider: "postgresql",
         installPrismaSkills: false,
         databaseScripts: ["db:generate", "db:seed"],
+        helperPath: "lib/prisma.ts",
       },
       makeContext(),
     );
@@ -763,6 +782,7 @@ describe("interactive database scripts phase", () => {
       provider: "postgresql",
       installPrismaSkills: false,
       databaseScripts: ["db:generate", "db:seed"],
+      helperPath: "lib/prisma.ts",
     };
     const context = makeContext();
     await databaseGenerator.run(answers, context);
@@ -800,6 +820,7 @@ describe("interactive database scripts phase", () => {
         provider: "postgresql",
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
+        helperPath: "lib/prisma.ts",
       },
       makeContext(),
     );
@@ -825,6 +846,7 @@ describe("interactive database scripts phase", () => {
         provider: "postgresql",
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
+        helperPath: "lib/prisma.ts",
       },
       makeContext({ force: true }),
     );
@@ -848,6 +870,7 @@ describe("interactive database scripts phase", () => {
         provider: "postgresql",
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
+        helperPath: "lib/prisma.ts",
       },
       makeContext(),
     );
@@ -884,6 +907,7 @@ describe("interactive database scripts phase", () => {
         provider: "postgresql",
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
+        helperPath: "lib/prisma.ts",
       },
       makeContext(),
     );
@@ -903,7 +927,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
       makeContext(),
     );
 
@@ -926,6 +950,7 @@ describe("interactive database scripts phase", () => {
         provider: "postgresql",
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
+        helperPath: "lib/prisma.ts",
       },
       makeContext({ dryRun: true }),
     );
@@ -956,6 +981,7 @@ describe("interactive database scripts phase", () => {
         provider: "postgresql",
         installPrismaSkills: false,
         databaseScripts: ["db:generate", "db:seed"],
+        helperPath: "lib/prisma.ts",
       },
       makeContext(),
     );
@@ -1001,6 +1027,7 @@ describe("interactive database scripts phase", () => {
         provider: "postgresql",
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
+        helperPath: "lib/prisma.ts",
       },
       makeContext(),
     );
