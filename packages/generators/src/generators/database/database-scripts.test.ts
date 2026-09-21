@@ -438,7 +438,7 @@ describe("interactive database scripts phase", () => {
     expect(values).toContain("skip");
   });
 
-  test("recommended: adds exactly the recommended set (db:generate, db:push, db:studio)", async () => {
+  test("recommended: adds exactly the recommended set (db:generate, db:push, db:pull, db:studio)", async () => {
     await seedProject();
 
     await databaseGenerator.run(
@@ -449,10 +449,10 @@ describe("interactive database scripts phase", () => {
     const final = readManifestFromDisk();
     expect(final.scripts["db:generate"]).toBe("prisma generate");
     expect(final.scripts["db:push"]).toBe("prisma db push");
+    expect(final.scripts["db:pull"]).toBe("prisma db pull");
     expect(final.scripts["db:studio"]).toBe("prisma studio");
-    // The recommended set is deliberately minimal.
+    // The recommended set includes generate, push, pull, studio.
     expect(final.scripts["db:migrate"]).toBeUndefined();
-    expect(final.scripts["db:pull"]).toBeUndefined();
     expect(final.scripts["db:seed"]).toBeUndefined();
     expect(final.scripts["db:reset"]).toBeUndefined();
     // Never prompted: the answer came from the CLI answers.

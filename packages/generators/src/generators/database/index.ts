@@ -24,6 +24,7 @@ import type {
   DependencyInstallResult,
 } from "../../install/types";
 import { installerFailureHint } from "../../install/installer";
+import { withDlxBuildApprovals } from "../../install/dlx";
 import {
   specName,
   DEFAULT_GENERATOR_OUTPUT,
@@ -255,19 +256,19 @@ export const databaseScriptCatalog: Record<
     hint: "Open Prisma Studio",
     recommended: true,
   },
-  "db:migrate": {
-    command: "prisma migrate dev",
-    hint: "Create and apply Prisma migrations",
-    recommended: false,
-  },
   "db:pull": {
     command: "prisma db pull",
     hint: "Pull the database schema into Prisma schema",
-    recommended: false,
+    recommended: true,
   },
   [SEED_SCRIPT_NAME]: {
     command: "prisma db seed",
     hint: "Seed the database",
+    recommended: false,
+  },
+  "db:migrate": {
+    command: "prisma migrate dev",
+    hint: "Create and apply Prisma migrations",
     recommended: false,
   },
 };
@@ -283,8 +284,7 @@ export function providerScripts(providerKey: string): string[] {
     (provider as { supportsMigrations?: boolean } | undefined)
       ?.supportsMigrations === false;
   return Object.keys(databaseScriptCatalog).filter(
-    (name) =>
-      !(excludeMigrations && name === "db:migrate"),
+    (name) => !(excludeMigrations && name === "db:migrate"),
   );
 }
 
@@ -489,10 +489,10 @@ export function planDatabase(
   // The seed script only works end-to-end when its three parts travel
   // together: the runner (tsx, devDependency), the seed file, and the
   // `prisma.seed` config Prisma reads. Selected here, materialized below.
-  const seedSelected =
-    resolveDatabaseScripts(answers.databaseScripts, provider.key).includes(
-      SEED_SCRIPT_NAME,
-    );
+  const seedSelected = resolveDatabaseScripts(
+    answers.databaseScripts,
+    provider.key,
+  ).includes(SEED_SCRIPT_NAME);
   if (seedSelected && !devPackages.includes("tsx")) {
     devPackages.push("tsx");
   }
@@ -669,7 +669,9 @@ function insertSeedIntoPrismaConfig(configText: string): string | undefined {
   // A pre-existing seed line is REPLACED in place (the --force path —
   // a conflict was already reported for the different value, force
   // resolves it by overwriting, exactly like conflicting scripts).
-  const existingSeed = configText.match(/^[ \t]*seed\s*:\s*["'][^"']*["'],?[ \t]*$/m);
+  const existingSeed = configText.match(
+    /^[ \t]*seed\s*:\s*["'][^"']*["'],?[ \t]*$/m,
+  );
   if (existingSeed) {
     const replacement = existingSeed[0].replace(
       /(["']).*?\1/,
@@ -808,8 +810,7 @@ export async function executeDatabase(
     // them, not as a silent omission.
     if (
       planToUse.prismaDeclarationsSatisfied &&
-      (planToUse.devPackages.length > 0 ||
-        planToUse.regularPackages.length > 0)
+      (planToUse.devPackages.length > 0 || planToUse.regularPackages.length > 0)
     ) {
       result.skipped.push(
         "prisma@7.10.0 and @prisma/client@7.10.0 reinstall (already declared at the verified pin)",
@@ -974,6 +975,18 @@ export async function executeDatabase(
         prismaArgs = originalArgs;
       }
 
+      // pnpm dlx build approval (install-layer adapter): when the command
+      // really is `pnpm dlx`, pass --allow-build for exactly the plan's
+      // approvalOnly packages — otherwise pnpm's dlx cache install drops
+      // the transitive @prisma/engines postinstall into ignoredBuilds and
+      // (TTY) prompts "Choose which packages to build" inside this spinner,
+      // or (non-TTY) silently skips the schema-engine binary download.
+      prismaArgs = withDlxBuildApprovals(
+        prismaCmd,
+        prismaArgs,
+        planToUse.dependencyPlan,
+      );
+
       const prismaExecuteCwd = prismaResolvedCwd ?? process.cwd();
 
       try {
@@ -1007,7 +1020,6 @@ export async function executeDatabase(
   // client — the staleness case). The command therefore runs on every
   // reconcile, fresh OR existing, after a skipped OR executed init.
   if (!ctx.dryRun) {
-
     // Step 3b: Generate the Prisma Client. Prisma 7 has NO auto-generate —
     // @prisma/client ships a stub that throws "did not initialize yet" at
     // import time until `prisma generate` runs, and no install-lifecycle
@@ -1056,6 +1068,15 @@ export async function executeDatabase(
         generateCmd = "npx";
         generateArgs = ["prisma@7", "generate", "--no-hints"];
       }
+
+      // Same pnpm dlx build approval as init (install-layer adapter): the
+      // generate cache is a separate dlx install with the same transitive
+      // @prisma/engines postinstall gate.
+      generateArgs = withDlxBuildApprovals(
+        generateCmd,
+        generateArgs,
+        planToUse.dependencyPlan,
+      );
 
       try {
         await executeCommand(generateCmd, generateArgs, {
@@ -1144,9 +1165,7 @@ export async function executeDatabase(
           "utf8",
         );
         result.created.push(".env (minimal, DATABASE_URL placeholder)");
-      } else if (
-        !/^\s*(?:export\s+)?DATABASE_URL\s*=/m.test(envText)
-      ) {
+      } else if (!/^\s*(?:export\s+)?DATABASE_URL\s*=/m.test(envText)) {
         // Byte-preserving append: original content first, untouched, then
         // the new declaration on its own line.
         const needsLeadingNewline =
@@ -1447,21 +1466,15 @@ export function summarizeDatabase(result: {
   const sections: string[] = [];
 
   if (created.length) {
-    sections.push(
-      ["Created:", ...created.map((p) => `  • ${p}`)].join("\n"),
-    );
+    sections.push(["Created:", ...created.map((p) => `  • ${p}`)].join("\n"));
   }
 
   if (updated.length) {
-    sections.push(
-      ["Updated:", ...updated.map((p) => `  • ${p}`)].join("\n"),
-    );
+    sections.push(["Updated:", ...updated.map((p) => `  • ${p}`)].join("\n"));
   }
 
   if (skipped.length) {
-    sections.push(
-      ["Skipped:", ...skipped.map((p) => `  • ${p}`)].join("\n"),
-    );
+    sections.push(["Skipped:", ...skipped.map((p) => `  • ${p}`)].join("\n"));
   }
 
   if (conflicts.length) {
@@ -1513,7 +1526,13 @@ export const databaseGenerator: Generator = {
     // Only prompt in interactive mode (not dry-run and not CI)
     const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
 
-    if (shouldPrompt && (needsProvider || needsSkillsAnswer || needsScriptsAnswer || needsHelperPath)) {
+    if (
+      shouldPrompt &&
+      (needsProvider ||
+        needsSkillsAnswer ||
+        needsScriptsAnswer ||
+        needsHelperPath)
+    ) {
       // Use interactive prompts for missing fields. DXG owns the Prisma
       // agent skills decision ("Install Prisma agent skills?") — it is asked
       // here, after the provider selection, so the Prisma CLI itself never
@@ -1575,7 +1594,9 @@ export const databaseGenerator: Generator = {
     // cancelling here leaves package.json completely untouched.
     if (answers.databaseScripts === "customize") {
       try {
-        answers.databaseScripts = await promptCustomScripts(answers.provider as string);
+        answers.databaseScripts = await promptCustomScripts(
+          answers.provider as string,
+        );
       } catch (error) {
         if (isCancel(error)) {
           cancel("Operation cancelled");

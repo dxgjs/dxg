@@ -451,7 +451,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     });
 
     // The recommended database scripts are added alongside the untouched
-    // existing scripts (recommended set: generate, push, studio).
+    // existing scripts (recommended set: generate, push, pull, studio).
     expect(final.scripts).toEqual({
       dev: "next dev",
       build: "next build",
@@ -459,6 +459,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
       lint: "eslint",
       "db:generate": "prisma generate",
       "db:push": "prisma db push",
+      "db:pull": "prisma db pull",
       "db:studio": "prisma studio",
     });
   });

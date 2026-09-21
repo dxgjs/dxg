@@ -46,3 +46,5 @@ export {
   applyNpmAllowScripts,
   applyYarnBerryDependenciesMeta,
 } from "./approvals";
+
+export { withDlxBuildApprovals } from "./dlx";
