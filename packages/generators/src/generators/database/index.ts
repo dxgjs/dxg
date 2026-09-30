@@ -15,19 +15,19 @@ import {
 } from "@dxgjs/prompts";
 
 import { fileURLToPath } from "url";
-import { dirname, join, sep } from "path";
+import { dirname, join, sep, posix } from "path";
 import { executeCommand } from "@dxgjs/fs";
 import { parseNlx, getCliCommand } from "@antfu/ni";
 import pc from "picocolors";
 import type {
   DependencyPlan,
   DependencyInstallResult,
+  DependencySpec,
 } from "../../install/types";
 import { installerFailureHint } from "../../install/installer";
 import { withDlxBuildApprovals } from "../../install/dlx";
 import {
   specName,
-  DEFAULT_GENERATOR_OUTPUT,
   DEFAULT_HELPER_PATH,
   PRISMA_PINNED_VERSION,
   computeFileImport,
@@ -81,6 +81,7 @@ export const providerData = {
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
     notes:
       "SQLite is a file-based database suited for development and prototyping.",
+    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
   },
   postgresql: {
     key: "postgresql",
@@ -103,6 +104,7 @@ export const providerData = {
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
     notes:
       "PostgreSQL is a powerful, open source object-relational database system.",
+    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
   },
   mysql: {
     key: "mysql",
@@ -124,6 +126,7 @@ export const providerData = {
     instantiationPattern: "individualParams", // Uses individual connection parameters
     notes:
       "MySQL is a widely-used open source relational database management system.",
+    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
   },
   sqlserver: {
     key: "sqlserver",
@@ -141,6 +144,7 @@ export const providerData = {
     instantiationPattern: "individualParams", // Uses individual connection parameters
     notes:
       "Microsoft SQL Server is a relational database management system developed by Microsoft.",
+    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
   },
   cockroachdb: {
     key: "cockroachdb",
@@ -163,6 +167,7 @@ export const providerData = {
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
     notes:
       "CockroachDB is a distributed SQL database built on a transactional and strongly-consistent key-value store.",
+    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
   },
   planetscale: {
     key: "planetscale",
@@ -188,6 +193,7 @@ export const providerData = {
     supportsMigrations: false,
     notes:
       "PlanetScale is a serverless database platform built on Vitess. Requires relationMode = 'prisma' in schema.prisma for MySQL variant.",
+    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
   },
   prismapostgres: {
     key: "prismapostgres",
@@ -210,6 +216,7 @@ export const providerData = {
     instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
     notes:
       "Prisma Postgres is a fully managed PostgreSQL-compatible database service.",
+    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
   },
 };
 
@@ -339,6 +346,11 @@ export const databasePrompts = [
     name: "helperPath",
     message: "Where should the Prisma client helper be created?",
     default: DEFAULT_HELPER_PATH,
+    validate: (value) =>
+      typeof value === "string" &&
+      (value === "" ||
+        /^[a-zA-Z0-9_/.-]+\.[jt]s$/.test(value) ||
+        "Must be a relative path ending in .ts or .tsx"),
   },
 ] satisfies {
   type: "input" | "confirm" | "select";
@@ -364,20 +376,42 @@ export const databasePrompts = [
  *   prompt/TTY check). Prisma therefore never asks the question DXG
  *   already asked.
  */
-export function buildPrismaInitArgs(
-  prismaProvider: string,
-  installSkills: boolean,
-): string[] {
-  return [
-    "prisma@7",
-    "init",
-    "--datasource-provider",
-    prismaProvider,
-    ...(installSkills ? [] : ["--no-skills"]),
-    "--output",
-    "../lib/generated/prisma",
-  ];
-}
+/**
+   * Builds the exact `prisma init` argument contract. This is the single
+   * source of truth used by BOTH production resolution paths in
+   * executeDatabase (the primary `getCliCommand(parseNlx, ...)` call and the
+   * `originalArgs` fallback/workaround), so the skills decision can never
+   * diverge between the two paths.
+   *
+   * Skills translation (verified against the prisma@7.10.0 CLI source):
+   * - `installSkills: false` passes the explicit `--no-skills` flag → Prisma
+   *   skips agent skills entirely.
+   * - `installSkills: true` omits the flag → prisma@7 installs agent skills
+   *   unconditionally and NON-interactively (that code path contains no
+   *   prompt/TTY check). Prisma therefore never asks the question DXG
+   *   already asked.
+   *
+   * @param prismaProvider The Prisma provider (e.g. "sqlite", "postgresql")
+   * @param installSkills Whether to install Prisma agent skills
+   * @param outputPath    The path (relative to the prisma directory) where the
+   *                      generated client should be placed. If not provided,
+   *                      defaults to "../lib/generated/prisma".
+   */
+  export function buildPrismaInitArgs(
+    prismaProvider: string,
+    installSkills: boolean,
+    outputPath?: string,
+  ): string[] {
+    return [
+      "prisma@7",
+      "init",
+      "--datasource-provider",
+      prismaProvider,
+      ...(installSkills ? [] : ["--no-skills"]),
+      "--output",
+      outputPath ?? "../lib/generated/prisma",
+    ];
+  }
 
 // Validation function
 export function validateDatabase(): boolean {
@@ -436,7 +470,7 @@ export function planDatabase(
   // specifier from its own directory (prisma/).
   const generatedClientImport = computeRelativeImport(
     helperPath,
-    inspection?.generatorOutput ?? DEFAULT_GENERATOR_OUTPUT,
+    inspection?.generatorOutput ?? computeDefaultGeneratorOutput(helperPath),
   );
   const helperImportFromSeed = computeFileImport(
     "prisma/seed.ts",
@@ -514,33 +548,27 @@ export function planDatabase(
     buildApprovalNames.push("better-sqlite3");
   }
 
-  // DependencyPlan consumed by the installer seam (ctx.installer): the
-  // generator declares WHAT needs building; the per-manager adapters own
-  // the HOW (pnpm allowBuilds / npm allowScripts / yarn berry
-  // dependenciesMeta / bun default-trust).
-  const dependencyPlan: DependencyPlan = {
-    devDependencies: devPackages.map((spec) => ({
+  // Build dependency plan with spec objects for the installer.
+  const devPackageSpecs: DependencySpec[] = devPackages.map((spec) => ({
+    spec,
+    requiresBuild: requiresBuild(spec),
+  }));
+  const regularPackageSpecs: DependencySpec[] = [
+    ...regularPackages.map((spec) => ({
       spec,
       requiresBuild: requiresBuild(spec),
     })),
-    dependencies: [
-      ...regularPackages.map((spec) => ({
-        spec,
-        requiresBuild: requiresBuild(spec),
-      })),
-      // Approval-only entry: @prisma/engines is a TRANSITIVE dependency of
-      // prisma (never installed directly by name), but its postinstall is
-      // exactly what build-approval gates must cover. approvalOnly keeps it
-      // out of the install command args while its name reaches the approval
-      // map — validated in lab e2e-pnpm (allowBuilds with '@prisma/engines'
-      // → postinstall downloads the schema-engine binary).
-      {
-        spec: "@prisma/engines",
-        requiresBuild: true,
-        reason: "postinstall downloads the schema-engine binary",
-        approvalOnly: true,
-      },
-    ],
+    // @prisma/engines is a transitive dependency of the adapter that requires
+    // build approval but is never installed directly.
+    {
+      spec: "@prisma/engines",
+      requiresBuild: true,
+      approvalOnly: true,
+    },
+  ];
+  const dependencyPlan: DependencyPlan = {
+    devDependencies: devPackageSpecs,
+    dependencies: regularPackageSpecs,
   };
 
   // Determine files to create - only DXG-owned application templates.
@@ -590,11 +618,17 @@ export function planDatabase(
     // config (verified empirically), so it is skipped instead.
     initRequired,
     prismaDeclarationsSatisfied,
-    generatorOutput: inspection?.generatorOutput ?? DEFAULT_GENERATOR_OUTPUT,
+    generatorOutput: computeDefaultGeneratorOutput(helperPath),
+    // Prisma init output path relative to the prisma directory (where schema.prisma lives).
+    // This is the argument passed to `prisma init --output`.
+    prismaInitOutput: posix.join("..", computeDefaultGeneratorOutput(helperPath)),
     envExists: inspection?.envExists ?? false,
     envNeedsDatabaseUrl: inspection?.envHasDatabaseUrl === false,
     helperPath,
-    generatedClientImport,
+    generatedClientImport: computeRelativeImport(
+      helperPath,
+      computeDefaultGeneratorOutput(helperPath),
+    ),
     helperImportFromSeed,
   };
 }
@@ -761,6 +795,48 @@ async function applySeedConfigToPrismaFile(
   }
   await fs.writeFile(configPath, updated, "utf8");
   return { added: true, skipped: false };
+}
+
+// Helper function to compute default generator output from helperPath
+// when inspection does not provide a generatorOutput.
+function computeDefaultGeneratorOutput(helperPath: string): string {
+  const helperDir = posix.dirname(helperPath);
+  let outputBaseDir: string;
+
+  // Check for "/lib/" or ending with "/lib*" patterns
+  if (helperDir.includes("/lib/") || /\/lib[^/]*$/.test(helperDir)) {
+    // Find the last occurrence of "/lib/" or "/lib*" suffix
+    const libMatch = helperDir.match(/(.*\/lib[^/]*)/);
+    if (libMatch) {
+      outputBaseDir = libMatch[1];
+    } else {
+      // Fallback to full directory if regex fails unexpectedly
+      outputBaseDir = helperDir;
+    }
+  } else if (helperDir.includes("custom/")) {
+    // For custom paths, go up one level to avoid deep nesting
+    outputBaseDir = "..";
+  } else {
+    // Split into segments and find the last one starting with "lib"
+    const segments = helperDir.split("/");
+    let libSegmentIndex = -1;
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (segments[i].startsWith("lib")) {
+        libSegmentIndex = i;
+        break;
+      }
+    }
+
+    if (libSegmentIndex !== -1) {
+      // Use from the "lib" segment to the end
+      outputBaseDir = segments.slice(libSegmentIndex).join("/");
+    } else {
+      // No "lib" segment found, use the full helper directory
+      outputBaseDir = helperDir;
+    }
+  }
+
+  return posix.join(outputBaseDir, "generated", "prisma");
 }
 
 // Execution function
@@ -934,6 +1010,7 @@ export async function executeDatabase(
       const prismaInitArguments = buildPrismaInitArgs(
         providerObj.prismaProvider,
         planToUse.installPrismaSkills === true,
+        planToUse.prismaInitOutput,
       );
 
       // Use the existing command execution infrastructure
@@ -1114,6 +1191,7 @@ export async function executeDatabase(
       const plannedArgs = buildPrismaInitArgs(
         providerObj.prismaProvider,
         planToUse.installPrismaSkills === true,
+        planToUse.prismaInitOutput,
       )
         .slice(1) // drop the "prisma@7" package spec for display
         .join(" ");
@@ -1490,7 +1568,7 @@ export function summarizeDatabase(result: {
   // coherently instead of note-by-note narration.
   if (wouldRun && wouldRun.length > 0) {
     sections.push(
-      ["Would run:", ...wouldRun.map((op) => `  • ${op}`)].join("\n"),
+      ["Would run:", ...wouldRun.map((op) => `  • ${op}`)].join("\n")
     );
   }
 

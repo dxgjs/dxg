@@ -33,6 +33,9 @@ import { note as noteMock } from "@dxgjs/prompts";
 import { createDependencyInstaller } from "../../install/installer";
 import * as path from "path";
 import * as os from "os";
+import type { PackageJson, FSInterface } from "../../../src/types";
+import type { Generator } from "../../../src/types";
+import type { ProjectAwareness } from "@dxgjs/workspace";
 
 vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
@@ -52,10 +55,22 @@ vi.mock("@dxgjs/prompts", async () => {
   };
 });
 
+const fsMockStore = vi.hoisted(() => {
+  return {
+    _files: new Map<string, string>(),
+    _directories: new Set<string>(),
+  } as unknown as {
+    _files: Map<string, string>;
+    _directories: Set<string>;
+  };
+});
+
+let lastPrismaInitOutput: string | null = null;
+
 vi.mock("@dxgjs/fs", async () => {
   const actual = await vi.importActual<typeof import("@dxgjs/fs")>("@dxgjs/fs");
-  const _files = new Map<string, string>();
-  const _directories = new Set<string>();
+  const _files = fsMockStore._files;
+  const _directories = fsMockStore._directories;
 
   // The exact prisma7.config.ts content written by `prisma init` 7.10.0
   const _prismaInitConfig = [
@@ -82,7 +97,7 @@ vi.mock("@dxgjs/fs", async () => {
       return actual.pathExists(filePath);
     }),
     readFile: vi.fn().mockImplementation(
-      async (filePath: string, options?: any) => {
+      async (filePath: string, options?: unknown) => {
         if (_files.has(filePath)) {
           return _files.get(filePath);
         }
@@ -146,7 +161,7 @@ vi.mock("@dxgjs/fs", async () => {
           const packages = dev ? args.slice(2) : args.slice(1);
           const manifest = JSON.parse(
             _files.get("package.json") ?? "{}",
-          ) as Record<string, any>;
+          ) as PackageJson;
           const section = dev
             ? (manifest.devDependencies ??= {})
             : (manifest.dependencies ??= {});
@@ -174,23 +189,25 @@ vi.mock("@dxgjs/fs", async () => {
           args[1] === "init" &&
           !_files.has("prisma7.config.ts")
         ) {
+          // Extract the output path from the args (--output <path>)
+          const outputIndex = args.indexOf("--output");
+          let outputPathRelativeToPrisma: string;
+          if (outputIndex !== -1 && outputIndex + 1 < args.length) {
+            outputPathRelativeToPrisma = args[outputIndex + 1]; // relative to prisma directory
+          } else {
+            // Default output if not specified (relative to prisma directory)
+            outputPathRelativeToPrisma = "node_modules/@prisma/client";
+          }
+          lastPrismaInitOutput = outputPathRelativeToPrisma;
+          // Write schema.prisma with the output path relative to the prisma directory
           _files.set(
             "prisma/schema.prisma",
-            [
-              "generator client {",
-              '  provider = "prisma-client"',
-              '  output = "../lib/generated/prisma"',
-              "}",
-              "",
-              "datasource db {",
-              '  provider = "sqlite"',
-              "}",
-              "",
-            ].join("\n"),
+            `generator client {\n  provider = "prisma-client"\n  output = "${lastPrismaInitOutput}"\n}\ndatasource db {\n  provider = "sqlite"\n}`,
           );
           _files.set("prisma7.config.ts", _prismaInitConfig);
           _files.set(".env", 'DATABASE_URL="file:./dev.db"\n');
           _directories.add("prisma");
+          return { all: "prisma init ok", stdout: "", stderr: "" };
         }
         // Simulate `prisma generate`: emits the generated client.
         if (
@@ -198,11 +215,22 @@ vi.mock("@dxgjs/fs", async () => {
           args[0] === "prisma@7" &&
           args[1] === "generate"
         ) {
+          // Determine the output path: use the last captured from prisma init, or default
+          const outputPathRelativeToPrisma = lastPrismaInitOutput ?? "node_modules/@prisma/client";
+          // Convert to path relative to project root: prisma/<outputPath>
+          let outputPathRelativeToProjectRoot = `prisma/${outputPathRelativeToPrisma}`;
+          // Since in our tests, prismaInitOutput is always set to "../<generatorOutput>",
+          // we have outputPathRelativeToProjectRoot = "prisma/../<generatorOutput>"
+          // So we can remove the "prisma/../" prefix to get the generatorOutput.
+          if (outputPathRelativeToProjectRoot.startsWith('prisma/../')) {
+            outputPathRelativeToProjectRoot = outputPathRelativeToProjectRoot.slice(10);
+          }
+          // Ensure the directory exists
+          _directories.add(outputPathRelativeToProjectRoot);
           _files.set(
-            "lib/generated/prisma/client.ts",
+            `${outputPathRelativeToProjectRoot}/client.ts`,
             "// generated prisma client\n",
           );
-          _directories.add("lib/generated/prisma");
           return { all: "prisma generate ok", stdout: "", stderr: "" };
         }
         return { all: "", stdout: "", stderr: "" };
@@ -218,7 +246,7 @@ vi.mock("@antfu/ni", () => {
     parseNi: vi.fn().mockReturnValue("npm-mock"),
     getCliCommand: vi
       .fn()
-      .mockImplementation((parseNiFn: any, args: string[]) => {
+      .mockImplementation((parseNiFn: unknown, args: string[]) => {
         parseNiFn;
         // dlx passthrough (real ni behavior): prisma init/generate resolve
         // to npx with verbatim args.
@@ -239,7 +267,7 @@ vi.mock("@antfu/ni", () => {
 });
 
 // Import the database generator AFTER the mocks are in place
-let databaseGenerator: any;
+let databaseGenerator: Generator;
 
 beforeAll(async () => {
   // vi.clearAllMocks() in beforeEach would wipe the mockImplementations
@@ -248,10 +276,6 @@ beforeAll(async () => {
   databaseGenerator = indexModule.default;
 });
 
-const fsMockStore = fs as unknown as {
-  _files: Map<string, string>;
-  _directories: Set<string>;
-};
 
 /** A realistic Next.js project manifest. */
 const MY_APP_PACKAGE_JSON = {
@@ -287,10 +311,10 @@ async function seedProject(manifest: unknown = MY_APP_PACKAGE_JSON) {
   await fs.writeFile("package.json", JSON.stringify(manifest, null, 2), "utf8");
 }
 
-function readManifestFromDisk(): Record<string, any> {
+function readManifestFromDisk(): PackageJson {
   const raw = fsMockStore._files.get("package.json");
   expect(raw).toBeDefined();
-  return JSON.parse(raw!);
+  return JSON.parse(raw!) as PackageJson;
 }
 
 function makeContext(overrides: Record<string, unknown> = {}) {
@@ -341,23 +365,41 @@ function makeContext(overrides: Record<string, unknown> = {}) {
  * calls — the exact contract the decision document requires.
  */
 function installCalls(): string[][] {
-  return (fs.executeCommand as Mock).mock.calls.filter(
-    (call: any[]) => {
-      const [cmd, args] = call as [string, string[]];
+  return (fs.executeCommand as Mock).mock.calls
+    .filter(
+      (call): call is [string, string[]] => {
+        return (
+          Array.isArray(call) &&
+          call.length === 2 &&
+          typeof call[0] === 'string' &&
+          Array.isArray(call[1]) &&
+          call[1].every((arg): arg is string => typeof arg === 'string')
+        );
+      }
+    )
+    .filter(([cmd, args]) => {
       if (cmd !== "npm-mock") return false;
       const first = args[0];
       return first === "install" || first === "add";
-    },
-  );
+    });
 }
 
 function prismaCommandCalls(): string[][] {
-  return (fs.executeCommand as Mock).mock.calls.filter(
-    (call: any[]) => {
-      const [cmd, args] = call as [string, string[]];
+  return (fs.executeCommand as Mock).mock.calls
+    .filter(
+      (call): call is [string, string[]] => {
+        return (
+          Array.isArray(call) &&
+          call.length === 2 &&
+          typeof call[0] === 'string' &&
+          Array.isArray(call[1]) &&
+          call[1].every((arg): arg is string => typeof arg === 'string')
+        );
+      }
+    )
+    .filter(([cmd, args]) => {
       return cmd === "npx" && args[0] === "prisma@7";
-    },
-  );
+    });
 }
 
 let originalCwd: string;
@@ -522,7 +564,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
     const installs = installCalls();
     // prisma and @prisma/client are dropped from the batches; the remaining
     // provider deps (adapter, better-sqlite3, dotenv) are still installed.
-    const allSpecs = installs.flatMap((call: any[]) => {
+    const allSpecs = installs.flatMap((call: [string, string[]]) => {
       const args: string[] = call[1] ?? [];
       return args.filter((a) => !["install", "add", "-D"].includes(a));
     });
@@ -532,7 +574,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
 
     // Fresh-shaped (no schema, no config): init still executes.
     const initCalls = prismaCommandCalls().filter(
-      (call: any[]) => call[1]?.[1] === "init",
+      (call: [string, string[]]) => call[1]?.[1] === "init",
     );
     expect(initCalls).toHaveLength(1);
   });
@@ -563,7 +605,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
     expect(fsMockStore._files.get(".env")).toBe(envAfterFirst);
 
     // Prisma packages were NOT reinstalled.
-    const allSpecs = installCalls().flatMap((call: any[]) => {
+    const allSpecs = installCalls().flatMap((call: [string, string[]]) => {
       const args: string[] = call[1] ?? [];
       return args.filter((a) => !["install", "add", "-D"].includes(a));
     });
@@ -572,10 +614,10 @@ describe("idempotence reconciliation (satisfied state)", () => {
 
     // init never executes; generate DOES (always-generate).
     const initCalls = prismaCommandCalls().filter(
-      (call: any[]) => call[1]?.[1] === "init",
+      (call: [string, string[]]) => call[1]?.[1] === "init",
     );
     const generateCalls = prismaCommandCalls().filter(
-      (call: any[]) => call[1]?.[1] === "generate",
+      (call: [string, string[]]) => call[1]?.[1] === "generate",
     );
     expect(initCalls).toHaveLength(0);
     expect(generateCalls).toHaveLength(1);
@@ -613,7 +655,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
 
     // init never executes (schema exists → gate).
     expect(
-      prismaCommandCalls().filter((call: any[]) => call[1]?.[1] === "init"),
+      prismaCommandCalls().filter((call: [string, string[]]) => call[1]?.[1] === "init"),
     ).toHaveLength(0);
     // Schema is byte-preserved.
     expect(fsMockStore._files.get("prisma/schema.prisma")).toContain(
@@ -621,7 +663,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
     );
     // generate still runs (always-generate).
     expect(
-      prismaCommandCalls().filter((call: any[]) => call[1]?.[1] === "generate"),
+      prismaCommandCalls().filter((call: [string, string[]]) => call[1]?.[1] === "generate"),
     ).toHaveLength(1);
   });
 
@@ -649,7 +691,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
     );
 
     expect(
-      prismaCommandCalls().filter((call: any[]) => call[1]?.[1] === "init"),
+      prismaCommandCalls().filter((call: [string, string[]]) => call[1]?.[1] === "init"),
     ).toHaveLength(0);
     // The custom config survived byte-for-byte (init would have clobbered
     // migrations.path and the custom seed — verified empirically).
@@ -670,7 +712,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
       makeContext(),
     );
 
-    const allSpecs = installCalls().flatMap((call: any[]) => {
+    const allSpecs = installCalls().flatMap((call: [string, string[]]) => {
       const args: string[] = call[1] ?? [];
       return args.filter((a) => !["install", "add", "-D"].includes(a));
     });
@@ -966,11 +1008,11 @@ describe("mode contracts and staleness", () => {
     );
 
     const generateCalls = prismaCommandCalls().filter(
-      (call: any[]) => call[1]?.[1] === "generate",
+      (call: [string, string[]]) => call[1]?.[1] === "generate",
     );
     expect(generateCalls).toHaveLength(1);
     expect(
-      prismaCommandCalls().filter((call: any[]) => call[1]?.[1] === "init"),
+      prismaCommandCalls().filter((call: [string, string[]]) => call[1]?.[1] === "init"),
     ).toHaveLength(0);
   });
 });

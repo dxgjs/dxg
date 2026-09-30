@@ -40,6 +40,8 @@ import {
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import { render as realRender } from "@dxgjs/templates";
+import type { FSInterface, PackageJson } from "../../../src/types";
+import type { ProjectAwareness } from "@dxgjs/workspace";
 import {
   note as noteMock,
   prompt as promptMock,
@@ -49,6 +51,7 @@ import {
 import { createDependencyInstaller } from "../../install/installer";
 import * as path from "path";
 import * as os from "os";
+import type { Generator } from "../../../src/types";
 
 vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
@@ -107,7 +110,7 @@ vi.mock("@dxgjs/fs", async () => {
       return actual.pathExists(filePath);
     }),
     readFile: vi.fn().mockImplementation(
-      async (filePath: string, options?: any) => {
+      async (filePath: string, options?: unknown) => {
         if (_files.has(filePath)) {
           return _files.get(filePath);
         }
@@ -115,13 +118,13 @@ vi.mock("@dxgjs/fs", async () => {
       },
     ),
     writeFile: vi.fn().mockImplementation(
-      async (filePath: string, data: string | Buffer) => {
+      async (filePath: string, data: string | Buffer, options?: unknown) => {
         _files.set(filePath, data.toString());
         const dir = filePath.split("/").slice(0, -1).join("/");
         if (dir) {
           _directories.add(dir);
         }
-        return undefined;
+        return actual.writeFile(filePath, data, options);
       },
     ),
     stat: vi.fn().mockImplementation(async (filePath: string) => {
@@ -170,7 +173,7 @@ vi.mock("@dxgjs/fs", async () => {
           const packages = dev ? args.slice(2) : args.slice(1);
           const manifest = JSON.parse(
             _files.get("package.json") ?? "{}",
-          ) as Record<string, any>;
+          ) as Record<string, unknown>;
           const section = dev
             ? (manifest.devDependencies ??= {})
             : (manifest.dependencies ??= {});
@@ -266,7 +269,7 @@ vi.mock("@dxgjs/templates", async () => {
   };
 });
 
-let databaseGenerator: any;
+let databaseGenerator: Generator;
 
 beforeAll(async () => {
   const indexModule = await import("./index");
@@ -303,7 +306,7 @@ async function seedProject(manifest: unknown = MY_APP_PACKAGE_JSON) {
   await fs.writeFile("package.json", JSON.stringify(manifest, null, 2), "utf8");
 }
 
-function readManifestFromDisk(): Record<string, any> {
+function readManifestFromDisk(): PackageJson {
   const raw = fsMockStore._files.get("package.json");
   expect(raw).toBeDefined();
   return JSON.parse(raw!);
@@ -316,7 +319,7 @@ function readPrismaConfig(): string {
   return raw!;
 }
 
-function makeContext(overrides: Record<string, unknown> = {}) {
+function makeContext(overrides: Partial<GeneratorContext> = {}): GeneratorContext {
   return {
     logger: {
       info: vi.fn(),
@@ -331,7 +334,7 @@ function makeContext(overrides: Record<string, unknown> = {}) {
     awareness: {
       projectRoot: ".",
       workspaceRoot: ".",
-      framework: { name: "next-app", detected: true },
+      framework: { name: "next-app" as const, detected: true },
       language: { name: "typescript", detected: true },
       packageManager: "pnpm",
       styling: {
@@ -352,7 +355,7 @@ function makeContext(overrides: Record<string, unknown> = {}) {
     // The real installer bound to the mocked fs + npm agent (matching the
     // @antfu/ni and executeCommand mocks above) — executeDatabase requires
     // one; approvals land in the same in-memory store as everything else.
-    installer: createDependencyInstaller({ agent: "npm", fs: fs as any }),
+    installer: createDependencyInstaller({ agent: "npm", fs: fs as FSInterface }),
     dryRun: false,
     force: false,
     nonInteractive: false,
@@ -518,7 +521,7 @@ describe("interactive database scripts phase", () => {
       (call: unknown[]) => call[0] === "package.json",
     );
     for (const [, data] of manifestWrites) {
-      const scripts = (data as Record<string, any>).scripts ?? {};
+      const scripts = (data as PackageJson).scripts ?? {};
       const dbKeys = Object.keys(scripts).filter((k) => k.startsWith("db:"));
       expect(dbKeys).toEqual([]);
     }
@@ -623,12 +626,12 @@ describe("interactive database scripts phase", () => {
     expect(final.name).toBe("my-app");
     expect(final.version).toBe("0.1.0");
     expect(final.private).toBe(true);
-    expect(final.scripts.dev).toBe("next dev");
-    expect(final.scripts.build).toBe("next build");
-    expect(final.dependencies.next).toBe("16.2.12");
+    expect((final.scripts ?? {}).dev).toBe("next dev");
+    expect((final.scripts ?? {}).build).toBe("next build");
+    expect((final.dependencies ?? {}).next).toBe("16.2.12");
     // DXG-installed dependencies survive the write-back.
-    expect(final.devDependencies.prisma).toBe("7.10.0");
-    expect(final.dependencies["@prisma/client"]).toBe("7.10.0");
+    expect((final.devDependencies ?? {}).prisma).toBe("7.10.0");
+    expect((final.dependencies ?? {})["@prisma/client"]).toBe("7.10.0");
   });
 
   test("cancellation during the phase propagates the Clack cancel symbol", async () => {
@@ -679,9 +682,9 @@ describe("interactive database scripts phase", () => {
 
     expect(promptMock).not.toHaveBeenCalled();
     const final = readManifestFromDisk();
-    expect(final.scripts["db:generate"]).toBe("prisma generate");
-    expect(final.scripts["db:push"]).toBe("prisma db push");
-    expect(final.scripts["db:studio"]).toBe("prisma studio");
+    expect((final.scripts ?? {})["db:generate"]).toBe("prisma generate");
+    expect((final.scripts ?? {})["db:push"]).toBe("prisma db push");
+    expect((final.scripts ?? {})["db:studio"]).toBe("prisma studio");
   });
 
   test("dry-run never prompts and never mutates package.json", async () => {

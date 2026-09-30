@@ -16,6 +16,11 @@ import * as path from "path";
 import * as os from "os";
 import { getCliCommand } from "@antfu/ni";
 import { createDependencyInstaller } from "../../install";
+import type { GeneratorContext, Generator } from "../../types";
+import type { FSInterface } from "../../types";
+import type { PackageJson } from "@dxgjs/workspace";
+import type { ProjectAwareness } from "@dxgjs/workspace";
+import { ProviderData, planDatabase as planDatabaseFn, validateDatabase as validateDatabaseFn } from "./index";
 
 // Hoisted shared mock storage: the @dxgjs/fs mock factory needs it at
 // hoisted time (vi.mock factories run before module scope), and the
@@ -36,8 +41,10 @@ const fsMockStore = vi.hoisted(() => {
 // resets call history but preserves custom implementations, so a scenario
 // fake a test installs (e.g. the blocked-install one) would otherwise leak
 // into every later test.
+let lastPrismaInitOutput: string | null = null;
+
 const defaultExecuteFake = vi.hoisted(() => {
-  return async (command: string, args: string[]) => {
+  return async (command: string, args: string[]): Promise<{ all: string; stdout: string; stderr: string }> => {
     const specs = args.filter(
       (a: string) =>
         !["install", "add", "-D"].includes(a) && !a.startsWith("-"),
@@ -66,9 +73,18 @@ const defaultExecuteFake = vi.hoisted(() => {
       return { all: "added packages", stdout: "", stderr: "" };
     }
     if (command === "npx" && args[0] === "prisma@7" && args[1] === "init") {
+      // Extract the output path from the args (--output <path>)
+      const outputIndex = args.indexOf("--output");
+      if (outputIndex !== -1 && outputIndex + 1 < args.length) {
+        lastPrismaInitOutput = args[outputIndex + 1]; // relative to prisma directory
+      } else {
+        // Default output if not specified (relative to prisma directory)
+        lastPrismaInitOutput = "node_modules/@prisma/client";
+      }
+      // Write schema.prisma with the output path relative to the prisma directory
       fsMockStore._files.set(
         "prisma/schema.prisma",
-        'generator client {\n  provider = "prisma-client"\n}\ndatasource db {\n  provider = "sqlite"\n}',
+        `generator client {\n  provider = "prisma-client"\n  output = "${lastPrismaInitOutput}"\n}\ndatasource db {\n  provider = "sqlite"\n}`,
       );
       fsMockStore._files.set(
         "prisma7.config.ts",
@@ -78,11 +94,22 @@ const defaultExecuteFake = vi.hoisted(() => {
       return { all: "prisma init ok", stdout: "", stderr: "" };
     }
     if (command === "npx" && args[0] === "prisma@7" && args[1] === "generate") {
+      // Determine the output path: use the last captured from prisma init, or default
+      const outputPathRelativeToPrisma = lastPrismaInitOutput ?? "node_modules/@prisma/client";
+      // Convert to path relative to project root: prisma/<outputPath>
+      let outputPathRelativeToProjectRoot = `prisma/${outputPathRelativeToPrisma}`;
+      // Since in our tests, prismaInitOutput is always set to "../<generatorOutput>",
+      // we have outputPathRelativeToProjectRoot = "prisma/../<generatorOutput>"
+      // So we can remove the "prisma/../" prefix to get the generatorOutput.
+      if (outputPathRelativeToProjectRoot.startsWith('prisma/../')) {
+        outputPathRelativeToProjectRoot = outputPathRelativeToProjectRoot.slice(10);
+      }
+      // Ensure the directory exists
+      fsMockStore._directories.add(outputPathRelativeToProjectRoot);
       fsMockStore._files.set(
-        "lib/generated/prisma/client.ts",
+        `${outputPathRelativeToProjectRoot}/client.ts`,
         "// generated prisma client\n",
       );
-      fsMockStore._directories.add("lib/generated/prisma");
       return { all: "prisma generate ok", stdout: "", stderr: "" };
     }
     return { all: "", stdout: "", stderr: "" };
@@ -123,18 +150,18 @@ vi.mock("@dxgjs/fs", async () => {
       // Fall back to actual implementation for other paths
       return actual.pathExists(path);
     }),
-    readFile: vi.fn().mockImplementation(async (path: string, options?: any) => {
+    readFile: vi.fn().mockImplementation(async (path: string, options?: unknown) => {
       // Check if we have this file in our mock storage
       if (fsMockStore._files.has(path)) {
         return fsMockStore._files.get(path);
       }
       // Fall back to actual implementation for other paths
-      return actual.readFile(path, options);
+      return actual.readFile(path, options as any);
     }),
     writeFile: vi.fn().mockImplementation(async (
       path: string,
       data: string | Buffer,
-      options?: any,
+      options?: unknown,
     ) => {
       // Store the file in our mock storage
       fsMockStore._files.set(path, data.toString());
@@ -144,7 +171,7 @@ vi.mock("@dxgjs/fs", async () => {
         fsMockStore._directories.add(dir);
       }
       // Call actual writeFile (though in test env this might not do anything)
-      return actual.writeFile(path, data, options);
+      return actual.writeFile(path, data, options as any);
     }),
     stat: vi.fn().mockImplementation(async (path: string) => {
       // Check if it's a file we have
@@ -162,7 +189,7 @@ vi.mock("@dxgjs/fs", async () => {
       // Fall back to actual implementation
       return actual.stat(path);
     }),
-    mkdir: vi.fn().mockImplementation(async (path: string, options?: any) => {
+    mkdir: vi.fn().mockImplementation(async (path: string, options?: unknown) => {
       // Track the directory as created
       fsMockStore._directories.add(path);
       // Also track parent directories
@@ -171,7 +198,7 @@ vi.mock("@dxgjs/fs", async () => {
         fsMockStore._directories.add(parentDir);
       }
       // Call actual mkdir (though in test env this might not do anything)
-      return actual.mkdir(path, options);
+      return actual.mkdir(path, options as any);
     }),
     // Storage-backed JSON seam (the approval writers and the scripts phase
     // go through readJson/writeJson — backing them by the SAME store as
@@ -219,17 +246,15 @@ let triggerPrismaGenerateWorkaround = false;
 
 vi.mock("@antfu/ni", () => {
   return {
-    parseNlx: vi.fn().mockReturnValue("npx"),
-    parseNi: vi.fn().mockReturnValue("npm-mock"),
+    parseNlx: vi.fn().mockReturnValue({ command: "npx", args: [] }),
+    parseNi: vi.fn().mockReturnValue({ command: "npm-mock", args: [] }),
     getCliCommand: vi
       .fn()
-      .mockImplementation((parseNiFn: any, args: string[], ctx: any) => {
+      .mockImplementation((agentResult: { command: string; args: string[] }, args: string[]) => {
         // Use the parameters to avoid TS6133
-        parseNiFn;
-        ctx;
         // Simulate the behavior of getCliCommand for an npm project.
         if (!args || args.length === 0) {
-          return { command: "npm-mock", args: [] };
+          return { command: agentResult.command, args: [] };
         }
         // For prisma init — keyed to the EXACT production argument shape
         // (executeDatabase calls getCliCommand(parseNlx, ["prisma@7",
@@ -271,24 +296,24 @@ vi.mock("@antfu/ni", () => {
         // For dependency installation commands
         if (args.includes("-D") && !args.includes("add")) {
           return {
-            command: "npm-mock",
+            command: agentResult.command,
             args: ["install", "-D", ...args.slice(1)],
           };
         }
         if (!args.includes("-D") && !args.includes("add")) {
-          return { command: "npm-mock", args: ["install", ...args] };
+          return { command: agentResult.command, args: ["install", ...args] };
         }
-        return { command: "npm-mock", args: [...args] };
+        return { command: agentResult.command, args: [...args] };
       }),
     executeCommand: vi.fn().mockResolvedValue(undefined),
   };
 });
 
 // Import the database generator and provider data for testing
-let databaseGenerator: any;
-let providerData: any;
-let planDatabase: any;
-let validateDatabase: any;
+let databaseGenerator: Generator;
+let providerData: ProviderData;
+let planDatabase: ReturnType<typeof planDatabaseFn>;
+let validateDatabase: ReturnType<typeof validateDatabaseFn>;
 
 beforeAll(async () => {
   const indexModule = await import("./index");
@@ -309,7 +334,7 @@ beforeAll(async () => {
  * the in-memory store.
  */
 function makeInstaller() {
-  return createDependencyInstaller({ agent: "npm", fs: fs as any });
+  return createDependencyInstaller({ agent: "npm", fs: fs as FSInterface });
 }
 
 describe("Database Generator", () => {
@@ -397,7 +422,7 @@ describe("Database Generator", () => {
   });
 
   describe("planning", () => {
-    test("should plan correctly for SQLite provider", async () => {
+    test("should plan correctly for SQLite provider with default helper path", async () => {
       const answers = { provider: "sqlite" };
       const plan = planDatabase(answers);
 
@@ -415,9 +440,35 @@ describe("Database Generator", () => {
       expect(plan.filesToCreate[0].templatePath).toContain(
         "prisma-client-lib-sqlite.tmpl",
       );
+      // Default generator output should be lib/generated/prisma
+      expect(plan.generatorOutput).toBe("lib/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib/generated/prisma");
     });
 
-    test("should plan correctly for PostgreSQL provider", async () => {
+    test("should plan correctly for SQLite provider with custom helper path", async () => {
+      const answers = { provider: "sqlite", helperPath: "lib2/prisma.ts" };
+      const plan = planDatabase(answers);
+
+      expect(plan.provider).toBe("sqlite");
+      expect(plan.providerName).toBe("SQLite");
+      expect(plan.prismaProvider).toBe("sqlite");
+      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("@types/node");
+      expect(plan.devPackages).toContain("@types/better-sqlite3");
+      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/adapter-better-sqlite3");
+      expect(plan.regularPackages).toContain("dotenv");
+      expect(plan.filesToCreate.length).toBe(1);
+      expect(plan.filesToCreate[0].path).toBe("lib2/prisma.ts");
+      expect(plan.filesToCreate[0].templatePath).toContain(
+        "prisma-client-lib-sqlite.tmpl",
+      );
+      // Generator output should be lib2/generated/prisma
+      expect(plan.generatorOutput).toBe("lib2/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib2/generated/prisma");
+    });
+
+    test("should plan correctly for PostgreSQL provider with default helper path", async () => {
       const answers = { provider: "postgresql" };
       const plan = planDatabase(answers);
 
@@ -436,9 +487,36 @@ describe("Database Generator", () => {
       expect(plan.filesToCreate[0].templatePath).toContain(
         "prisma-client-lib.tmpl",
       );
+      // Default generator output should be lib/generated/prisma
+      expect(plan.generatorOutput).toBe("lib/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib/generated/prisma");
     });
 
-    test("should plan correctly for MySQL provider", async () => {
+    test("should plan correctly for PostgreSQL provider with custom helper path", async () => {
+      const answers = { provider: "postgresql", helperPath: "src/db/prisma.ts" };
+      const plan = planDatabase(answers);
+
+      expect(plan.provider).toBe("postgresql");
+      expect(plan.providerName).toBe("PostgreSQL");
+      expect(plan.prismaProvider).toBe("postgresql");
+      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("@types/node");
+      expect(plan.devPackages).toContain("@types/pg");
+      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/adapter-pg");
+      expect(plan.regularPackages).toContain("pg");
+      expect(plan.regularPackages).toContain("dotenv");
+      expect(plan.filesToCreate.length).toBe(1);
+      expect(plan.filesToCreate[0].path).toBe("src/db/prisma.ts");
+      expect(plan.filesToCreate[0].templatePath).toContain(
+        "prisma-client-lib.tmpl",
+      );
+      // Generator output should be src/db/generated/prisma
+      expect(plan.generatorOutput).toBe("src/db/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../src/db/generated/prisma");
+    });
+
+    test("should plan correctly for MySQL provider with default helper path", async () => {
       const answers = { provider: "mysql" };
       const plan = planDatabase(answers);
 
@@ -455,9 +533,12 @@ describe("Database Generator", () => {
       expect(plan.filesToCreate[0].templatePath).toContain(
         "prisma-client-lib-mysql.tmpl",
       );
+      // Default generator output should be lib/generated/prisma
+      expect(plan.generatorOutput).toBe("lib/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib/generated/prisma");
     });
 
-    test("should plan correctly for SQL Server provider", async () => {
+    test("should plan correctly for SQL Server provider with default helper path", async () => {
       const answers = { provider: "sqlserver" };
       const plan = planDatabase(answers);
 
@@ -475,9 +556,12 @@ describe("Database Generator", () => {
       expect(plan.filesToCreate[0].templatePath).toContain(
         "prisma-client-lib-sqlserver.tmpl",
       );
+      // Default generator output should be lib/generated/prisma
+      expect(plan.generatorOutput).toBe("lib/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib/generated/prisma");
     });
 
-    test("should plan correctly for CockroachDB provider", async () => {
+    test("should plan correctly for CockroachDB provider with default helper path", async () => {
       const answers = { provider: "cockroachdb" };
       const plan = planDatabase(answers);
 
@@ -496,9 +580,12 @@ describe("Database Generator", () => {
       expect(plan.filesToCreate[0].templatePath).toContain(
         "prisma-client-lib.tmpl",
       );
+      // Default generator output should be lib/generated/prisma
+      expect(plan.generatorOutput).toBe("lib/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib/generated/prisma");
     });
 
-    test("should plan correctly for PlanetScale provider", async () => {
+    test("should plan correctly for PlanetScale provider with default helper path", async () => {
       const answers = { provider: "planetscale" };
       const plan = planDatabase(answers);
 
@@ -516,9 +603,12 @@ describe("Database Generator", () => {
       expect(plan.filesToCreate[0].templatePath).toContain(
         "prisma-client-lib-planetscale.tmpl",
       );
+      // Default generator output should be lib/generated/prisma
+      expect(plan.generatorOutput).toBe("lib/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib/generated/prisma");
     });
 
-    test("should plan correctly for Prisma Postgres provider", async () => {
+    test("should plan correctly for Prisma Postgres provider with default helper path", async () => {
       const answers = { provider: "prismapostgres" };
       const plan = planDatabase(answers);
 
@@ -537,6 +627,9 @@ describe("Database Generator", () => {
       expect(plan.filesToCreate[0].templatePath).toContain(
         "prisma-client-lib.tmpl",
       );
+      // Default generator output should be lib/generated/prisma
+      expect(plan.generatorOutput).toBe("lib/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib/generated/prisma");
     });
   });
 
@@ -560,7 +653,7 @@ describe("Database Generator", () => {
     };
 
     for (const providerKey of Object.keys(expectedAdapterSnippets)) {
-      test(`renders raw-template-free, provider-correct lib/prisma.ts for ${providerKey}`, async () => {
+      test(`renders raw-template-free, provider-correct lib/prisma.ts for ${providerKey} with default helper path`, async () => {
         // Guard: every registered provider must be covered by this audit.
         expect(Object.keys(providerData).sort()).toEqual(
           Object.keys(expectedAdapterSnippets).sort(),
@@ -583,6 +676,41 @@ describe("Database Generator", () => {
         // prisma/schema.prisma, i.e. <project>/lib/generated/prisma).
         expect(rendered).toContain(
           'import { PrismaClient } from "./generated/prisma/client";',
+        );
+
+        // 3. Provider-correct adapter instantiation per the Prisma v7 reference.
+        for (const snippet of expectedAdapterSnippets[providerKey]) {
+          expect(rendered).toContain(snippet);
+        }
+
+        // 4. Connection info must be read at RUNTIME from the generated
+        // project's own environment, never baked in at generation time.
+        expect(rendered).toMatch(/process\.env\./);
+        expect(rendered).not.toContain("`undefined`");
+      });
+
+      test(`renders raw-template-free, provider-correct helper/prisma.ts for ${providerKey} with custom helper path`, async () => {
+        // Guard: every registered provider must be covered by this audit.
+        expect(Object.keys(providerData).sort()).toEqual(
+          Object.keys(expectedAdapterSnippets).sort(),
+        );
+
+        const plan = planDatabase({ provider: providerKey, helperPath: "custom/helpers/prisma.ts" });
+        const file = plan.filesToCreate[0];
+        const template = (await fs.readFile(file.templatePath, {
+          encoding: "utf8",
+        })) as string;
+
+        // Real @dxgjs/templates semantics (the mocked module delegates to it).
+        const rendered = realRender(template, file.data);
+
+        // 1. No unresolved template syntax may survive rendering.
+        expect(rendered).not.toMatch(/\{\{[^}]*\}\}/);
+
+        // 2. PrismaClient must be imported from DXG's generated client output
+        // Computed relatively from helper to generator output
+        expect(rendered).toContain(
+          'import { PrismaClient } from "../../../generated/prisma/client";',
         );
 
         // 3. Provider-correct adapter instantiation per the Prisma v7 reference.
@@ -653,7 +781,7 @@ describe("Database Generator", () => {
             version: '1.0.0',
             private: true
           }
-        },
+        } as ProjectAwareness,
         dryRun: false,
         force: false,
       };
@@ -681,6 +809,106 @@ describe("Database Generator", () => {
       // Verify that fs.writeFile was called for the lib/prisma.ts file (DXG-owned)
       expect(fs.writeFile).toHaveBeenCalledWith(
         expect.stringContaining("lib/prisma.ts"),
+        expect.any(String),
+        "utf8",
+      );
+
+      // Verify that getCliCommand was called for dependency installation
+      expect(getCliCommand).toHaveBeenCalled();
+
+      // Verify that executeCommand was called for: dev dependencies install,
+      // regular dependencies install, prisma init, and prisma generate —
+      // 4 commands total through the installer seam + Prisma steps.
+      expect(fs.executeCommand).toHaveBeenCalledTimes(4);
+
+      // The summary is fully Clack-native: the generator flow must not emit
+      // logger output into the interactive UX (no logger.debug from summary).
+      expect(mockLogger.debug).not.toHaveBeenCalled();
+    });
+
+    test("should execute successfully with CLI answers for SQLite and custom helper path", async () => {
+      // Create a package.json so that validation passes
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      const mockLogger = {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as unknown as Logger;
+
+      const templatesMock = {
+        // Real renderer semantics (delegates to @dxgjs/templates render):
+        // unresolved placeholders must stay visible, never be blanked out.
+        render: vi.fn(realRender),
+      };
+
+      const context = {
+        logger: mockLogger,
+        fs: fs,
+        templates: templatesMock,
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: {
+            name: 'unknown',
+            detected: false
+          },
+          language: {
+            name: 'javascript',
+            detected: true
+          },
+          packageManager: 'npm',
+          styling: {
+            name: 'none',
+            detected: false,
+            version: null,
+            configFile: null
+          },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false
+          },
+          packageJson: {
+            name: 'test-project',
+            version: '1.0.0',
+            private: true
+          }
+        } as ProjectAwareness,
+        dryRun: false,
+        force: false,
+      };
+
+      const answers = {
+        provider: "sqlite",
+        helperPath: "lib2/prisma.ts",
+      };
+
+      await expect(
+        databaseGenerator.run(answers, context),
+      ).resolves.not.toThrow();
+
+      // Verify that fs.pathExists was called for package.json
+      expect(fs.pathExists).toHaveBeenCalledWith("package.json");
+
+      // Verify that fs.readFile was called for package.json and the lib2/prisma.ts template
+      expect(fs.readFile).toHaveBeenCalledWith("package.json", {
+        encoding: "utf8",
+      });
+      expect(fs.readFile).toHaveBeenCalledWith(
+        expect.stringContaining("prisma-client-lib-sqlite.tmpl"),
+        { encoding: "utf8" },
+      );
+
+      // Verify that fs.writeFile was called for the lib2/prisma.ts file (DXG-owned)
+      expect(fs.writeFile).toHaveBeenCalledWith(
+        expect.stringContaining("lib2/prisma.ts"),
         expect.any(String),
         "utf8",
       );
@@ -753,9 +981,8 @@ describe("Database Generator", () => {
 
       // Verify that fs.readFile was NOT called for a schema.prisma.tmpl template
       // (since we removed it and Prisma owns it now)
-      const schemaTemplateCalls = (fs.readFile as any).mock.calls.filter(
-        (call: any[]) =>
-          call[0] &&
+      const schemaTemplateCalls = (fs.readFile as Mock).mock.calls.filter(
+        (call: [string, unknown?]) =>
           typeof call[0] === "string" &&
           call[0].includes("schema.prisma.tmpl"),
       );
@@ -838,6 +1065,83 @@ describe("Database Generator", () => {
       ]);
     });
 
+    test("should trigger workaround for @antfu/ni issue and pass custom output to prisma init", async () => {
+      // Create a package.json so that validation passes
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+
+      const mockLogger = {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as unknown as Logger;
+
+      const templatesMock = {
+        render: vi.fn(realRender),
+      };
+
+      // Set the flag to trigger the workaround
+      triggerPrismaInitWorkaround = true;
+
+      const context = {
+        logger: mockLogger,
+        fs: fs,
+        templates: templatesMock,
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: { name: 'unknown', detected: false },
+          language: { name: 'javascript', detected: true },
+          packageManager: 'npm',
+          styling: { name: 'none', detected: false, version: null, configFile: null },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false
+          },
+          packageJson: {
+            name: 'test-project',
+            version: '1.0.0',
+            private: true
+          }
+        },
+        dryRun: false,
+        force: false,
+        nonInteractive: false,
+      };
+
+      const answers = {
+        provider: "sqlite",
+        helperPath: "lib2/prisma.ts",
+      };
+
+      await databaseGenerator.run(answers, context);
+
+      // Reset the flag
+      triggerPrismaInitWorkaround = false;
+
+      // Expect that the workaround was triggered: command should be "npx" and args should be the original args
+      // (which include --no-skills and custom output)
+      expect(fs.executeCommand).toHaveBeenCalledTimes(4); // deps, deps, prisma init, prisma generate
+      // The third call to executeCommand is the prisma init invocation
+      const prismaInitCall = (fs.executeCommand as Mock).mock.calls[2];
+      expect(prismaInitCall[0]).toBe("npx");
+      expect(prismaInitCall[1]).toEqual([
+        "prisma@7",
+        "init",
+        "--datasource-provider",
+        "sqlite",
+        "--no-skills",
+        "--output",
+        "../lib2/generated/prisma"
+      ]);
+    });
+
     test("install failure surfaces the normalized reason and the manager's own remediation", async () => {
       // Create a package.json so that validation passes
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
@@ -863,7 +1167,7 @@ describe("Database Generator", () => {
           framework: { name: 'unknown', detected: false },
           language: { name: 'javascript', detected: true },
           packageManager: 'pnpm',
-          styling: { name: 'none', detected: false, version: null, configFile: null },
+          styling: { name: 'none', detected: false, volume: null, configFile: null },
           capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
           packageJson: { name: 'test-project', version: '1.0.0', private: true },
         },
@@ -1029,10 +1333,10 @@ describe("Database Generator", () => {
           packageManager: 'npm',
           styling: { name: 'none', detected: false, version: null, configFile: null },
           capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
-          packageJson: { name: 'test-project', version: '1.0.0', private: true },
+          packageJson: { name: 'test-project', version: '1.0.0', private: true }
         },
         dryRun: false,
-        force: false,
+        force: false
       };
 
       await databaseGenerator.run({ provider: "sqlite" }, context);
@@ -1367,13 +1671,100 @@ describe("Database Generator", () => {
             version: '1.0.0',
             private: true
           }
-        },
+        } as ProjectAwareness,
         dryRun: true, // Dry run mode
         force: false,
       };
 
       const answers = {
         provider: "sqlite",
+      };
+
+      await expect(
+        databaseGenerator.run(answers, context),
+      ).resolves.not.toThrow();
+
+      // In dry-run mode, fs.writeFile should NOT be called for any files
+      expect(fs.writeFile).not.toHaveBeenCalled();
+
+      // But pathExists should still be called to check for package.json
+      expect(fs.pathExists).toHaveBeenCalledWith("package.json");
+
+      // And readFile should be called for package.json and template
+      expect(fs.readFile).toHaveBeenCalledWith("package.json", {
+        encoding: "utf8",
+      });
+      expect(fs.readFile).toHaveBeenCalledWith(
+        expect.stringContaining("prisma-client-lib-sqlite.tmpl"),
+        { encoding: "utf8" },
+      );
+
+      // Verify that executeCommand was NOT called for prisma init or prisma generate
+      expect(fs.executeCommand).not.toHaveBeenCalled();
+    });
+
+    test("should handle dry-run mode correctly with custom helper path", async () => {
+      // Create a package.json so that validation passes
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+      // Clear mock call history to not count the setup call
+      vi.clearAllMocks();
+
+      const mockLogger = {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as unknown as Logger;
+
+      const templatesMock = {
+        // Real renderer semantics (delegates to @dxgjs/templates render).
+        render: vi.fn(realRender),
+      };
+
+      const context = {
+        logger: mockLogger,
+        fs: fs,
+        templates: templatesMock,
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: {
+            name: 'unknown',
+            detected: false
+          },
+          language: {
+            name: 'javascript',
+            detected: true
+          },
+          packageManager: 'npm',
+          styling: {
+            name: 'none',
+            detected: false,
+            version: null,
+            configFile: null
+          },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false
+          },
+          packageJson: {
+            name: 'test-project',
+            version: '1.0.0',
+            private: true
+          }
+        } as ProjectAwareness,
+        dryRun: true, // Dry run mode
+        force: false,
+      };
+
+      const answers = {
+        provider: "sqlite",
+        helperPath: "lib2/prisma.ts",
       };
 
       await expect(
@@ -1440,7 +1831,7 @@ describe("Database Generator", () => {
       const answers = {}; // No provider specified
 
       await expect(databaseGenerator.run(answers, context)).rejects.toThrow(
-        "Missing required values in non-interactive mode: provider",
+        "Missing required values in non-interactive mode: provider"
       );
     });
   });

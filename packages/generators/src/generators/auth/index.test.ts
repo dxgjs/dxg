@@ -1,4 +1,24 @@
 import { describe, test, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
+import type { GeneratorContext } from "../../../src/types";
+import * as fs from "@dxgjs/fs";
+
+// Extract types from the actual fs module for proper mock typings
+type ReadFileOptions = Parameters<typeof fs.readFile>[1];
+type WriteFileOptions = Parameters<typeof fs.writeFile>[2];
+type StatOptions = Parameters<typeof fs.stat>[1];
+type MkdirOptions = Parameters<typeof fs.mkdir>[1];
+type Stats = ReturnType<typeof fs.stat>;
+
+interface MockFS {
+  pathExists: (path: string) => Promise<boolean>;
+  readFile: (path: string, options?: ReadFileOptions) => Promise<string | Buffer>;
+  writeFile: (path: string, data: string | Buffer, options?: WriteFileOptions) => Promise<void>;
+  stat: (path: string, options?: StatOptions) => Promise<Stats>;
+  mkdir: (path: string, options?: MkdirOptions) => Promise<void>;
+  executeCommand: () => Promise<void>;
+  _files: Map<string, string>;
+  _directories: Set<string>;
+}
 
 // We need to mock the modules before importing the authGenerator
 vi.mock("@dxgjs/prompts", async () => {
@@ -18,17 +38,17 @@ vi.mock("@dxgjs/prompts", async () => {
     // Remove unused imports that we actually removed from the implementation
     // text: vi.fn(),
     // confirm: vi.fn(),
-    select: vi.fn(),
+    // select: vi.fn(),
   };
 });
 
 vi.mock("@dxgjs/fs", async () => {
   const actual = await vi.importActual<typeof import("@dxgjs/fs")>("@dxgjs/fs");
-  const _mock = {
+  const _mock: MockFS = {
     ...actual,
     _files: new Map<string, string>(),
     _directories: new Set<string>(),
-    pathExists: vi.fn().mockImplementation(async function(this: any, path: string) {
+    pathExists: vi.fn().mockImplementation(async function(this: MockFS, path: string) {
       // Check if we have this file in our mock storage
       if (this._files.has(path)) {
         return true;
@@ -40,7 +60,7 @@ vi.mock("@dxgjs/fs", async () => {
       // Fall back to actual implementation for other paths
       return actual.pathExists(path);
     }),
-    readFile: vi.fn().mockImplementation(async function(this: any, path: string, options?: any) {
+    readFile: vi.fn().mockImplementation(async function(this: MockFS, path: string, options?: ReadFileOptions) {
       // Check if we have this file in our mock storage
       if (this._files.has(path)) {
         return this._files.get(path);
@@ -48,7 +68,7 @@ vi.mock("@dxgjs/fs", async () => {
       // Fall back to actual implementation for other paths
       return actual.readFile(path, options);
     }),
-    writeFile: vi.fn().mockImplementation(async function(this: any, path: string, data: string | Buffer, options?: any) {
+    writeFile: vi.fn().mockImplementation(async function(this: MockFS, path: string, data: string | Buffer, options?: WriteFileOptions) {
       // Store the file in our mock storage
       this._files.set(path, data.toString());
       // Also ensure parent directories are tracked
@@ -59,23 +79,23 @@ vi.mock("@dxgjs/fs", async () => {
       // Call actual writeFile (though in test env this might not do anything)
       return actual.writeFile(path, data, options);
     }),
-    stat: vi.fn().mockImplementation(async function(this: any, path: string) {
+    stat: vi.fn().mockImplementation(async function(this: MockFS, path: string, options?: StatOptions) {
       // Check if it's a file we have
       if (this._files.has(path)) {
         return {
           isDirectory: () => false,
-        };
+        } as Stats;
       }
       // Check if it's a directory we have
       if (this._directories.has(path)) {
         return {
           isDirectory: () => true,
-        };
+        } as Stats;
       }
       // Fall back to actual implementation
-      return actual.stat(path);
+      return actual.stat(path, options);
     }),
-    mkdir: vi.fn().mockImplementation(async function(this: any, path: string, options?: any) {
+    mkdir: vi.fn().mockImplementation(async function(this: MockFS, path: string, options?: MkdirOptions) {
       // Track the directory as created
       this._directories.add(path);
       // Also track parent directories
@@ -108,7 +128,7 @@ vi.mock("@antfu/ni", async () => {
   const actual = await vi.importActual("@antfu/ni");
   return {
     ...actual,
-    parseNi: vi.fn().mockReturnValue((agent: string, args: string[], ctx: any) => {
+    parseNi: vi.fn().mockReturnValue((agent: string, args: string[], ctx: GeneratorContext) => {
       // Simulate the behavior of parseNi for npm project with no args
       if (!agent && !args && !ctx) {
         return { command: "npm", args: [] };

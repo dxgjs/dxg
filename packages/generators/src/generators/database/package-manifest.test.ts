@@ -49,6 +49,9 @@ import { note as noteMock, prompt as promptMock } from "@dxgjs/prompts";
 import { createDependencyInstaller } from "../../install/installer";
 import * as path from "path";
 import * as os from "os";
+import type { PackageJson, FSInterface } from "../../../src/types";
+import type { Generator } from "../../../src/types";
+import type { ProjectAwareness } from "@dxgjs/workspace";
 
 vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
@@ -88,7 +91,7 @@ vi.mock("@dxgjs/fs", async () => {
       return actual.pathExists(filePath);
     }),
     readFile: vi.fn().mockImplementation(
-      async (filePath: string, options?: any) => {
+      async (filePath: string, options?: unknown) => {
         if (_files.has(filePath)) {
           return _files.get(filePath);
         }
@@ -159,7 +162,7 @@ vi.mock("@dxgjs/fs", async () => {
           const packages = dev ? args.slice(2) : args.slice(1);
           const manifest = JSON.parse(
             _files.get("package.json") ?? "{}",
-          ) as Record<string, any>;
+          ) as PackageJson;
           const section = dev
             ? (manifest.devDependencies ??= {})
             : (manifest.dependencies ??= {});
@@ -256,8 +259,8 @@ vi.mock("@dxgjs/templates", async () => {
   };
 });
 
-let databaseGenerator: any;
-let providerData: any;
+let databaseGenerator: Generator;
+let providerData: Record<string, unknown>;
 
 beforeAll(async () => {
   const indexModule = await import("./index");

@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest";
-import { Logger, LogLevel } from "./src/index";
+import { Logger } from "./src/index";
 
 describe("Logger (minimal contract)", () => {
   let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
@@ -13,7 +13,8 @@ describe("Logger (minimal contract)", () => {
     stdoutWriteSpy.mockRestore();
   });
 
-  const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*m/g, '');
+  // eslint-disable-next-line no-control-regex
+  const stripAnsi = (str: string) => str.replace(/\u001b\[[0-9;]*m/g, '');
 
   const getLastLog = (): string => {
     const calls = stdoutWriteSpy.mock.calls;
@@ -33,7 +34,8 @@ describe("Logger (minimal contract)", () => {
 
     expect(stdoutWriteSpy).toHaveBeenCalledTimes(3); // info, warn, error
     const logs = getAllLogs();
-    expect(logs[logs.length - 1]).toContain("] ERROR ") && expect(logs[logs.length - 1]).toContain("error message");
+    expect(logs[logs.length - 1]).toContain("] ERROR ");
+    expect(logs[logs.length - 1]).toContain("error message");
   });
 
   test("minLevel = 'debug' shows all levels", () => {
@@ -73,7 +75,8 @@ describe("Logger (minimal contract)", () => {
 
     expect(stdoutWriteSpy).toHaveBeenCalledTimes(1); // error only
     const lastLog = getLastLog();
-    expect(lastLog).toContain("] ERROR ") && expect(lastLog).toContain("error message");
+    expect(lastLog).toContain("] ERROR ");
+    expect(lastLog).toContain("error message");
   });
 
   test("output format matches [timestamp] LEVEL message", () => {
@@ -105,12 +108,15 @@ describe("Logger (minimal contract)", () => {
 
     const logs = stdoutWriteSpy.mock.calls.map(call => call[0]); // raw logs with ANSI
 
-    // Info should be green (\x1b[32m)
-    expect(logs[0]).toMatch(/\x1b\[32m\[.+\] INFO\x1b\[0m info message\n/);
-    // Warn should be yellow (\x1b[33m)
-    expect(logs[1]).toMatch(/\x1b\[33m\[.+\] WARN\x1b\[0m warn message\n/);
-    // Error should be red (\x1b[31m)
-    expect(logs[2]).toMatch(/\x1b\[31m\[.+\] ERROR\x1b\[0m error message\n/);
+    // Info should be green (\u001b[32m)
+    // eslint-disable-next-line no-control-regex
+    expect(logs[0]).toMatch(/\u001b\[32m\[.+\] INFO\u001b\[0m info message\n/);
+    // Warn should be yellow (\u001b[33m)
+    // eslint-disable-next-line no-control-regex
+    expect(logs[1]).toMatch(/\u001b\[33m\[.+\] WARN\u001b\[0m warn message\n/);
+    // Error should be red (\u001b[31m)
+    // eslint-disable-next-line no-control-regex
+    expect(logs[2]).toMatch(/\u001b\[31m\[.+\] ERROR\u001b\[0m error message\n/);
   });
 
   test("output uses process.stdout.write", () => {
