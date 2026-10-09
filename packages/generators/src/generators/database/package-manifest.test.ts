@@ -49,9 +49,15 @@ import { note as noteMock, prompt as promptMock } from "@dxgjs/prompts";
 import { createDependencyInstaller } from "../../install/installer";
 import * as path from "path";
 import * as os from "os";
-import type { PackageJson, FSInterface } from "../../../src/types";
-import type { Generator } from "../../../src/types";
+import type { FSInterface, Generator } from "../../types";
 import type { ProjectAwareness } from "@dxgjs/workspace";
+
+/**
+ * PackageJson via the public awareness surface: @dxgjs/workspace does not
+ * export it directly, and a cross-package relative import would violate
+ * the package's rootDir under typecheck.
+ */
+type PackageJson = ProjectAwareness["packageJson"];
 
 vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
@@ -95,7 +101,12 @@ vi.mock("@dxgjs/fs", async () => {
         if (_files.has(filePath)) {
           return _files.get(filePath);
         }
-        return actual.readFile(filePath, options);
+        // Fallback (absolute template paths): pass the options through
+        // with the real module's own parameter type.
+        return actual.readFile(
+          filePath,
+          options as Parameters<typeof actual.readFile>[1],
+        );
       },
     ),
     writeFile: vi.fn().mockImplementation(
@@ -338,13 +349,13 @@ function makeContext(
     awareness: {
       projectRoot: ".",
       workspaceRoot: ".",
-      framework: { name: "next-app", detected: true },
-      language: { name: "typescript", detected: true },
+      framework: { name: "next-app" as const, detected: true },
+      language: { name: "typescript" as const, detected: true },
       packageManager: "pnpm",
       styling: {
         name: "tailwindcss",
         detected: true,
-        version: "v4",
+        version: "v4" as const,
         configFile: null,
       },
       capabilities: {
@@ -361,7 +372,7 @@ function makeContext(
     // The real installer bound to the mocked fs + npm agent (matching the
     // @antfu/ni and executeCommand mocks above) — executeDatabase requires
     // one; approvals land in the same in-memory store as everything else.
-    installer: createDependencyInstaller({ agent: "npm", fs: fs as any }),
+    installer: createDependencyInstaller({ agent: "npm", fs: fs as FSInterface }),
     dryRun: false,
     force: false,
     ...overrides,

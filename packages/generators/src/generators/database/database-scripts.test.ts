@@ -40,8 +40,15 @@ import {
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import { render as realRender } from "@dxgjs/templates";
-import type { FSInterface, PackageJson } from "../../../src/types";
+import type { FSInterface, Generator, GeneratorContext } from "../../types";
 import type { ProjectAwareness } from "@dxgjs/workspace";
+
+/**
+ * PackageJson via the public awareness surface: @dxgjs/workspace does not
+ * export it directly, and a cross-package relative import would violate
+ * the package's rootDir under typecheck.
+ */
+type PackageJson = ProjectAwareness["packageJson"];
 import {
   note as noteMock,
   prompt as promptMock,
@@ -51,7 +58,6 @@ import {
 import { createDependencyInstaller } from "../../install/installer";
 import * as path from "path";
 import * as os from "os";
-import type { Generator } from "../../../src/types";
 
 vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
@@ -114,17 +120,27 @@ vi.mock("@dxgjs/fs", async () => {
         if (_files.has(filePath)) {
           return _files.get(filePath);
         }
-        return actual.readFile(filePath, options);
+        // Fallback (absolute template paths): pass the options through
+        // with the real module's own parameter type.
+        return actual.readFile(
+          filePath,
+          options as Parameters<typeof actual.readFile>[1],
+        );
       },
     ),
     writeFile: vi.fn().mockImplementation(
-      async (filePath: string, data: string | Buffer, options?: unknown) => {
+      async (filePath: string, data: string | Buffer) => {
+        // Store-ONLY (same contract as idempotence.test.ts): the project
+        // image lives entirely in the mock — a real write would ENOENT on
+        // helper paths whose directories were only "created" in the store
+        // (mkdir is store-only here, unlike index.test.ts which also
+        // calls the real one).
         _files.set(filePath, data.toString());
         const dir = filePath.split("/").slice(0, -1).join("/");
         if (dir) {
           _directories.add(dir);
         }
-        return actual.writeFile(filePath, data, options);
+        return undefined;
       },
     ),
     stat: vi.fn().mockImplementation(async (filePath: string) => {
@@ -173,7 +189,7 @@ vi.mock("@dxgjs/fs", async () => {
           const packages = dev ? args.slice(2) : args.slice(1);
           const manifest = JSON.parse(
             _files.get("package.json") ?? "{}",
-          ) as Record<string, unknown>;
+          ) as PackageJson;
           const section = dev
             ? (manifest.devDependencies ??= {})
             : (manifest.dependencies ??= {});
@@ -183,6 +199,16 @@ vi.mock("@dxgjs/fs", async () => {
             section[name] = at > 0 ? spec.slice(at + 1) : "*";
           }
           _files.set("package.json", JSON.stringify(manifest, null, 2));
+          // better-sqlite3's (approved) install script lands the binding —
+          // the native artifact verifyDatabase probes. Spec-prefix match:
+          // the plan pins "better-sqlite3@^12.6.0" (same fidelity as
+          // idempotence.test.ts's fake).
+          if (packages.some((s: string) => s.startsWith("better-sqlite3"))) {
+            _files.set(
+              "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+              "<binary>",
+            );
+          }
         }
         // Simulate `prisma init` (prisma@7.10.0, non-bun): it owns and
         // writes the root prisma7.config.ts plus the prisma/ scaffolding
@@ -319,7 +345,9 @@ function readPrismaConfig(): string {
   return raw!;
 }
 
-function makeContext(overrides: Partial<GeneratorContext> = {}): GeneratorContext {
+function makeContext(
+  overrides: Partial<GeneratorContext> | Record<string, unknown> = {},
+): GeneratorContext {
   return {
     logger: {
       info: vi.fn(),
@@ -335,7 +363,7 @@ function makeContext(overrides: Partial<GeneratorContext> = {}): GeneratorContex
       projectRoot: ".",
       workspaceRoot: ".",
       framework: { name: "next-app" as const, detected: true },
-      language: { name: "typescript", detected: true },
+      language: { name: "typescript" as const, detected: true },
       packageManager: "pnpm",
       styling: {
         name: "tailwindcss",
@@ -450,14 +478,14 @@ describe("interactive database scripts phase", () => {
     );
 
     const final = readManifestFromDisk();
-    expect(final.scripts["db:generate"]).toBe("prisma generate");
-    expect(final.scripts["db:push"]).toBe("prisma db push");
-    expect(final.scripts["db:pull"]).toBe("prisma db pull");
-    expect(final.scripts["db:studio"]).toBe("prisma studio");
+    expect(final.scripts!["db:generate"]).toBe("prisma generate");
+    expect(final.scripts!["db:push"]).toBe("prisma db push");
+    expect(final.scripts!["db:pull"]).toBe("prisma db pull");
+    expect(final.scripts!["db:studio"]).toBe("prisma studio");
     // The recommended set includes generate, push, pull, studio.
-    expect(final.scripts["db:migrate"]).toBeUndefined();
-    expect(final.scripts["db:seed"]).toBeUndefined();
-    expect(final.scripts["db:reset"]).toBeUndefined();
+    expect(final.scripts!["db:migrate"]).toBeUndefined();
+    expect(final.scripts!["db:seed"]).toBeUndefined();
+    expect(final.scripts!["db:reset"]).toBeUndefined();
     // Never prompted: the answer came from the CLI answers.
     expect(promptMock).not.toHaveBeenCalled();
   });
@@ -498,10 +526,10 @@ describe("interactive database scripts phase", () => {
     expect(String(generate.hint || generate.label)).toMatch(/prisma client/i);
 
     const final = readManifestFromDisk();
-    expect(final.scripts["db:generate"]).toBe("prisma generate");
-    expect(final.scripts["db:migrate"]).toBe("prisma migrate dev");
-    expect(final.scripts["db:push"]).toBeUndefined();
-    expect(final.scripts["db:studio"]).toBeUndefined();
+    expect(final.scripts!["db:generate"]).toBe("prisma generate");
+    expect(final.scripts!["db:migrate"]).toBe("prisma migrate dev");
+    expect(final.scripts!["db:push"]).toBeUndefined();
+    expect(final.scripts!["db:studio"]).toBeUndefined();
   });
 
   test("skip: package.json is untouched by the scripts phase and the skip is reported", async () => {
@@ -532,7 +560,7 @@ describe("interactive database scripts phase", () => {
     );
     expect(dbScriptKeys).toEqual([]);
     // Pre-existing scripts and fields intact.
-    expect(final.scripts.dev).toBe("next dev");
+    expect(final.scripts!.dev).toBe("next dev");
     expect(final.name).toBe("my-app");
     const summary = operationSummary();
     expect(summary.toLowerCase()).toContain("skip");
@@ -555,8 +583,8 @@ describe("interactive database scripts phase", () => {
 
     const final = readManifestFromDisk();
     // Exactly one db:generate, still the same command.
-    expect(final.scripts["db:generate"]).toBe("prisma generate");
-    const dbScriptKeys = Object.keys(final.scripts).filter((k) =>
+    expect(final.scripts!["db:generate"]).toBe("prisma generate");
+    const dbScriptKeys = Object.keys(final.scripts!).filter((k) =>
       k.startsWith("db:"),
     );
     expect(dbScriptKeys.filter((k) => k === "db:generate")).toHaveLength(1);
@@ -583,8 +611,8 @@ describe("interactive database scripts phase", () => {
     );
 
     const final = readManifestFromDisk();
-    expect(final.scripts["db:generate"]).toBe("prisma generate --custom");
-    expect(final.scripts["db:push"]).toBe("prisma db push");
+    expect(final.scripts!["db:generate"]).toBe("prisma generate --custom");
+    expect(final.scripts!["db:push"]).toBe("prisma db push");
     const summary = operationSummary();
     expect(summary.toLowerCase()).toContain("conflict");
     expect(summary).toContain("prisma generate --custom");
@@ -759,7 +787,7 @@ describe("interactive database scripts phase", () => {
 
     const final = readManifestFromDisk();
     // The npm script...
-    expect(final.scripts["db:seed"]).toBe("prisma db seed");
+    expect(final.scripts!["db:seed"]).toBe("prisma db seed");
     // ...the seed command configured where Prisma 7's `db seed` reads it:
     // migrations.seed in the prisma7.config.ts file — NOT a `prisma.seed`
     // field in package.json (that field is only read by the init flow's
@@ -773,10 +801,10 @@ describe("interactive database scripts phase", () => {
     // ...importing the shared Prisma Client from lib/prisma.ts...
     expect(seedFile).toContain(`from "../lib/prisma"`);
     // ...and tsx lands in devDependencies (it runs the seed file).
-    expect(final.devDependencies.tsx).toBeDefined();
+    expect(final.devDependencies!.tsx).toBeDefined();
     // Unrelated manifest fields stay intact.
     expect(final.name).toBe("my-app");
-    expect(final.dependencies.next).toBe("16.2.12");
+    expect(final.dependencies!.next).toBe("16.2.12");
   });
 
   test("db:seed is fully idempotent on re-run (script, config, file)", async () => {
@@ -935,7 +963,7 @@ describe("interactive database scripts phase", () => {
     );
 
     const final = readManifestFromDisk();
-    expect(final.scripts["db:seed"]).toBeUndefined();
+    expect(final.scripts!["db:seed"]).toBeUndefined();
     // No seed command in the Prisma config either, and no prisma section
     // in package.json (the seed phase never runs).
     const config = readPrismaConfig();
@@ -993,12 +1021,12 @@ describe("interactive database scripts phase", () => {
     // the seed contract still land (no partial no-op, no partial clobber):
     // the db:seed npm script...
     const final = readManifestFromDisk();
-    expect(final.scripts["db:seed"]).toBe("prisma db seed");
-    expect(final.scripts["db:generate"]).toBe("prisma generate");
+    expect(final.scripts!["db:seed"]).toBe("prisma db seed");
+    expect(final.scripts!["db:generate"]).toBe("prisma generate");
     // ...the seed file skeleton...
     expect(fsMockStore._files.has("prisma/seed.ts")).toBe(true);
     // ...the tsx runner...
-    expect(final.devDependencies.tsx).toBeDefined();
+    expect(final.devDependencies!.tsx).toBeDefined();
     // ...while the user's config entry is preserved verbatim.
     expect(readPrismaConfig()).toBe(custom);
     // Both facts are visible in the summary (conflict + additions).
@@ -1041,7 +1069,7 @@ describe("interactive database scripts phase", () => {
     expect(config).toBe(preConfigured);
     expect(config.match(/seed:/g)).toHaveLength(1);
     const final = readManifestFromDisk();
-    expect(final.scripts["db:seed"]).toBe("prisma db seed");
+    expect(final.scripts!["db:seed"]).toBe("prisma db seed");
     const summary = operationSummary();
     expect(summary.toLowerCase()).not.toContain("conflict");
     expect(summary.toLowerCase()).toContain("already exists");

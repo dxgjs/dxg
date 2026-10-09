@@ -16,11 +16,11 @@ import * as path from "path";
 import * as os from "os";
 import { getCliCommand } from "@antfu/ni";
 import { createDependencyInstaller } from "../../install";
-import type { GeneratorContext, Generator } from "../../types";
+import type { Generator } from "../../types";
 import type { FSInterface } from "../../types";
-import type { PackageJson } from "@dxgjs/workspace";
 import type { ProjectAwareness } from "@dxgjs/workspace";
-import { ProviderData, planDatabase as planDatabaseFn, validateDatabase as validateDatabaseFn } from "./index";
+import { providerData as providerDataValue, planDatabase as planDatabaseFn, validateDatabase as validateDatabaseFn } from "./index";
+import type { DatabaseInspection } from "./inspect";
 
 // Hoisted shared mock storage: the @dxgjs/fs mock factory needs it at
 // hoisted time (vi.mock factories run before module scope), and the
@@ -250,11 +250,16 @@ vi.mock("@antfu/ni", () => {
     parseNi: vi.fn().mockReturnValue({ command: "npm-mock", args: [] }),
     getCliCommand: vi
       .fn()
-      .mockImplementation((agentResult: { command: string; args: string[] }, args: string[]) => {
-        // Use the parameters to avoid TS6133
-        // Simulate the behavior of getCliCommand for an npm project.
+      .mockImplementation((_parseFn: unknown, args: string[]) => {
+        // The first production argument is the parse FUNCTION (parseNi /
+        // parseNlx), not a command spec — the install batches below must
+        // resolve to the literal "npm-mock" command the executeCommand
+        // fake keys on (same shape as idempotence.test.ts's mock). The
+        // previous agentResult.command read resolved to undefined, so
+        // installs silently skipped the fake: no binding, no manifest
+        // persistence, and verifyDatabase failed every sqlite run.
         if (!args || args.length === 0) {
-          return { command: agentResult.command, args: [] };
+          return { command: "npm-mock", args: [] };
         }
         // For prisma init — keyed to the EXACT production argument shape
         // (executeDatabase calls getCliCommand(parseNlx, ["prisma@7",
@@ -296,14 +301,14 @@ vi.mock("@antfu/ni", () => {
         // For dependency installation commands
         if (args.includes("-D") && !args.includes("add")) {
           return {
-            command: agentResult.command,
+            command: "npm-mock",
             args: ["install", "-D", ...args.slice(1)],
           };
         }
         if (!args.includes("-D") && !args.includes("add")) {
-          return { command: agentResult.command, args: ["install", ...args] };
+          return { command: "npm-mock", args: ["install", ...args] };
         }
-        return { command: agentResult.command, args: [...args] };
+        return { command: "npm-mock", args: [...args] };
       }),
     executeCommand: vi.fn().mockResolvedValue(undefined),
   };
@@ -311,9 +316,9 @@ vi.mock("@antfu/ni", () => {
 
 // Import the database generator and provider data for testing
 let databaseGenerator: Generator;
-let providerData: ProviderData;
-let planDatabase: ReturnType<typeof planDatabaseFn>;
-let validateDatabase: ReturnType<typeof validateDatabaseFn>;
+let providerData: typeof providerDataValue;
+let planDatabase: typeof planDatabaseFn;
+let validateDatabase: typeof validateDatabaseFn;
 
 beforeAll(async () => {
   const indexModule = await import("./index");
@@ -393,7 +398,7 @@ describe("Database Generator", () => {
     expect(prompts[0].default).toBe("sqlite");
     const choices = prompts[0].choices;
     expect(Array.isArray(choices)).toBe(true);
-    expect(choices!.length).toBe(Object.values(providerData).length); // 7 providers
+    expect(choices!.length).toBe(Object.values(providerDataValue).length); // 7 providers
 
     // Check choices
     const choiceValues = choices!.map((c: { value: string }) => c.value);
@@ -420,6 +425,38 @@ describe("Database Generator", () => {
     // Since validateDatabase always returns true, any answers should pass
     expect(typeof validateDatabase).toBe("function");
   });
+
+  /**
+   * Builds a DatabaseInspection for planDatabase's state-aware paths.
+   * Defaults describe a FRESH project (no schema, no config, nothing
+   * declared); each test overrides only the fields it exercises.
+   */
+  function makeInspection(
+    overrides: Partial<DatabaseInspection> = {},
+  ): DatabaseInspection {
+    return {
+      schemaExists: false,
+      configExists: false,
+      prismaDirExists: false,
+      prismaDirEmpty: false,
+      schemaHasGenerator: false,
+      generatorOutput: "lib/generated/prisma",
+      generatorOutputEscapesRoot: false,
+      datasourceLegacyForm: false,
+      prismaVersion: "missing",
+      prismaDeclaredSpec: undefined,
+      clientVersion: "missing",
+      clientDeclaredSpec: undefined,
+      providerDependenciesMissing: [],
+      prismaInstalled: false,
+      clientInstalled: false,
+      envExists: false,
+      envHasDatabaseUrl: false,
+      helperCandidates: [],
+      defaultHelperPath: "lib/prisma.ts",
+      ...overrides,
+    };
+  }
 
   describe("planning", () => {
     test("should plan correctly for SQLite provider with default helper path", async () => {
@@ -631,6 +668,68 @@ describe("Database Generator", () => {
       expect(plan.generatorOutput).toBe("lib/generated/prisma");
       expect(plan.prismaInitOutput).toBe("../lib/generated/prisma");
     });
+
+    // Generator-output resolution (Phase 1 stabilization): the plan must
+    // agree with where prisma generate will actually write the client. A
+    // user-owned schema that declares its own output wins over the
+    // helper-derived default — the old plan ignored it, so the template
+    // import and verifyDatabase probed the wrong path.
+    test("uses the user schema's declared generator output when the schema owns one", () => {
+      const inspection = makeInspection({
+        schemaExists: true,
+        configExists: true,
+        schemaHasGenerator: true,
+        generatorOutput: "src/generated/prisma",
+      });
+      const plan = planDatabase({ provider: "sqlite" }, inspection);
+
+      expect(plan.generatorOutput).toBe("src/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../src/generated/prisma");
+      // The template import is computed FROM the schema's output, and the
+      // plan-level field matches the template data (single resolution).
+      expect(plan.generatedClientImport).toBe("../src/generated/prisma/client");
+      // The project already owns schema + config: init must not run.
+      expect(plan.initRequired).toBe(false);
+    });
+
+    test("falls back to the helper-derived default when the schema's output escapes the root", () => {
+      const inspection = makeInspection({
+        schemaExists: true,
+        schemaHasGenerator: true,
+        generatorOutputEscapesRoot: true,
+      });
+      const plan = planDatabase(
+        { provider: "sqlite", helperPath: "lib2/prisma.ts" },
+        inspection,
+      );
+
+      expect(plan.generatorOutput).toBe("lib2/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib2/generated/prisma");
+    });
+
+    test("falls back to the helper-derived default when the schema has no generator block", () => {
+      const inspection = makeInspection({
+        schemaExists: true,
+        schemaHasGenerator: false,
+      });
+      const plan = planDatabase(
+        { provider: "sqlite", helperPath: "src/db/prisma.ts" },
+        inspection,
+      );
+
+      expect(plan.generatorOutput).toBe("src/db/generated/prisma");
+    });
+
+    test("falls back to the helper-derived default on a fresh project (no schema)", () => {
+      const inspection = makeInspection();
+      const plan = planDatabase({ provider: "sqlite" }, inspection);
+
+      // init will run: the output passed to prisma init is exactly the
+      // deterministic default derived from the helper's own directory.
+      expect(plan.generatorOutput).toBe("lib/generated/prisma");
+      expect(plan.prismaInitOutput).toBe("../lib/generated/prisma");
+      expect(plan.initRequired).toBe(true);
+    });
   });
 
   describe("template rendering (Prisma v7 correctness)", () => {
@@ -707,10 +806,14 @@ describe("Database Generator", () => {
         // 1. No unresolved template syntax may survive rendering.
         expect(rendered).not.toMatch(/\{\{[^}]*\}\}/);
 
-        // 2. PrismaClient must be imported from DXG's generated client output
-        // Computed relatively from helper to generator output
+        // 2. PrismaClient must be imported from DXG's generated client
+        // output. The deterministic output rule co-locates the client with
+        // the helper (custom/helpers/prisma.ts →
+        // custom/helpers/generated/prisma), so the import stays INSIDE the
+        // project — the old escaping heuristic generated the client at
+        // ../../../generated/prisma, one level ABOVE the project root.
         expect(rendered).toContain(
-          'import { PrismaClient } from "../../../generated/prisma/client";',
+          'import { PrismaClient } from "./generated/prisma/client";',
         );
 
         // 3. Provider-correct adapter instantiation per the Prisma v7 reference.
@@ -755,11 +858,11 @@ describe("Database Generator", () => {
           projectRoot: '.',
           workspaceRoot: '.',
           framework: {
-            name: 'unknown',
+            name: 'unknown' as const,
             detected: false
           },
           language: {
-            name: 'javascript',
+            name: 'javascript' as const,
             detected: true
           },
           packageManager: 'npm',
@@ -854,11 +957,11 @@ describe("Database Generator", () => {
           projectRoot: '.',
           workspaceRoot: '.',
           framework: {
-            name: 'unknown',
+            name: 'unknown' as const,
             detected: false
           },
           language: {
-            name: 'javascript',
+            name: 'javascript' as const,
             detected: true
           },
           packageManager: 'npm',
@@ -952,8 +1055,8 @@ describe("Database Generator", () => {
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
-          framework: { name: 'unknown', detected: false },
-          language: { name: 'javascript', detected: true },
+          framework: { name: 'unknown' as const, detected: false },
+          language: { name: 'javascript' as const, detected: true },
           packageManager: 'npm',
           styling: { name: 'none', detected: false, version: null, configFile: null },
           capabilities: {
@@ -982,7 +1085,7 @@ describe("Database Generator", () => {
       // Verify that fs.readFile was NOT called for a schema.prisma.tmpl template
       // (since we removed it and Prisma owns it now)
       const schemaTemplateCalls = (fs.readFile as Mock).mock.calls.filter(
-        (call: [string, unknown?]) =>
+        (call: any[]) =>
           typeof call[0] === "string" &&
           call[0].includes("schema.prisma.tmpl"),
       );
@@ -1017,8 +1120,8 @@ describe("Database Generator", () => {
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
-          framework: { name: 'unknown', detected: false },
-          language: { name: 'javascript', detected: true },
+          framework: { name: 'unknown' as const, detected: false },
+          language: { name: 'javascript' as const, detected: true },
           packageManager: 'npm',
           styling: { name: 'none', detected: false, version: null, configFile: null },
           capabilities: {
@@ -1093,8 +1196,8 @@ describe("Database Generator", () => {
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
-          framework: { name: 'unknown', detected: false },
-          language: { name: 'javascript', detected: true },
+          framework: { name: 'unknown' as const, detected: false },
+          language: { name: 'javascript' as const, detected: true },
           packageManager: 'npm',
           styling: { name: 'none', detected: false, version: null, configFile: null },
           capabilities: {
@@ -1164,10 +1267,10 @@ describe("Database Generator", () => {
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
-          framework: { name: 'unknown', detected: false },
-          language: { name: 'javascript', detected: true },
+          framework: { name: 'unknown' as const, detected: false },
+          language: { name: 'javascript' as const, detected: true },
           packageManager: 'pnpm',
-          styling: { name: 'none', detected: false, volume: null, configFile: null },
+          styling: { name: 'none', detected: false, version: null, configFile: null },
           capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
           packageJson: { name: 'test-project', version: '1.0.0', private: true },
         },
@@ -1238,8 +1341,8 @@ describe("Database Generator", () => {
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
-          framework: { name: 'unknown', detected: false },
-          language: { name: 'javascript', detected: true },
+          framework: { name: 'unknown' as const, detected: false },
+          language: { name: 'javascript' as const, detected: true },
           packageManager: 'npm',
           styling: { name: 'none', detected: false, version: null, configFile: null },
           capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
@@ -1264,7 +1367,7 @@ describe("Database Generator", () => {
       expect(blockedNote).toBeDefined();
       expect(String(blockedNote![0])).toContain("better-sqlite3");
       // The remediation message carries the per-manager commands.
-      const verifyError = await runPromise.catch((e: Error) => e);
+      const verifyError = await runPromise.catch((e: Error) => e) as Error;
       expect(verifyError.message).toContain("pnpm approve-builds");
     });
 
@@ -1285,8 +1388,8 @@ describe("Database Generator", () => {
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
-          framework: { name: 'unknown', detected: false },
-          language: { name: 'javascript', detected: true },
+          framework: { name: 'unknown' as const, detected: false },
+          language: { name: 'javascript' as const, detected: true },
           packageManager: 'npm',
           styling: { name: 'none', detected: false, version: null, configFile: null },
           capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
@@ -1328,8 +1431,8 @@ describe("Database Generator", () => {
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
-          framework: { name: 'unknown', detected: false },
-          language: { name: 'javascript', detected: true },
+          framework: { name: 'unknown' as const, detected: false },
+          language: { name: 'javascript' as const, detected: true },
           packageManager: 'npm',
           styling: { name: 'none', detected: false, version: null, configFile: null },
           capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
@@ -1385,8 +1488,8 @@ describe("Database Generator", () => {
       awareness: {
         projectRoot: ".",
         workspaceRoot: ".",
-        framework: { name: "unknown", detected: false },
-        language: { name: "javascript", detected: true },
+        framework: { name: "unknown" as const, detected: false },
+        language: { name: "javascript" as const, detected: true },
         packageManager: "npm",
         styling: {
           name: "none",
@@ -1645,11 +1748,11 @@ describe("Database Generator", () => {
           projectRoot: '.',
           workspaceRoot: '.',
           framework: {
-            name: 'unknown',
+            name: 'unknown' as const,
             detected: false
           },
           language: {
-            name: 'javascript',
+            name: 'javascript' as const,
             detected: true
           },
           packageManager: 'npm',
@@ -1731,11 +1834,11 @@ describe("Database Generator", () => {
           projectRoot: '.',
           workspaceRoot: '.',
           framework: {
-            name: 'unknown',
+            name: 'unknown' as const,
             detected: false
           },
           language: {
-            name: 'javascript',
+            name: 'javascript' as const,
             detected: true
           },
           packageManager: 'npm',
@@ -1817,12 +1920,12 @@ describe("Database Generator", () => {
         awareness: {
           projectRoot: '.',
           workspaceRoot: '.',
-          framework: undefined,
-          language: undefined,
+          framework: { name: 'unknown' as const, detected: false },
+          language: { name: 'javascript' as const, detected: false },
           packageManager: 'npm',
-          styling: undefined,
-          capabilities: {},
-          packageJson: {}
+          styling: { name: 'none', detected: false, version: null, configFile: null },
+          capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
+          packageJson: { name: 'test-project', private: true },
         },
         dryRun: true, // Dry run to avoid prompts
         force: false,

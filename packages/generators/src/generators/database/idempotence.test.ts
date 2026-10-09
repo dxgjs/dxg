@@ -33,9 +33,15 @@ import { note as noteMock } from "@dxgjs/prompts";
 import { createDependencyInstaller } from "../../install/installer";
 import * as path from "path";
 import * as os from "os";
-import type { PackageJson, FSInterface } from "../../../src/types";
-import type { Generator } from "../../../src/types";
+import type { FSInterface, Generator } from "../../types";
 import type { ProjectAwareness } from "@dxgjs/workspace";
+
+/**
+ * PackageJson via the public awareness surface: @dxgjs/workspace does not
+ * export it directly, and a cross-package relative import would violate
+ * the package's rootDir under typecheck.
+ */
+type PackageJson = ProjectAwareness["packageJson"];
 
 vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
@@ -101,7 +107,12 @@ vi.mock("@dxgjs/fs", async () => {
         if (_files.has(filePath)) {
           return _files.get(filePath);
         }
-        return actual.readFile(filePath, options);
+        // Fallback (absolute template paths): pass the options through
+        // with the real module's own parameter type.
+        return actual.readFile(
+          filePath,
+          options as Parameters<typeof actual.readFile>[1],
+        );
       },
     ),
     writeFile: vi.fn().mockImplementation(
@@ -349,8 +360,8 @@ function makeContext(overrides: Record<string, unknown> = {}) {
         hasDocker: false,
       },
       packageJson: JSON.parse(JSON.stringify(MY_APP_PACKAGE_JSON)),
-    },
-    installer: createDependencyInstaller({ agent: "npm", fs: fs as any }),
+    } as ProjectAwareness,
+    installer: createDependencyInstaller({ agent: "npm", fs: fs as FSInterface }),
     dryRun: false,
     force: false,
     nonInteractive: false,
@@ -364,13 +375,18 @@ function makeContext(overrides: Record<string, unknown> = {}) {
  * so "install never executed" is asserted via the absence of install-shaped
  * calls — the exact contract the decision document requires.
  */
-function installCalls(): string[][] {
+function installCalls(): [string, string[]][] {
   return (fs.executeCommand as Mock).mock.calls
     .filter(
       (call): call is [string, string[]] => {
         return (
           Array.isArray(call) &&
-          call.length === 2 &&
+          // >= 2, NOT === 2: the real seam passes a third options argument
+          // (executeCommand(command, args, { cwd, all/stdio })) — the exact
+          // length check silently dropped every real call from these
+          // helpers, making the "command executed" assertions below
+          // vacuous while breaking the "command expected" ones.
+          call.length >= 2 &&
           typeof call[0] === 'string' &&
           Array.isArray(call[1]) &&
           call[1].every((arg): arg is string => typeof arg === 'string')
@@ -384,13 +400,15 @@ function installCalls(): string[][] {
     });
 }
 
-function prismaCommandCalls(): string[][] {
+function prismaCommandCalls(): [string, string[]][] {
   return (fs.executeCommand as Mock).mock.calls
     .filter(
       (call): call is [string, string[]] => {
         return (
           Array.isArray(call) &&
-          call.length === 2 &&
+          // >= 2, NOT === 2: same fix as installCalls — the real prisma
+          // calls carry a third options argument ({ cwd, stdio: "inherit" }).
+          call.length >= 2 &&
           typeof call[0] === 'string' &&
           Array.isArray(call[1]) &&
           call[1].every((arg): arg is string => typeof arg === 'string')
@@ -490,7 +508,7 @@ describe("idempotence gates (fail-early, before any installation)", () => {
     expect(prismaCommandCalls()).toHaveLength(0);
     // The declared version is untouched — no silent flip to ^7.10.0.
     const manifest = readManifestFromDisk();
-    expect(manifest.devDependencies.prisma).toBe("6.20.0");
+    expect(manifest.devDependencies!.prisma).toBe("6.20.0");
   });
 
   test("declared @prisma/client ^7.0.0 → conflict (unverified floor)", async () => {
@@ -830,10 +848,15 @@ describe("helper path resolution and dynamic imports", () => {
     const helper = fsMockStore._files.get("src/lib/db.ts");
     expect(helper).toBeDefined();
     expect(fsMockStore._files.has("lib/prisma.ts")).toBe(false);
-    // The generated-client import is computed relative to src/lib/db.ts:
-    // lib/generated/prisma from src/lib → ../../lib/generated/prisma/client.
+    // The generated-client import is computed FROM the same output the
+    // init/generate pair actually uses (planDatabase's single resolution):
+    // src/lib/db.ts co-locates the client at src/lib/generated/prisma →
+    // ./generated/prisma/client. The OLD behavior pinned
+    // ../../lib/generated/prisma/client — the constant default — while
+    // init wrote the client to src/lib/generated/prisma: a
+    // runtime-broken import DXG must never ship.
     expect(helper).toContain(
-      'import { PrismaClient } from "../../lib/generated/prisma/client";',
+      'import { PrismaClient } from "./generated/prisma/client";',
     );
   });
 
@@ -909,8 +932,12 @@ describe("helper path resolution and dynamic imports", () => {
 
     const helper = fsMockStore._files.get("src/helpers/db.ts");
     expect(helper).toBeDefined();
+    // Normalized to src/helpers/db.ts → the client lands at
+    // src/helpers/generated/prisma (co-located with the helper's own
+    // directory), so the import stays relative and INSIDE the project —
+    // coherent with where prisma init --output actually writes it.
     expect(helper).toContain(
-      'import { PrismaClient } from "../../lib/generated/prisma/client";',
+      'import { PrismaClient } from "./generated/prisma/client";',
     );
   });
 });

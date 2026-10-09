@@ -109,10 +109,13 @@ export function mergeAllowBuildsBlock(
   let end = keyIdx + 1;
   while (end < lines.length) {
     const line = lines[end];
-    if (line.trim() === "") break;
-    if (!/^\s/.test(line)) break;
-    const entry = line.match(/^\s+([^\s:][^:]*):\s*(.*)$/);
-    if (entry) existingNames.add(unquoteYamlKey(entry[1].trim()));
+    if (!/^\s/.test(line)) break; // Exit block when line doesn't start with whitespace
+
+    // Only process non-empty lines within the block
+    if (line.trim() !== "") {
+      const entry = line.match(/^\s+([^\s:][^:]*):\s*(.*)$/);
+      if (entry) existingNames.add(unquoteYamlKey(entry[1].trim()));
+    }
     end += 1;
   }
 

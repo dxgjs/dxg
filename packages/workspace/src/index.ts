@@ -52,12 +52,7 @@ import { stat } from "@dxgjs/fs";
       const pm = await detectPackageManagerFs(projectRoot, {
         stopDir: workspaceRoot,
       });
-      // Map bun to unknown to preserve old behavior (old did not support bun)
-      if (pm === "bun") {
-        packageManager = "unknown";
-      } else {
-        packageManager = pm;
-      }
+      packageManager = pm;
     } catch {
       // If detection fails (e.g., no lockfile and no fallback), return unknown to match old behavior
       packageManager = "unknown";

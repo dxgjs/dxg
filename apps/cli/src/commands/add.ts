@@ -44,7 +44,6 @@ export function registerAddCommand(program: Command): void {
 
         // Shared setup
         const awareness = await detectProjectAwarenessSilently(projectRoot);
-        const context = await prepareContext(options, awareness);
 
         // Get generator instance
         const generatorMap: Record<string, Generator> = {
@@ -68,6 +67,7 @@ export function registerAddCommand(program: Command): void {
 
         // Run generator in project root directory
         await runInTargetDirectory(projectRoot, async () => {
+          const context = await prepareContext(options, awareness);
           await generator.run(cliAnswers, context);
         });
 

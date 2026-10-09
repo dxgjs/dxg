@@ -16,6 +16,7 @@ import {
   createDependencyInstaller,
   detectPackageManagerAgent,
 } from "@dxgjs/generators";
+import type { PackageManagerAgent } from "@dxgjs/generators";
 
 /**
  * Options shared by the root command and the `add` command.
@@ -61,6 +62,18 @@ export async function detectProjectAwarenessSilently(targetDir: string): Promise
 }
 
 /**
+ * Coarse package-manager display name for a detected agent — the value
+ * `ProjectAwareness.packageManager` carries. The agent is the single
+ * detection that drives installs, so the awareness must report the SAME
+ * manager, never a second, diverging detection. "yarn@berry" collapses to
+ * "yarn": the awareness field is a display name; the classic/berry
+ * distinction stays installer-internal.
+ */
+function agentDisplayName(agent: PackageManagerAgent): string {
+  return agent === "yarn@berry" ? "yarn" : agent;
+}
+
+/**
  * Prepares the generator context with logger, fs, and templates
  */
 export async function prepareContext(options: CommanderOptions, awareness: ProjectAwareness) {
@@ -76,24 +89,31 @@ export async function prepareContext(options: CommanderOptions, awareness: Proje
   // Provide stat and readdir functions (not used by all generators but required by type)
   const fs = { readFile, writeFile, pathExists, stat, readdir, mkdir, readJson, writeJson };
 
-  // Dependency-installer seam. Detection uses the same @antfu/ni detector
-  // the install commands resolve through (fine-grained agent — yarn classic
-  // vs berry — never awareness.packageManager, which is a coarse display
-  // name). When no agent is detectable the seam stays absent: generators
-  // fall back to their own error, and nothing here blocks scaffolding.
+  // Dependency-installer seam — ONE detection feeding everything. The
+  // fine-grained agent (yarn classic vs berry), resolved via the same
+  // @antfu/ni detector the install commands run through, drives BOTH the
+  // installer and the awareness's coarse packageManager name: the manager
+  // reported and the manager that installs can never diverge. The
+  // awareness's own lockfile-based value only survives as the fallback
+  // when no agent is detectable (generators then surface their own error
+  // — nothing here blocks scaffolding). Detection is read-only and also
+  // runs in dry-run mode, so a planned run reports the same manager a
+  // real run would use.
+  const agent = await detectPackageManagerAgent(awareness.projectRoot).catch(
+    () => null,
+  );
   let installer;
-  if (!options.dryRun) {
-    const agent = await detectPackageManagerAgent(awareness.projectRoot).catch(() => null);
-    if (agent) {
-      installer = createDependencyInstaller({ agent, fs });
-    }
+  if (agent && !options.dryRun) {
+    installer = createDependencyInstaller({ agent, fs });
   }
 
   return {
     logger,
     fs,
     templates: { render: templatesRender },
-    awareness,
+    awareness: agent
+      ? { ...awareness, packageManager: agentDisplayName(agent) }
+      : awareness,
     dryRun: options.dryRun ?? false,
     force: options.force ?? false,
     nonInteractive: options.nonInteractive ?? false,
