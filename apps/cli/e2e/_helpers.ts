@@ -8,7 +8,7 @@
  * the CLI cannot express non-interactively — it runs the same BUILT
  * generator code.
  */
-import { exec, execFile } from "node:child_process";
+import { exec, execFile, execFileSync } from "node:child_process";
 import { promisify } from "node:util";
 import {
   existsSync,
@@ -44,6 +44,17 @@ export interface RunResult {
 const DEFAULT_TIMEOUT_MS = 12 * 60_000;
 const MAX_BUFFER = 40 * 1024 * 1024;
 
+// Headless spawn contract: a spawned child gets a CLOSED stdin, never
+// node's default open never-fed pipe. On Windows that pipe handle is
+// inherited by every npm/npx grandchild (CreateProcess handle
+// inheritance) and the whole spawn tree stalls — the exact hang that
+// froze `dxg add database` E2E runs for the full 12-minute timeout.
+// Bisected live with no-dist replays: the identical bootstrap+install+
+// prisma-init sequence hung as an execFile child with the default
+// stdin, and passed in ~5 min flat with stdio[0]="ignore". The dist
+// was exonerated — the spawn context alone was the channel.
+const HEADLESS_STDIO: ["ignore", "pipe", "pipe"] = ["ignore", "pipe", "pipe"];
+
 function childEnv(extra?: Record<string, string>): Record<string, string> {
   return {
     ...process.env,
@@ -51,6 +62,25 @@ function childEnv(extra?: Record<string, string>): Record<string, string> {
     COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
     ...extra,
   };
+}
+
+/**
+ * execFile's timeout SIGTERMs only the direct child; its npm/npx
+ * grandchildren survive as orphans holding the temp project's
+ * node_modules and the shared npm cache locks open (observed live:
+ * zombie runners outliving their killed parent by minutes, polluting
+ * later runs). Best-effort tree kill — the timeout rejection still
+ * propagates when it fails.
+ */
+function killTree(pid: number | undefined): void {
+  if (process.platform !== "win32" || pid === undefined) return;
+  try {
+    execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+    });
+  } catch {
+    // hygiene only
+  }
 }
 
 /** Runs a Node script — no shell, safe with spaces in paths. */
@@ -69,10 +99,12 @@ export function runNode(
         timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxBuffer: MAX_BUFFER,
         env: childEnv(opts.env),
+        stdio: HEADLESS_STDIO,
       },
       (error, stdout, stderr) => {
         const code = (error as { code?: unknown } | null)?.code;
         if (error !== null && typeof code !== "number") {
+          killTree((error as { pid?: number }).pid);
           reject(error);
           return;
         }
@@ -109,6 +141,7 @@ export async function runPM(
       timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxBuffer: MAX_BUFFER,
       env: childEnv(opts.env),
+      stdio: HEADLESS_STDIO,
     });
     return {
       code: 0,
@@ -264,6 +297,45 @@ export async function bootstrapProject(
     // empty yarn.lock marks THIS directory as its own project root —
     // the boundary berry's own error message recommends.
     writeFileSync(path.join(dir, "yarn.lock"), "", "utf8");
+  }
+  if (pm === "pnpm") {
+    // pnpm (strictDepBuilds on by default) fails an install with
+    // unapproved build scripts. A bootstrap manifest that declares prisma
+    // runs its lifecycle scripts during THIS install — pre-write the SAME
+    // approvals the CLI itself writes later (applyPnpmAllowBuilds: the
+    // allowBuilds map, lab-validated format, "@" keys single-quoted), or
+    // the bootstrap dies with ERR_PNPM_IGNORED_BUILDS before the
+    // generator ever runs. onlyBuiltDependencies (the pre-11 name) is
+    // NOT read by the pnpm corepack resolves for lockfile-less temp
+    // manifests (12.x here) — verified live in the bootstrap failures.
+    const declared = [
+      ...Object.keys(
+        (manifest.devDependencies ?? {}) as Record<string, string>,
+      ),
+      ...Object.keys((manifest.dependencies ?? {}) as Record<string, string>),
+    ];
+    if (declared.includes("prisma")) {
+      writeFileSync(
+        path.join(dir, "pnpm-workspace.yaml"),
+        "allowBuilds:\n  prisma: true\n  '@prisma/engines': true\n",
+        "utf8",
+      );
+    }
+  }
+  if (pm === "bun") {
+    // bun writes no lockfile when a manifest declares nothing to
+    // resolve, and without a marker @antfu/ni's detection walks UP — a
+    // stray package.json above the temp tree (this machine's user home
+    // declares packageManager yarn@4) then hijacks the project as yarn
+    // berry. An empty bun.lock pins detection to THIS project (ni maps
+    // it to the bun agent); bun add rewrites a stale/empty lockfile
+    // fine (verified live: bun add ms, exit 0).
+    if (
+      !existsSync(path.join(dir, "bun.lock")) &&
+      !existsSync(path.join(dir, "bun.lockb"))
+    ) {
+      writeFileSync(path.join(dir, "bun.lock"), "", "utf8");
+    }
   }
   const res = await runPM(PM_COMMAND[pm], ["install"], {
     cwd: dir,

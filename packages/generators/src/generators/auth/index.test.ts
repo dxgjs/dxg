@@ -5,15 +5,16 @@ import * as fs from "@dxgjs/fs";
 // Extract types from the actual fs module for proper mock typings
 type ReadFileOptions = Parameters<typeof fs.readFile>[1];
 type WriteFileOptions = Parameters<typeof fs.writeFile>[2];
-type StatOptions = Parameters<typeof fs.stat>[1];
 type MkdirOptions = Parameters<typeof fs.mkdir>[1];
-type Stats = ReturnType<typeof fs.stat>;
+// fs.stat takes only the path (no options) and is async — Awaited keeps
+// the RESOLVED Stats shape, not the promise wrapper.
+type Stats = Awaited<ReturnType<typeof fs.stat>>;
 
 interface MockFS {
   pathExists: (path: string) => Promise<boolean>;
   readFile: (path: string, options?: ReadFileOptions) => Promise<string | Buffer>;
   writeFile: (path: string, data: string | Buffer, options?: WriteFileOptions) => Promise<void>;
-  stat: (path: string, options?: StatOptions) => Promise<Stats>;
+  stat: (path: string) => Promise<Stats>;
   mkdir: (path: string, options?: MkdirOptions) => Promise<void>;
   executeCommand: () => Promise<void>;
   _files: Map<string, string>;
@@ -79,7 +80,7 @@ vi.mock("@dxgjs/fs", async () => {
       // Call actual writeFile (though in test env this might not do anything)
       return actual.writeFile(path, data, options);
     }),
-    stat: vi.fn().mockImplementation(async function(this: MockFS, path: string, options?: StatOptions) {
+    stat: vi.fn().mockImplementation(async function(this: MockFS, path: string) {
       // Check if it's a file we have
       if (this._files.has(path)) {
         return {
@@ -93,7 +94,7 @@ vi.mock("@dxgjs/fs", async () => {
         } as Stats;
       }
       // Fall back to actual implementation
-      return actual.stat(path, options);
+      return actual.stat(path);
     }),
     mkdir: vi.fn().mockImplementation(async function(this: MockFS, path: string, options?: MkdirOptions) {
       // Track the directory as created
@@ -149,7 +150,6 @@ vi.mock("@antfu/ni", async () => {
 // Import the mocked modules
 const prompts = await import("@dxgjs/prompts");
 import { Logger } from "@dxgjs/logger";
-import * as fs from "@dxgjs/fs";
 import * as path from "path";
 import * as os from "os";
 import authGenerator from "./index";

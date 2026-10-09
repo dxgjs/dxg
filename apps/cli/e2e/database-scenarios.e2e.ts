@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { describe, expect, test } from "vitest";
 import {
+  CLI_BIN,
   bootstrapProject,
   depSection,
   installedVersion,
@@ -24,6 +25,7 @@ import {
   readText,
   runDxg,
   runDriver,
+  runNode,
   runPM,
   scriptSection,
   sha,
@@ -32,6 +34,41 @@ import {
 } from "./_helpers";
 
 describe("E2E: dxg add database — state, conflict & native scenarios", () => {
+  test("bin entry executes even when the spawning environment carries VITEST", async () => {
+    await withProject("vitest-env-guard", async (dir) => {
+      // A bare manifest is enough for --dry-run — it plans without installing.
+      writeFileSync(
+        path.join(dir, "package.json"),
+        '{"name":"e2e-fixture","version":"0.0.0","private":true}',
+        "utf8",
+      );
+      // Regression (context-construction mechanism): dist skips
+      // program.parse() when VITEST is set — a guard meant for unit-test
+      // IMPORTS of the module. A SPAWNED bin inherits its parent env, so a
+      // vitest-spawned CLI (or any tooling exporting VITEST) used to exit 0
+      // with EMPTY stdout, doing nothing. The explicit env pins the
+      // regression regardless of the runner.
+      const run = await runNode(
+        CLI_BIN,
+        [
+          "add",
+          "database",
+          "--provider",
+          "postgresql",
+          "--non-interactive",
+          "--dry-run",
+        ],
+        { cwd: dir, env: { VITEST: "true" } },
+      );
+      expect(
+        run.code,
+        `dxg exited ${run.code}\nSTDOUT:\n${run.stdout}\nSTDERR:\n${run.stderr}`,
+      ).toBe(0);
+      expect(run.stdout).toContain("Operation Summary");
+      expect(run.stdout).toContain("Database setup completed for postgresql");
+    });
+  });
+
   test("existing fully-configured project is reconciled, never overwritten", async (ctx) => {
     if (!(await pmAvailable("pnpm"))) {
       return ctx.skip("pnpm is not installed on this machine");
@@ -133,6 +170,60 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
     });
   });
 
+  test("a dxg-produced project reruns as a no-op: init and installs skipped", async (ctx) => {
+    if (!(await pmAvailable("npm"))) {
+      return ctx.skip("npm is not installed on this machine");
+    }
+    await withProject("rerun-noop-npm", async (dir) => {
+      await bootstrapProject(dir, "npm");
+      const run1 = await runDxg(dir, [
+        "--provider",
+        "postgresql",
+        "--non-interactive",
+      ]);
+      expect(
+        run1.code,
+        `dxg exited ${run1.code}\nSTDOUT:\n${run1.stdout}\nSTDERR:\n${run1.stderr}`,
+      ).toBe(0);
+      // Run 1 initialized Prisma for real — the init-skip summary line
+      // must NOT be there yet.
+      expect(run1.stdout).not.toContain(
+        "(schema.prisma or prisma7.config.ts already exists)",
+      );
+
+      const pkg1 = readJson(dir, "package.json");
+      const lock1 = sha(readText(dir, "package-lock.json"));
+      const snapshot1 = snapshotUserFiles(dir);
+
+      // THE rerun: same command, dxg-produced state. Context is rebuilt
+      // from scratch with the filesystem rooted at the project — the
+      // inspection must see run 1's files and skip what they satisfy.
+      const run2 = await runDxg(dir, [
+        "--provider",
+        "postgresql",
+        "--non-interactive",
+      ]);
+      expect(
+        run2.code,
+        `dxg exited ${run2.code}\nSTDOUT:\n${run2.stdout}\nSTDERR:\n${run2.stderr}`,
+      ).toBe(0);
+      console.log(
+        `[e2e] rerun timings — fresh run: ${run1.ms}ms, rerun: ${run2.ms}ms`,
+      );
+      // Init skipped — surfaced in the operation summary.
+      expect(run2.stdout).toContain(
+        "Prisma initialization (schema.prisma or prisma7.config.ts already exists)",
+      );
+      // No reinstall — the pins run 1 wrote are already satisfied.
+      expect(run2.stdout).toContain("already declared at the verified pin");
+      // No user-facing file mutated by the rerun.
+      expect(snapshotUserFiles(dir)).toEqual(snapshot1);
+      // npm never ran again: lockfile byte-identical, manifest unchanged.
+      expect(sha(readText(dir, "package-lock.json"))).toBe(lock1);
+      expect(readJson(dir, "package.json")).toEqual(pkg1);
+    });
+  });
+
   test("empty prisma/ fails fast with zero mutations", async (ctx) => {
     if (!(await pmAvailable("pnpm"))) {
       return ctx.skip("pnpm is not installed on this machine");
@@ -167,8 +258,10 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
     }
     await withProject("prisma-6", async (dir) => {
       // Really installs prisma 6.x — the gate has something real to see.
+      // 6.9.0: the highest 6.x still published (6.10+ were unpublished from
+      // the registry — 6.20.0 now resolves to E404).
       await bootstrapProject(dir, "pnpm", {
-        devDependencies: { prisma: "6.20.0" },
+        devDependencies: { prisma: "6.9.0" },
       });
       const pkgBefore = sha(readText(dir, "package.json"));
 
@@ -185,8 +278,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
       expect(sha(readText(dir, "package.json"))).toBe(pkgBefore);
       expect(
         depSection(readJson(dir, "package.json"), "devDependencies").prisma,
-      ).toBe("6.20.0");
-      expect(installedVersion(dir, "prisma", "pnpm")).toBe("6.20.0");
+      ).toBe("6.9.0");
+      expect(installedVersion(dir, "prisma", "pnpm")).toBe("6.9.0");
       expect(existsSync(path.join(dir, "prisma"))).toBe(false);
     });
   });

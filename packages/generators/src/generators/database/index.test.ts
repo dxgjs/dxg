@@ -1467,6 +1467,60 @@ describe("Database Generator", () => {
         "@prisma/engines": true,
       });
     });
+
+    test("seed selection pre-approves tsx's transitive esbuild build script (pnpm 11 strictDepBuilds)", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+      vi.clearAllMocks();
+
+      const context = {
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        fs,
+        templates: { render: vi.fn(realRender) },
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: '.',
+          workspaceRoot: '.',
+          framework: { name: 'unknown' as const, detected: false },
+          language: { name: 'javascript' as const, detected: true },
+          packageManager: 'npm',
+          styling: { name: 'none' as const, detected: false, version: null, configFile: null },
+          capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
+          packageJson: { name: 'test-project', version: '1.0.0', private: true }
+        },
+        dryRun: false,
+        force: false
+      };
+
+      await databaseGenerator.run(
+        { provider: "postgresql", databaseScripts: ["db:generate", "db:seed"] },
+        context,
+      );
+
+      // tsx is installed as the seed runner…
+      const calls = (fs.executeCommand as Mock).mock.calls;
+      const installCalls = calls.filter(
+        (c: unknown[]) =>
+          c[0] === "npm-mock" && (c[1] as string[])[0] === "install",
+      );
+      const allSpecs = installCalls.flatMap((c: unknown[]) => c[1] as string[]);
+      expect(allSpecs).toContain("tsx");
+      // …its transitive esbuild is NEVER a direct spec (approval-only)…
+      expect(allSpecs).not.toContain("esbuild");
+      // …but esbuild's install script IS pre-approved: pnpm 11 fails the
+      // whole install (strictDepBuilds on by default) when tsx pulls
+      // esbuild with a blocked postinstall.
+      const pkg = JSON.parse(
+        String(await fs.readFile("package.json", { encoding: "utf8" })),
+      );
+      expect(pkg.allowScripts).toMatchObject({
+        prisma: true,
+        "@prisma/engines": true,
+        esbuild: true,
+      });
+      expect(pkg.allowScripts["better-sqlite3"]).toBeUndefined();
+    });
   });
 
   describe("Prisma agent skills decision (DXG-owned)", () => {

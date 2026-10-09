@@ -28,6 +28,7 @@ import { installerFailureHint } from "../../install/installer";
 import { withDlxBuildApprovals } from "../../install/dlx";
 import {
   specName,
+  DEFAULT_GENERATOR_OUTPUT,
   DEFAULT_HELPER_PATH,
   PRISMA_PINNED_VERSION,
   computeFileImport,
@@ -464,13 +465,27 @@ export function planDatabase(
     throw new Error(`Invalid helper path "${helperPath}": ${helperError}`);
   }
 
+  // Generator-output resolution — the single source of truth for the plan
+  // fields AND the template data: a user-owned schema that declares a
+  // parseable, root-internal output wins (the plan must agree with where
+  // `prisma generate` will actually write the client); every other state —
+  // no generator block, unparseable output, root-escaping output, or no
+  // inspection at all — falls back to the helper-derived co-location rule.
+  const generatorOutput =
+    inspection !== undefined &&
+    inspection.schemaHasGenerator &&
+    !inspection.generatorOutputEscapesRoot &&
+    inspection.generatorOutput !== DEFAULT_GENERATOR_OUTPUT
+      ? inspection.generatorOutput
+      : computeDefaultGeneratorOutput(helperPath);
+
   // Dynamic imports (decision document, section 7): computed here, in the
   // planning layer, from the helper path and the generator output — never
   // hardcoded in the templates. The seed imports the helper with a relative
   // specifier from its own directory (prisma/).
   const generatedClientImport = computeRelativeImport(
     helperPath,
-    inspection?.generatorOutput ?? computeDefaultGeneratorOutput(helperPath),
+    generatorOutput,
   );
   const helperImportFromSeed = computeFileImport(
     "prisma/seed.ts",
@@ -536,23 +551,38 @@ export function planDatabase(
   // build native artifacts. prisma's preinstall is a Node-version guard;
   // @prisma/engines' postinstall downloads the schema engine binary
   // (required for migrate/db push); better-sqlite3@12 compiles/links the
-  // .node binding. tsx, @types/*, dotenv, pg and the adapters have none.
+  // .node binding. tsx pulls esbuild transitively, whose postinstall
+  // verifies/downloads the platform binary — an install script pnpm 11
+  // blocks (strictDepBuilds on by default) unless pre-approved.
+  // @types/*, dotenv, pg and the adapters have none.
   const requiresBuild = (spec: string): boolean =>
     /^prisma@/.test(spec) ||
     spec === "@prisma/engines" ||
+    spec === "esbuild" ||
     /^better-sqlite3@/.test(spec);
   // The adapter pulls @prisma/engines transitively — its build approval is
-  // needed even though it never appears as a direct spec.
+  // needed even though it never appears as a direct spec. Same for esbuild
+  // under the seed runner (tsx).
   const buildApprovalNames = ["prisma", "@prisma/engines"];
   if (provider.key === "sqlite") {
     buildApprovalNames.push("better-sqlite3");
   }
+  if (seedSelected) {
+    buildApprovalNames.push("esbuild");
+  }
 
   // Build dependency plan with spec objects for the installer.
-  const devPackageSpecs: DependencySpec[] = devPackages.map((spec) => ({
-    spec,
-    requiresBuild: requiresBuild(spec),
-  }));
+  const devPackageSpecs: DependencySpec[] = [
+    ...devPackages.map((spec) => ({
+      spec,
+      requiresBuild: requiresBuild(spec),
+    })),
+    // tsx pulls esbuild transitively — esbuild's postinstall needs build
+    // approval even though it is never installed as a direct spec.
+    ...(seedSelected
+      ? [{ spec: "esbuild", requiresBuild: true, approvalOnly: true }]
+      : []),
+  ];
   const regularPackageSpecs: DependencySpec[] = [
     ...regularPackages.map((spec) => ({
       spec,
@@ -618,17 +648,14 @@ export function planDatabase(
     // config (verified empirically), so it is skipped instead.
     initRequired,
     prismaDeclarationsSatisfied,
-    generatorOutput: computeDefaultGeneratorOutput(helperPath),
+    generatorOutput,
     // Prisma init output path relative to the prisma directory (where schema.prisma lives).
     // This is the argument passed to `prisma init --output`.
-    prismaInitOutput: posix.join("..", computeDefaultGeneratorOutput(helperPath)),
+    prismaInitOutput: posix.join("..", generatorOutput),
     envExists: inspection?.envExists ?? false,
     envNeedsDatabaseUrl: inspection?.envHasDatabaseUrl === false,
     helperPath,
-    generatedClientImport: computeRelativeImport(
-      helperPath,
-      computeDefaultGeneratorOutput(helperPath),
-    ),
+    generatedClientImport,
     helperImportFromSeed,
   };
 }
@@ -797,46 +824,14 @@ async function applySeedConfigToPrismaFile(
   return { added: true, skipped: false };
 }
 
-// Helper function to compute default generator output from helperPath
-// when inspection does not provide a generatorOutput.
+// Helper-derived default generator output. Deterministic co-location
+// rule: the generated client lands in <helperDir>/generated/prisma, so
+// the helper's import is always "./generated/prisma/client" and stays
+// INSIDE the project whatever the helper path. (Replaces the old
+// /lib|custom/ heuristics, which could resolve the client outside the
+// helper's subtree — even above the project root.)
 function computeDefaultGeneratorOutput(helperPath: string): string {
-  const helperDir = posix.dirname(helperPath);
-  let outputBaseDir: string;
-
-  // Check for "/lib/" or ending with "/lib*" patterns
-  if (helperDir.includes("/lib/") || /\/lib[^/]*$/.test(helperDir)) {
-    // Find the last occurrence of "/lib/" or "/lib*" suffix
-    const libMatch = helperDir.match(/(.*\/lib[^/]*)/);
-    if (libMatch) {
-      outputBaseDir = libMatch[1];
-    } else {
-      // Fallback to full directory if regex fails unexpectedly
-      outputBaseDir = helperDir;
-    }
-  } else if (helperDir.includes("custom/")) {
-    // For custom paths, go up one level to avoid deep nesting
-    outputBaseDir = "..";
-  } else {
-    // Split into segments and find the last one starting with "lib"
-    const segments = helperDir.split("/");
-    let libSegmentIndex = -1;
-    for (let i = segments.length - 1; i >= 0; i--) {
-      if (segments[i].startsWith("lib")) {
-        libSegmentIndex = i;
-        break;
-      }
-    }
-
-    if (libSegmentIndex !== -1) {
-      // Use from the "lib" segment to the end
-      outputBaseDir = segments.slice(libSegmentIndex).join("/");
-    } else {
-      // No "lib" segment found, use the full helper directory
-      outputBaseDir = helperDir;
-    }
-  }
-
-  return posix.join(outputBaseDir, "generated", "prisma");
+  return posix.join(posix.dirname(helperPath), "generated", "prisma");
 }
 
 // Execution function
