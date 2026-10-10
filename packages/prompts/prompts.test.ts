@@ -1,4 +1,4 @@
-import { describe, test, expect, vi, beforeEach, beforeAll } from "vitest";
+import { describe, test, expect, vi, beforeEach, beforeAll, afterEach } from "vitest";
 import type { PromptQuestion } from "./src/index";
 
 // Mock implementations - declared at top level so they're accessible when the
@@ -406,6 +406,122 @@ describe("Prompts Package", () => {
         // The second question was never asked — cancellation halts collection.
         expect(mockConfirm).not.toHaveBeenCalled();
       });
+    });
+  });
+
+  // spinner() is NOT a passthrough: the Clack spinner's start() calls
+  // @clack/core's block(), which opens a flowing readline read on
+  // process.stdin. On a non-TTY stdin that child processes inherit
+  // (stdio "inherit"), the shared read deadlocks the child (audit
+  // R7-R10, 2026-10-10). Non-TTY sessions must therefore get the local
+  // headless spinner; only a real TTY reaches Clack.
+  describe("spinner()", () => {
+    const realIsTTY = process.stdin.isTTY;
+
+    const setTTY = (value: boolean | undefined) => {
+      Object.defineProperty(process.stdin, "isTTY", {
+        value,
+        configurable: true,
+      });
+    };
+
+    afterEach(() => {
+      setTTY(realIsTTY);
+    });
+
+    test("headless: does not reach the Clack spinner and writes plain traces", () => {
+      setTTY(undefined);
+      const write = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+
+      const s = prompts.spinner();
+      s.start("Installing dependencies (pnpm)");
+      s.stop("Installed dependencies");
+
+      expect(mockSpinner).not.toHaveBeenCalled();
+      const out = write.mock.calls.map((call) => String(call[0])).join("");
+      expect(out).toContain("Installing dependencies (pnpm)");
+      expect(out).toContain("Installed dependencies");
+      write.mockRestore();
+    });
+
+    test("headless: bare stop() keeps the current message", () => {
+      setTTY(undefined);
+      const write = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+
+      const s = prompts.spinner();
+      s.start("Creating project files");
+      s.stop();
+
+      const out = write.mock.calls.map((call) => String(call[0])).join("");
+      expect(out).toContain("Creating project files");
+      write.mockRestore();
+    });
+
+    test("headless: cancel() marks the spinner cancelled and runs onCancel", () => {
+      setTTY(undefined);
+      const write = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+      const onCancel = vi.fn();
+
+      const s = prompts.spinner({ onCancel });
+      s.start("Working");
+      s.cancel("Cancelled");
+
+      expect(s.isCancelled).toBe(true);
+      expect(onCancel).toHaveBeenCalledTimes(1);
+      write.mockRestore();
+    });
+
+    test("headless: cancel() without a started spinner sets isCancelled but skips onCancel", () => {
+      setTTY(undefined);
+      const onCancel = vi.fn();
+
+      const s = prompts.spinner({ onCancel });
+      s.cancel("Cancelled");
+
+      expect(s.isCancelled).toBe(true);
+      expect(onCancel).not.toHaveBeenCalled();
+    });
+
+    test("headless: clear() closes the spinner — a later stop() writes nothing", () => {
+      setTTY(undefined);
+      const write = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+
+      const s = prompts.spinner();
+      s.start("Working");
+      write.mockClear();
+      s.clear();
+      s.stop("Done");
+
+      expect(write).not.toHaveBeenCalled();
+      write.mockRestore();
+    });
+
+    test("headless: honors a custom output stream", () => {
+      setTTY(undefined);
+      const output = { write: vi.fn() } as unknown as NodeJS.WriteStream;
+
+      const s = prompts.spinner({ output });
+      s.start("Custom stream");
+
+      expect(output.write).toHaveBeenCalled();
+      expect(mockSpinner).not.toHaveBeenCalled();
+    });
+
+    test("TTY: forwards the options to the Clack spinner", () => {
+      setTTY(true);
+      const options = { frames: ["a", "b"], delay: 1000 };
+
+      prompts.spinner(options);
+
+      expect(mockSpinner).toHaveBeenCalledWith(options);
     });
   });
 });

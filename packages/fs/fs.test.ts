@@ -20,7 +20,8 @@ import {
   appendFileSync,
   glob,
   globSync,
-  readJson
+  readJson,
+  executeCommand
 } from './src/index';
 import {
   join,
@@ -330,5 +331,55 @@ describe('FS Abstraction Layer', () => {
     expect(files).toHaveLength(2);
     expect(files.map(f => path.basename(f))).toContain('test.txt');
     expect(files.map(f => path.basename(f))).toContain('.hidden');
+  });
+});
+
+// executeCommand regression coverage (idempotence audit, 2026-10-10,
+// %TEMP%\dxg-database-idempotence-audit): the former passthrough had no
+// timeout at all, so a wedged child left the CLI pending indefinitely
+// (protocol.md R10: readline holding the shared NT stdin handle, 0-CPU
+// freeze), and execa's plain kill orphaned the pnpm/prisma grandchildren
+// on Windows. The wrapper now enforces a default bound and tree-kills on
+// timeout. These tests pin that contract using node itself — fast and
+// offline, no dlx involved.
+describe('executeCommand', () => {
+  test('runs a fast command and resolves with its stdout', async () => {
+    const result = await executeCommand(process.execPath, ['-e', "console.log('exec-ok')"]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('exec-ok');
+  });
+
+  test('rejects with timedOut when an explicit short timeout is hit', async () => {
+    const startedAt = Date.now();
+    // A child that would stay alive for a minute, bounded to half a second.
+    const rejection = executeCommand(
+      process.execPath,
+      ['-e', 'setTimeout(() => {}, 60_000)'],
+      { timeout: 500 }
+    );
+
+    const error = await rejection.then(
+      () => {
+        throw new Error('expected the command to time out, but it resolved');
+      },
+      (error: unknown) => error as { timedOut?: boolean; message?: string }
+    );
+
+    expect(error.timedOut).toBe(true);
+    expect(error.message).toMatch(/timed out after 500 milliseconds/i);
+    // Rejected at the bound, not after the child's own lifetime.
+    expect(Date.now() - startedAt).toBeLessThan(10_000);
+  });
+
+  test('timeout: 0 is forwarded as-is (opt-out of the default bound)', async () => {
+    // execa treats 0 as "no limit"; the wrapper uses ?? so a legitimate 0
+    // is not replaced by the 10-minute default. Lifting the bound for real
+    // cannot be asserted without a >10-minute test, so this only proves the
+    // option survives the wrapper and the command still runs.
+    const result = await executeCommand(process.execPath, ['-e', "console.log('opt-out-ok')"], { timeout: 0 });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('opt-out-ok');
   });
 });

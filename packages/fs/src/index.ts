@@ -164,19 +164,41 @@ import { readFile, readFileSync } from "./readFile";
   }
 
   /**
+   * Default upper bound for a single spawned command, in milliseconds.
+   * Without a bound, a wedged child (hostile network, deadlocked stdio
+   * pipe) leaves `dxg` pending indefinitely with no diagnostic — the
+   * audit observed 12+ minute hangs (protocol.md, 2026-10-10). 10 min
+   * clears the slowest legitimate operation observed (a cold pnpm dlx
+   * cache copy of ~216 MB takes ~3 min) with a 3x margin. Pass an
+   * explicit `timeout` to narrow/widen it, or `timeout: 0` to opt out.
+   */
+  const DEFAULT_COMMAND_TIMEOUT_MS = 10 * 60_000;
+
+  /**
    * Execute a command with the given arguments using execa.
+   * Every spawned command gets a default timeout (see
+   * DEFAULT_COMMAND_TIMEOUT_MS) and kills its whole process tree when
+   * the bound is hit: execa's plain timeout only terminates the direct
+   * child, which on Windows orphans the pnpm/prisma grandchildren —
+   * they keep running (and writing project files) AFTER the failure
+   * has been reported. `killDescendants` makes execa taskkill /T the
+   * intact tree instead.
    * @param command - The command to execute (e.g., 'npm', 'pnpm', etc.)
    * @param args - Arguments to pass to the command
-   * @param options - Optional execa options
+   * @param options - Optional execa options; `timeout` overrides the default bound
    * @returns Promise resolving to the execa result
-   * @throws ExecaError if the command fails
+   * @throws ExecaError if the command fails or times out
    */
   export async function executeCommand(
     command: string,
     args: string[] = [],
     options?: Options
   ): Promise<ReturnType<typeof execa>> {
-    return execa(command, args, options);
+    return execa(command, args, {
+      ...options,
+      timeout: options?.timeout ?? DEFAULT_COMMAND_TIMEOUT_MS,
+      killDescendants: options?.killDescendants ?? true,
+    });
   }
 
   /**
