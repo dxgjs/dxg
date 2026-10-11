@@ -471,6 +471,130 @@ describe("createDependencyInstaller", () => {
     });
   });
 
+  describe("manifest reconciliation (npm rewrites installed specs)", () => {
+    // npm resolves `prisma@7.10.0` then saves it with its default
+    // save-prefix: devDependencies.prisma becomes "^7.10.0", silently
+    // degrading the verified pin to a caret range — and a commanded
+    // range fares no better (`better-sqlite3@^12.6.0` comes back as the
+    // latest match, `^12.11.1`). Live-verified on npm 12 (minimal repro
+    // 2026-10-10: a bare `npm install -D prisma@7.10.0` writes
+    // "^7.10.0"); pnpm/yarn/bun save specs verbatim, so npm is the only
+    // manager that breaks the contract. The mocks below reproduce npm's
+    // save side effect on the in-memory manifest; the installer must
+    // reconcile the entries it installed back to the commanded specs.
+
+    /**
+     * Fake install that mimics npm's manifest side effects: a pinned
+     * spec is saved caret-prefixed (`7.10.0` → `^7.10.0`), a ranged
+     * spec is bumped to the latest match (`^12.6.0` → `^12.11.1`),
+     * and a naked spec is saved as the latest caret version.
+     */
+    function mockNpmCaretRewrite() {
+      (executeCommand as Mock).mockImplementation(
+        async (_command: string, args: string[]) => {
+          const dev = args.includes("-D");
+          const specs = args.filter((a) => a !== "install" && a !== "-D");
+          const pkg =
+            (await fsStore.readJson("/proj/package.json")) as
+              | Record<string, unknown>
+              | undefined ?? {};
+          const section = dev ? "devDependencies" : "dependencies";
+          const entries = (pkg[section] ?? {}) as Record<string, string>;
+          for (const spec of specs) {
+            const at = spec.lastIndexOf("@");
+            const name = at > 0 ? spec.slice(0, at) : spec;
+            entries[name] =
+              at <= 0
+                ? "^18.0.7" // naked spec: npm saves latest with caret
+                : spec.slice(at + 1).startsWith("^")
+                  ? "^12.11.1" // ranged spec: bumped to the latest match
+                  : `^${spec.slice(at + 1)}`; // pin: caret-prefixed
+          }
+          pkg[section] = entries;
+          await fsStore.writeJson("/proj/package.json", pkg);
+          return { all: "added 42 packages" };
+        },
+      );
+    }
+
+    test("npm's caret rewrite of installed pins is reconciled to the commanded specs", async () => {
+      mockNpmCaretRewrite();
+      const installer = createDependencyInstaller({ agent: "npm", fs: fsStore });
+
+      const result = await installer.install(defaultPlan, { cwd: "/proj" });
+
+      expect(result.success).toBe(true);
+      const pkg = JSON.parse(fsStore.read("/proj/package.json"));
+      // Pins restored exactly — the manifest states the contract.
+      expect(pkg.devDependencies.prisma).toBe("7.10.0");
+      expect(pkg.dependencies["@prisma/client"]).toBe("7.10.0");
+      // Commanded ranges restored verbatim (npm had bumped them to the
+      // latest match).
+      expect(pkg.dependencies["better-sqlite3"]).toBe("^12.6.0");
+      // Naked specs carry no version contract: left as the manager wrote.
+      expect(pkg.devDependencies.tsx).toBe("^18.0.7");
+    });
+
+    test("a manifest already matching the specs is not rewritten (pnpm/yarn save verbatim)", async () => {
+      // pnpm/yarn/bun save the spec verbatim, so reconciliation must be
+      // a read-and-skip: the only package.json writes are the two the
+      // fake install itself made (byte-stable fixpoint — no rewrite
+      // when every entry already states the commanded spec).
+      (executeCommand as Mock).mockImplementation(
+        async (_command: string, args: string[]) => {
+          const dev = args.includes("-D");
+          const specs = args.filter((a) => a !== "install" && a !== "-D");
+          const pkg =
+            (await fsStore.readJson("/proj/package.json")) as
+              | Record<string, unknown>
+              | undefined ?? {};
+          const section = dev ? "devDependencies" : "dependencies";
+          const entries = (pkg[section] ?? {}) as Record<string, string>;
+          for (const spec of specs) {
+            const at = spec.lastIndexOf("@");
+            const name = at > 0 ? spec.slice(0, at) : spec;
+            entries[name] = at > 0 ? spec.slice(at + 1) : "^18.0.7";
+          }
+          pkg[section] = entries;
+          await fsStore.writeJson("/proj/package.json", pkg);
+          return { all: "added 42 packages" };
+        },
+      );
+      const installer = createDependencyInstaller({ agent: "pnpm", fs: fsStore });
+
+      const result = await installer.install(defaultPlan, { cwd: "/proj" });
+
+      expect(result.success).toBe(true);
+      const pkg = JSON.parse(fsStore.read("/proj/package.json"));
+      expect(pkg.devDependencies.prisma).toBe("7.10.0");
+      expect(pkg.dependencies["better-sqlite3"]).toBe("^12.6.0");
+      const pkgWrites = fsStore.writeLog.filter((p) =>
+        p.endsWith("package.json"),
+      );
+      // Exactly the two fake-install writes — reconciliation added none.
+      expect(pkgWrites).toHaveLength(2);
+    });
+
+    test("entries outside the plan survive reconciliation untouched", async () => {
+      // A user's own declaration for a package DXG did not install is
+      // not the installer's business: reconciliation touches ONLY the
+      // names the plan actually installed.
+      await fsStore.writeJson("/proj/package.json", {
+        name: "user-project",
+        dependencies: { dotenv: "^17.0.0" },
+      });
+      mockNpmCaretRewrite();
+      const installer = createDependencyInstaller({ agent: "npm", fs: fsStore });
+
+      const result = await installer.install(defaultPlan, { cwd: "/proj" });
+
+      expect(result.success).toBe(true);
+      const pkg = JSON.parse(fsStore.read("/proj/package.json"));
+      expect(pkg.name).toBe("user-project");
+      expect(pkg.dependencies.dotenv).toBe("^17.0.0");
+    });
+  });
+
   describe("dry-run and empty plans", () => {
     test("dryRun: nothing resolved, nothing executed, nothing written", async () => {
       const installer = createDependencyInstaller({

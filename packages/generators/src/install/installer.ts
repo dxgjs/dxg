@@ -55,6 +55,54 @@ export interface CreateInstallerOptions {
 }
 
 /**
+ * Reconciles package.json after a successful install batch: the manifest
+ * must state the spec DXG commanded, not the manager's save-prefix
+ * policy. npm resolves `prisma@7.10.0` and saves it caret-prefixed
+ * (`^7.10.0` — live-verified on npm 12; minimal repro 2026-10-10: a
+ * bare `npm install -D prisma@7.10.0` writes "^7.10.0"), and even a
+ * commanded range comes back as the latest match
+ * (`better-sqlite3@^12.6.0` → `^12.11.1`), silently breaking the
+ * verified-pin contract. pnpm/yarn/bun save specs verbatim, so for
+ * them this is a read-and-skip — the file is rewritten only when an
+ * installed entry actually differs (byte-stable fixpoint). Naked
+ * specs (no `@version` part) carry no version contract and stay as
+ * the manager wrote them; entries outside the batch are never touched.
+ */
+async function reconcileBatchSpecs(
+  fs: FSInterface,
+  cwd: string,
+  section: "devDependencies" | "dependencies",
+  specs: string[],
+): Promise<void> {
+  const wanted: { name: string; declared: string }[] = [];
+  for (const spec of specs) {
+    // Same split as packageNameFromSpec: the LAST "@" separates the
+    // (possibly scoped) name from the version part.
+    const at = spec.lastIndexOf("@");
+    if (at <= 0) continue; // naked spec — no version contract
+    const declared = spec.slice(at + 1);
+    if (declared === "") continue;
+    wanted.push({ name: packageNameFromSpec(spec), declared });
+  }
+  if (wanted.length === 0) return;
+
+  const pkgPath = join(cwd, "package.json");
+  if (!(await fs.pathExists(pkgPath))) return; // nothing to reconcile against
+  const pkg = (await fs.readJson<Record<string, unknown>>(pkgPath)) ?? {};
+  const entries = (pkg[section] ?? {}) as Record<string, unknown>;
+  let changed = false;
+  for (const { name, declared } of wanted) {
+    if (entries[name] !== undefined && entries[name] !== declared) {
+      entries[name] = declared;
+      changed = true;
+    }
+  }
+  if (!changed) return;
+  pkg[section] = entries;
+  await fs.writeJson(pkgPath, pkg);
+}
+
+/**
  * Builds the installer bound to a detected agent. The agent (not
  * `awareness.packageManager`) decides the approval mechanics, so the
  * generator never branches on the package manager.
@@ -120,17 +168,26 @@ export function createDependencyInstaller(
       deps.filter((d) => !d.approvalOnly);
     const devSpecs = installable(plan.devDependencies);
     const regularSpecs = installable(plan.dependencies);
-    const batches: { args: string[]; label: string }[] = [];
+    const batches: {
+      args: string[];
+      label: string;
+      section: "devDependencies" | "dependencies";
+      specs: string[];
+    }[] = [];
     if (devSpecs.length > 0) {
       batches.push({
         args: ["-D", ...devSpecs.map((d) => d.spec)],
         label: "dev dependencies",
+        section: "devDependencies",
+        specs: devSpecs.map((d) => d.spec),
       });
     }
     if (regularSpecs.length > 0) {
       batches.push({
         args: regularSpecs.map((d) => d.spec),
         label: "dependencies",
+        section: "dependencies",
+        specs: regularSpecs.map((d) => d.spec),
       });
     }
     if (batches.length === 0) {
@@ -206,6 +263,13 @@ export function createDependencyInstaller(
         }
       }
       outputs.push(output);
+
+      // The manifest a manager writes for an installed spec is not
+      // guaranteed to BE the spec (npm rewrites entries with its
+      // save-prefix) — reconcile the entries THIS batch installed
+      // before moving on, so a later batch's failure still leaves
+      // the earlier contract intact.
+      await reconcileBatchSpecs(fs, cwd, batch.section, batch.specs);
     }
 
     return {
