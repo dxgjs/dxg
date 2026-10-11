@@ -62,18 +62,25 @@ export interface CreateInstallerOptions {
  * bare `npm install -D prisma@7.10.0` writes "^7.10.0"), and even a
  * commanded range comes back as the latest match
  * (`better-sqlite3@^12.6.0` → `^12.11.1`), silently breaking the
- * verified-pin contract. pnpm/yarn/bun save specs verbatim, so for
- * them this is a read-and-skip — the file is rewritten only when an
- * installed entry actually differs (byte-stable fixpoint). Naked
+ * verified-pin contract. pnpm is NOT exempt: 12.5.1 saves pins verbatim
+ * but bumps commanded ranges to the latest match too (live-proven
+ * 2026-10-11: `pnpm add better-sqlite3@^12.6.0` saves `^12.11.1` into
+ * both manifest and lockfile). This therefore runs for every agent and
+ * rewrites only when an installed entry actually differs — yarn/bun's
+ * verbatim saves make it a read-and-skip (byte-stable fixpoint). Naked
  * specs (no `@version` part) carry no version contract and stay as
  * the manager wrote them; entries outside the batch are never touched.
+ *
+ * Returns whether the manifest was rewritten: the caller must then
+ * refresh the lockfile via LOCKFILE_SYNC, which still records the
+ * manager's rewritten specifier.
  */
 async function reconcileBatchSpecs(
   fs: FSInterface,
   cwd: string,
   section: "devDependencies" | "dependencies",
   specs: string[],
-): Promise<void> {
+): Promise<boolean> {
   const wanted: { name: string; declared: string }[] = [];
   for (const spec of specs) {
     // Same split as packageNameFromSpec: the LAST "@" separates the
@@ -84,10 +91,10 @@ async function reconcileBatchSpecs(
     if (declared === "") continue;
     wanted.push({ name: packageNameFromSpec(spec), declared });
   }
-  if (wanted.length === 0) return;
+  if (wanted.length === 0) return false;
 
   const pkgPath = join(cwd, "package.json");
-  if (!(await fs.pathExists(pkgPath))) return; // nothing to reconcile against
+  if (!(await fs.pathExists(pkgPath))) return false; // nothing to reconcile against
   const pkg = (await fs.readJson<Record<string, unknown>>(pkgPath)) ?? {};
   const entries = (pkg[section] ?? {}) as Record<string, unknown>;
   let changed = false;
@@ -97,10 +104,37 @@ async function reconcileBatchSpecs(
       changed = true;
     }
   }
-  if (!changed) return;
+  if (!changed) return false;
   pkg[section] = entries;
   await fs.writeJson(pkgPath, pkg);
+  return true;
 }
+
+/**
+ * Lockfile-only refresh per agent, run after reconcile restored the
+ * commanded specs in package.json: the lockfile still records the
+ * REWRITTEN specifier the manager saved, and a manifest/lockfile
+ * mismatch is a CI-breaking contract violation — `npm ci` and
+ * `pnpm install --frozen-lockfile` both hard-fail on it
+ * (ERR_PNPM_OUTDATED_LOCKFILE: "better-sqlite3 (lockfile: ^12.11.1,
+ * manifest: ^12.6.0)" — live-proven 2026-10-11 on the audit reference
+ * project). Executed directly, not via @antfu/ni: the flags are
+ * lockfile-refresh-specific and agent-dependent. yarn classic and bun
+ * save specs verbatim (no drift observed across the audit E2E
+ * baseline), so reconcile is a read-and-skip there and this entry
+ * stays a structural fallback — plain install is the correct refresh
+ * should a future version start rewriting.
+ */
+const LOCKFILE_SYNC: Record<
+  PackageManagerAgent,
+  { binary: string; args: string[] }
+> = {
+  npm: { binary: "npm", args: ["install", "--package-lock-only"] },
+  pnpm: { binary: "pnpm", args: ["install", "--lockfile-only"] },
+  "yarn@berry": { binary: "yarn", args: ["install", "--mode=update-lockfile"] },
+  yarn: { binary: "yarn", args: ["install"] },
+  bun: { binary: "bun", args: ["install"] },
+};
 
 /**
  * Builds the installer bound to a detected agent. The agent (not
@@ -266,10 +300,50 @@ export function createDependencyInstaller(
 
       // The manifest a manager writes for an installed spec is not
       // guaranteed to BE the spec (npm rewrites entries with its
-      // save-prefix) — reconcile the entries THIS batch installed
-      // before moving on, so a later batch's failure still leaves
-      // the earlier contract intact.
-      await reconcileBatchSpecs(fs, cwd, batch.section, batch.specs);
+      // save-prefix; pnpm 12.5.1 bumps commanded ranges) — reconcile
+      // the entries THIS batch installed before moving on, so a later
+      // batch's failure still leaves the earlier contract intact.
+      const reconciled = await reconcileBatchSpecs(
+        fs,
+        cwd,
+        batch.section,
+        batch.specs,
+      );
+      if (reconciled) {
+        // The lockfile still records the manager's rewritten specifier:
+        // refresh it so the manifest/lockfile pair is coherent again
+        // (`npm ci` / `pnpm install --frozen-lockfile` contract). Same
+        // per-batch rationale as the reconcile above. A failed refresh
+        // is surfaced as a failure — a drifted lockfile must never be
+        // left behind silently.
+        const sync = LOCKFILE_SYNC[agent];
+        try {
+          const refreshed = await executeCommand(sync.binary, sync.args, {
+            cwd,
+            all: true,
+          });
+          outputs.push(String(refreshed.all ?? ""));
+        } catch (error) {
+          const e = error as {
+            message?: string;
+            exitCode?: number;
+            all?: string;
+            stdout?: string;
+            stderr?: string;
+          };
+          const syncOutput = String(
+            e.all ?? e.stdout ?? e.stderr ?? e.message ?? "",
+          );
+          return {
+            success: false,
+            reason: "lockfile-sync",
+            output: [...outputs, syncOutput].join("\n"),
+            exitCode: e.exitCode,
+            hint: `package.json now states the commanded specs again, but the lockfile refresh failed (${sync.binary} ${sync.args.join(" ")}). Run it manually before committing, or the next frozen-lockfile install will fail on the mismatch.`,
+            suggestion: `${sync.binary} ${sync.args.join(" ")}`,
+          };
+        }
+      }
     }
 
     return {

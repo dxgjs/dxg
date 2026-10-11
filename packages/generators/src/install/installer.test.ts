@@ -471,17 +471,22 @@ describe("createDependencyInstaller", () => {
     });
   });
 
-  describe("manifest reconciliation (npm rewrites installed specs)", () => {
+  describe("manifest reconciliation (managers rewrite installed specs)", () => {
     // npm resolves `prisma@7.10.0` then saves it with its default
     // save-prefix: devDependencies.prisma becomes "^7.10.0", silently
     // degrading the verified pin to a caret range — and a commanded
     // range fares no better (`better-sqlite3@^12.6.0` comes back as the
     // latest match, `^12.11.1`). Live-verified on npm 12 (minimal repro
     // 2026-10-10: a bare `npm install -D prisma@7.10.0` writes
-    // "^7.10.0"); pnpm/yarn/bun save specs verbatim, so npm is the only
-    // manager that breaks the contract. The mocks below reproduce npm's
-    // save side effect on the in-memory manifest; the installer must
-    // reconcile the entries it installed back to the commanded specs.
+    // "^7.10.0"). pnpm is NOT exempt: 12.5.1 saves pins verbatim but
+    // bumps commanded RANGES to the latest match (live-proven
+    // 2026-10-11: `pnpm add better-sqlite3@^12.6.0` saves `^12.11.1`
+    // into both manifest and lockfile). yarn classic/berry and bun save
+    // specs verbatim (no drift observed across the audit E2E baseline).
+    // The mocks below reproduce each manager's save side effect on the
+    // in-memory manifest; the installer must reconcile the entries it
+    // installed back to the commanded specs — and resynchronize the
+    // lockfile, which still records the rewritten specifier.
 
     /**
      * Fake install that mimics npm's manifest side effects: a pinned
@@ -492,6 +497,16 @@ describe("createDependencyInstaller", () => {
     function mockNpmCaretRewrite() {
       (executeCommand as Mock).mockImplementation(
         async (_command: string, args: string[]) => {
+          // Lockfile-only resync calls (post-reconcile, see the lockfile
+          // sync tests below) rewrite the LOCKFILE only — package.json is
+          // not touched, so the fake writes nothing either.
+          if (
+            args.includes("--lockfile-only") ||
+            args.includes("--package-lock-only") ||
+            args.includes("--mode=update-lockfile")
+          ) {
+            return { all: "up to date" };
+          }
           const dev = args.includes("-D");
           const specs = args.filter((a) => a !== "install" && a !== "-D");
           const pkg =
@@ -535,11 +550,200 @@ describe("createDependencyInstaller", () => {
       expect(pkg.devDependencies.tsx).toBe("^18.0.7");
     });
 
-    test("a manifest already matching the specs is not rewritten (pnpm/yarn save verbatim)", async () => {
-      // pnpm/yarn/bun save the spec verbatim, so reconciliation must be
-      // a read-and-skip: the only package.json writes are the two the
+    /**
+     * pnpm 12.5.1's REAL save semantics (live-proven 2026-10-11, probe on
+     * the audit reference campaign): pins are saved verbatim, naked specs
+     * resolve to latest-with-caret, but a commanded RANGE is bumped to the
+     * latest match (`better-sqlite3@^12.6.0` saves as `^12.11.1`).
+     */
+    function mockPnpmRangeRewrite() {
+      (executeCommand as Mock).mockImplementation(
+        async (_command: string, args: string[]) => {
+          if (args.includes("--lockfile-only")) {
+            return { all: "up to date" };
+          }
+          const dev = args.includes("-D");
+          const specs = args.filter((a) => a !== "install" && a !== "-D");
+          const pkg =
+            (await fsStore.readJson("/proj/package.json")) as
+              | Record<string, unknown>
+              | undefined ?? {};
+          const section = dev ? "devDependencies" : "dependencies";
+          const entries = (pkg[section] ?? {}) as Record<string, string>;
+          for (const spec of specs) {
+            const at = spec.lastIndexOf("@");
+            const name = at > 0 ? spec.slice(0, at) : spec;
+            const declared = spec.slice(at + 1);
+            entries[name] =
+              at <= 0
+                ? "^18.0.7" // naked spec: latest with caret
+                : declared.startsWith("^")
+                  ? "^12.11.1" // commanded range: bumped to latest match
+                  : declared; // pin: saved verbatim
+          }
+          pkg[section] = entries;
+          await fsStore.writeJson("/proj/package.json", pkg);
+          return { all: "added 42 packages" };
+        },
+      );
+    }
+
+    /** Verbatim save semantics (yarn classic/berry, bun): the spec is the entry. */
+    function mockVerbatimSave() {
+      (executeCommand as Mock).mockImplementation(
+        async (_command: string, args: string[]) => {
+          const dev = args.includes("-D");
+          const specs = args.filter((a) => a !== "install" && a !== "-D");
+          const pkg =
+            (await fsStore.readJson("/proj/package.json")) as
+              | Record<string, unknown>
+              | undefined ?? {};
+          const section = dev ? "devDependencies" : "dependencies";
+          const entries = (pkg[section] ?? {}) as Record<string, string>;
+          for (const spec of specs) {
+            const at = spec.lastIndexOf("@");
+            const name = at > 0 ? spec.slice(0, at) : spec;
+            entries[name] = at > 0 ? spec.slice(at + 1) : "^18.0.7";
+          }
+          pkg[section] = entries;
+          await fsStore.writeJson("/proj/package.json", pkg);
+          return { all: "added 42 packages" };
+        },
+      );
+    }
+
+    test("a reconciled rewrite also resynchronizes the lockfile (npm: --package-lock-only)", async () => {
+      // npm rewrote the specs it saved and reconcile restored the
+      // commanded ones in package.json — but package-lock.json still
+      // records npm's specifiers, and `npm ci` fails on the mismatch.
+      // Every batch whose entries were rewritten must be followed by a
+      // lockfile-only refresh.
+      mockNpmCaretRewrite();
+      const installer = createDependencyInstaller({ agent: "npm", fs: fsStore });
+
+      const result = await installer.install(defaultPlan, { cwd: "/proj" });
+
+      expect(result.success).toBe(true);
+      const calls = (executeCommand as Mock).mock.calls as [string, string[]][];
+      const resyncs = calls.filter(
+        ([cmd, args]) =>
+          cmd === "npm" &&
+          args[0] === "install" &&
+          args.includes("--package-lock-only"),
+      );
+      // Both batches were rewritten (pins caret-bumped) → both resynced.
+      expect(resyncs).toHaveLength(2);
+    });
+
+    test("pnpm resynchronizes with --lockfile-only — frozen-lockfile CI contract", async () => {
+      // pnpm 12.5.1 bumps commanded ranges to the latest match too
+      // (live-proven 2026-10-11), so the drift hits pnpm-lock.yaml the
+      // same way — and CI's `pnpm install --frozen-lockfile` dies with
+      // ERR_PNPM_OUTDATED_LOCKFILE (live-proven on the audit reference
+      // project: better-sqlite3 lockfile ^12.11.1 vs manifest ^12.6.0).
+      mockPnpmRangeRewrite();
+      const installer = createDependencyInstaller({ agent: "pnpm", fs: fsStore });
+
+      const result = await installer.install(defaultPlan, { cwd: "/proj" });
+
+      expect(result.success).toBe(true);
+      const calls = (executeCommand as Mock).mock.calls as [string, string[]][];
+      const resyncs = calls.filter(
+        ([cmd, args]) =>
+          cmd === "pnpm" &&
+          args[0] === "install" &&
+          args.includes("--lockfile-only"),
+      );
+      // Only the deps batch rewrote (pins are saved verbatim by pnpm):
+      // exactly one resync, with the flag pnpm's own error message
+      // recommends.
+      expect(resyncs).toHaveLength(1);
+    });
+
+    test("yarn@berry resynchronizes with --mode=update-lockfile", async () => {
+      mockNpmCaretRewrite();
+      const installer = createDependencyInstaller({
+        agent: "yarn@berry",
+        fs: fsStore,
+      });
+
+      const result = await installer.install(defaultPlan, { cwd: "/proj" });
+
+      expect(result.success).toBe(true);
+      const calls = (executeCommand as Mock).mock.calls as [string, string[]][];
+      const resyncs = calls.filter(
+        ([cmd, args]) =>
+          cmd === "yarn" &&
+          args[0] === "install" &&
+          args.includes("--mode=update-lockfile"),
+      );
+      expect(resyncs).toHaveLength(2);
+    });
+
+    test("verbatim persistence never triggers a lockfile resync", async () => {
+      // yarn classic/berry and bun save specs verbatim: reconcile is a
+      // read-and-skip, so no lockfile refresh may run. The resync exists
+      // ONLY to repair a rewrite the manager actually performed —
+      // running it unconditionally would churn every install.
+      mockVerbatimSave();
+      const installer = createDependencyInstaller({
+        agent: "yarn@berry",
+        fs: fsStore,
+      });
+
+      const result = await installer.install(defaultPlan, { cwd: "/proj" });
+
+      expect(result.success).toBe(true);
+      const calls = (executeCommand as Mock).mock.calls as [string, string[]][];
+      // Exactly the two install batches — nothing else.
+      expect(calls).toHaveLength(2);
+      expect(
+        calls.some(([, args]) =>
+          args.includes("--lockfile-only") ||
+          args.includes("--package-lock-only") ||
+          args.includes("--mode=update-lockfile"),
+        ),
+      ).toBe(false);
+    });
+
+    test("a failed lockfile resync surfaces as an install failure, never silently", async () => {
+      mockNpmCaretRewrite();
+      // The install batches succeed; the resync dies the way execa does
+      // on a non-zero exit.
+      const inner = (executeCommand as Mock).getMockImplementation();
+      (executeCommand as Mock).mockImplementation(
+        async (command: string, args: string[]) => {
+          if (args.includes("--package-lock-only")) {
+            throw Object.assign(
+              new Error("EPERM: operation not permitted, open 'package-lock.json'"),
+              {
+                exitCode: 1,
+                all: "EPERM: operation not permitted, open 'package-lock.json'",
+              },
+            );
+          }
+          return inner?.(command, args);
+        },
+      );
+      const installer = createDependencyInstaller({ agent: "npm", fs: fsStore });
+
+      const result = await installer.install(defaultPlan, { cwd: "/proj" });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.reason).toBe("lockfile-sync");
+        expect(result.output).toContain("EPERM");
+      }
+    });
+
+    test("a manifest already matching the specs is not rewritten (byte-stable fixpoint)", async () => {
+      // When the manager saved the commanded specs as-is (yarn/bun
+      // verbatim; pnpm's verbatim pins), reconciliation must be a
+      // read-and-skip: the only package.json writes are the two the
       // fake install itself made (byte-stable fixpoint — no rewrite
-      // when every entry already states the commanded spec).
+      // when every entry already states the commanded spec). The fake
+      // below saves verbatim; pnpm's real range bump is covered by
+      // mockPnpmRangeRewrite above.
       (executeCommand as Mock).mockImplementation(
         async (_command: string, args: string[]) => {
           const dev = args.includes("-D");

@@ -447,6 +447,58 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
     });
   });
 
+  test("sqlite on pnpm: commanded range survives in manifest AND lockfile (frozen-lockfile CI contract)", async (ctx) => {
+    // H-4 regression (audit 2026-10-11): pnpm 12.5.1 bumps a commanded
+    // RANGE on save (`better-sqlite3@^12.6.0` → `^12.11.1` in both
+    // manifest and lockfile — live-proven), reconcile restores the
+    // manifest, and the lockfile-only resync resynchronizes the
+    // lockfile. Without the resync, CI's `pnpm install
+    // --frozen-lockfile` dies with ERR_PNPM_OUTDATED_LOCKFILE
+    // (live-proven on the audit reference project: lockfile ^12.11.1
+    // vs manifest ^12.6.0). The fresh matrix's pg rows never install
+    // better-sqlite3 — this row is where the range drift is real.
+    if (!(await pmAvailable("pnpm"))) {
+      return ctx.skip("pnpm is not installed on this machine");
+    }
+    await withProject("sqlite-native-pnpm", async (dir) => {
+      await bootstrapProject(dir, "pnpm");
+      const run = await runDriver(dir, {
+        provider: "sqlite",
+        installPrismaSkills: false,
+        databaseScripts: ["db:generate", "db:push"],
+        helperPath: "lib/prisma.ts",
+      });
+      expect(
+        run.code,
+        `driver exited ${run.code}\nSTDOUT:\n${run.stdout}\nSTDERR:\n${run.stderr}`,
+      ).toBe(0);
+
+      // Manifest states the commanded range — not pnpm's latest-match
+      // rewrite (the adapter's pin, verified against ^12.6.0).
+      const pkg = readJson(dir, "package.json");
+      expect(depSection(pkg, "dependencies")["better-sqlite3"]).toBe(
+        "^12.6.0",
+      );
+      expect(depSection(pkg, "devDependencies").prisma).toBe("7.10.0");
+
+      // Lockfile agrees: the importers entry carries the SAME specifier
+      // — the exact spot the drift sat before the fix.
+      const lock = readText(dir, "pnpm-lock.yaml");
+      expect(lock).toMatch(/better-sqlite3:\s*\r?\n\s+specifier: \^12\.6\.0/);
+
+      // The CI contract, executed: a frozen install must pass on the
+      // state DXG leaves behind.
+      const frozen = await runPM("pnpm", ["install", "--frozen-lockfile"], {
+        cwd: dir,
+        timeoutMs: 5 * 60_000,
+      });
+      expect(
+        frozen.code,
+        `frozen-lockfile exited ${frozen.code}\nSTDOUT:\n${frozen.stdout}\nSTDERR:\n${frozen.stderr}`,
+      ).toBe(0);
+    });
+  });
+
   test("custom helper paths stay inside the project with coherent output/import", async (ctx) => {
     if (!(await pmAvailable("pnpm"))) {
       return ctx.skip("pnpm is not installed on this machine");

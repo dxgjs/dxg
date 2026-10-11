@@ -99,6 +99,15 @@ export type DependencyInstallFailureReason =
    * expected file not written) — the project is not operational yet.
    */
   | "verification-failed"
+  /**
+   * The lockfile-only refresh that follows a manifest reconciliation
+   * failed: package.json states the commanded specs again, but the
+   * lockfile still records the manager's rewritten specifier — an
+   * incoherent pair that `npm ci` / `pnpm install --frozen-lockfile`
+   * hard-fail on (ERR_PNPM_OUTDATED_LOCKFILE). Surfaced, never
+   * silently skipped: a drifted lockfile is a CI-breaking landmine.
+   */
+  | "lockfile-sync"
   /** Non-zero exit we could not map to a known signature. */
   | "unknown";
 
