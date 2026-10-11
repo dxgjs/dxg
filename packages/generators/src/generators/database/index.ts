@@ -506,10 +506,12 @@ export function planDatabase(
   // declarations already satisfied, the pinned prisma/@prisma/client specs
   // are dropped from the install batches — the second run must not
   // reinstall what the project already declares at the verified pin.
-  // Non-Prisma provider deps (adapters, drivers, dotenv, tsx) stay in the
-  // batch unless already declared: the installer's own dependency
-  // resolution then makes the reinstall cheap/no-op, and MISSING entries
-  // self-heal. Every omission is reported through the summary (skipped).
+  // Non-Prisma provider deps (adapters, drivers, dotenv, tsx) follow the
+  // same declared rule: declared → dropped (an install with nothing to do
+  // still rewrites package-lock.json on npm — never assume a cheap no-op;
+  // live-proven by the e2e rerun-noop lockfile mutation), missing → they
+  // stay in the batch and self-heal. Every omission is reported through
+  // the summary (skipped).
   const devPackages = [...provider.devDependencies];
   const regularPackages = [...provider.dependencies];
 
@@ -522,9 +524,8 @@ export function planDatabase(
     // Both pinned Prisma packages are declared at the verified pin: drop
     // them from the install batches by NAME (a declared "7.10.0" and a
     // batch "prisma@7.10.0" are the same package — literal-spec comparison
-    // would never match). Non-Prisma provider deps (adapters, drivers,
-    // dotenv) stay in the batch: the installer's own resolution makes the
-    // reinstall cheap/no-op, and MISSING entries self-heal.
+    // would never match). Their version gate stays here; the non-Prisma
+    // declared-drop below is name-only.
     for (const list of [devPackages, regularPackages]) {
       for (let i = list.length - 1; i >= 0; i--) {
         const name = specName(list[i]);
@@ -535,14 +536,47 @@ export function planDatabase(
     }
   }
 
+  // Idempotence, non-Prisma side: every provider dependency the manifest
+  // already declares is dropped from the batches too. The historical
+  // assumption — "the manager makes their reinstall a cheap no-op" — was
+  // refuted live on npm (e2e rerun-noop 2026-10-10, kept project
+  // dxg-e2e-rerun-noop-npm-ZR61CI): a residual `npm install <declared
+  // specs>` rewrites package-lock.json even when nothing changes, so the
+  // rerun was not a byte-stable no-op. Missing entries self-heal: they
+  // stay in the batch. Legacy callers without an inspection keep the
+  // historical full-batch behavior.
+  const declaredProviderDepsDropped: string[] = [];
+  if (inspection !== undefined) {
+    const missing = inspection.providerDependenciesMissing;
+    for (const list of [devPackages, regularPackages]) {
+      for (let i = list.length - 1; i >= 0; i--) {
+        const name = specName(list[i]);
+        if (
+          name !== "prisma" &&
+          name !== "@prisma/client" &&
+          !missing.includes(name)
+        ) {
+          list.splice(i, 1);
+          declaredProviderDepsDropped.push(name);
+        }
+      }
+    }
+  }
+
   // The seed script only works end-to-end when its three parts travel
   // together: the runner (tsx, devDependency), the seed file, and the
   // `prisma.seed` config Prisma reads. Selected here, materialized below.
+  // A rerun of a seeded project must not reinstall a declared tsx (same
+  // lockfile-mutation defect as the declared batches above).
   const seedSelected = resolveDatabaseScripts(
     answers.databaseScripts,
     provider.key,
   ).includes(SEED_SCRIPT_NAME);
-  if (seedSelected && !devPackages.includes("tsx")) {
+  if (
+    seedSelected &&
+    !devPackages.includes("tsx") &&
+    inspection?.seedRunnerDeclared !== true
+  ) {
     devPackages.push("tsx");
   }
 
@@ -654,6 +688,22 @@ export function planDatabase(
     prismaInitOutput: posix.join("..", generatorOutput),
     envExists: inspection?.envExists ?? false,
     envNeedsDatabaseUrl: inspection?.envHasDatabaseUrl === false,
+    // Non-Prisma provider dependencies dropped from the install batches
+    // because the manifest already declares them (name-only check,
+    // inspection-driven). Surfaced in the summary so a rerun reads as a
+    // no-op for them too, not as a silent omission.
+    declaredProviderDepsDropped,
+    // The .env declaration line: SQLite gets the conventional file URL so
+    // the recommended chain works out-of-the-box — an empty URL fails
+    // `prisma db push` with `Connection url is empty` (live-proven, e2e
+    // sqlite-native 2026-10-10, kept project
+    // dxg-e2e-sqlite-native-npm-zYRENi: prisma7.config.ts reads
+    // process.env["DATABASE_URL"]). Server providers keep the empty
+    // placeholder: the connection value is the user's to fill.
+    envDatabaseUrlLine:
+      provider.key === "sqlite"
+        ? 'DATABASE_URL="file:./dev.db"'
+        : "DATABASE_URL=",
     helperPath,
     generatedClientImport,
     helperImportFromSeed,
@@ -878,13 +928,19 @@ export async function executeDatabase(
     // Reconciliation visibility: the Prisma packages were intentionally
     // left out of the install batches (already declared at the verified
     // pin) — surfaced in the summary so a second run reads as a no-op for
-    // them, not as a silent omission.
-    if (
-      planToUse.prismaDeclarationsSatisfied &&
-      (planToUse.devPackages.length > 0 || planToUse.regularPackages.length > 0)
-    ) {
+    // them, not as a silent omission. Unconditional on satisfaction: with
+    // the declared provider-deps drop, a fully-reconciled rerun has EMPTY
+    // batches, and the omission still deserves its summary line.
+    if (planToUse.prismaDeclarationsSatisfied) {
       result.skipped.push(
         "prisma@7.10.0 and @prisma/client@7.10.0 reinstall (already declared at the verified pin)",
+      );
+    }
+    // Same visibility for the non-Prisma provider dependencies dropped by
+    // the plan (declared in the manifest → not reinstalled).
+    if (planToUse.declaredProviderDepsDropped.length > 0) {
+      result.skipped.push(
+        `${planToUse.declaredProviderDepsDropped.join(", ")} reinstall (already declared)`,
       );
     }
     if (
@@ -1209,6 +1265,10 @@ export async function executeDatabase(
   // - .env present without DATABASE_URL → APPEND one line; every existing
   //   byte is preserved.
   // - .env already defines DATABASE_URL → untouched.
+  // The line's VALUE is provider-aware (plan.envDatabaseUrlLine): SQLite
+  // gets the conventional file URL — an empty one fails `prisma db push`
+  // with `Connection url is empty` (live-proven, e2e sqlite-native
+  // 2026-10-10) — server providers keep the empty placeholder.
   if (planToUse.envNeedsDatabaseUrl) {
     if (ctx.dryRun) {
       result.wouldRun.push(
@@ -1232,7 +1292,7 @@ export async function executeDatabase(
           envPath,
           [
             "# Environment variables — declared by the database layer",
-            "DATABASE_URL=",
+            planToUse.envDatabaseUrlLine,
             "",
           ].join("\n"),
           "utf8",
@@ -1245,7 +1305,7 @@ export async function executeDatabase(
           envText.length > 0 && !envText.endsWith("\n");
         await fs.writeFile(
           envPath,
-          `${envText}${needsLeadingNewline ? "\n" : ""}DATABASE_URL=\n`,
+          `${envText}${needsLeadingNewline ? "\n" : ""}${planToUse.envDatabaseUrlLine}\n`,
           "utf8",
         );
         result.updated.push(".env (appended DATABASE_URL)");

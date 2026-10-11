@@ -448,6 +448,7 @@ describe("Database Generator", () => {
       clientVersion: "missing",
       clientDeclaredSpec: undefined,
       providerDependenciesMissing: [],
+      seedRunnerDeclared: false,
       prismaInstalled: false,
       clientInstalled: false,
       envExists: false,

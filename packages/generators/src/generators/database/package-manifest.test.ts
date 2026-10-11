@@ -511,8 +511,25 @@ describe("package manifest invariant (dependencies survive script injection)", (
         (call) => (call[1] as string[])[0] === "install",
       );
       expect(installCalls).toHaveLength(2);
-      expect(installCalls[0][1].slice(2)).toEqual(provider.devDependencies);
-      expect(installCalls[1][1].slice(1)).toEqual(provider.dependencies);
+      // Post family-F fix (live-proven by the e2e rerun-noop lockfile
+      // mutation, 2026-10-10): specs the manifest ALREADY declares are
+      // dropped from the batch — an `npm install <declared specs>` rewrites
+      // package-lock.json even with nothing to change, so reinstalling
+      // them was never a no-op. The seeded Next.js project declares
+      // @types/node, so the installed set is the provider's set MINUS the
+      // declared names.
+      const declared = new Set([
+        ...Object.keys(MY_APP_PACKAGE_JSON.dependencies ?? {}),
+        ...Object.keys(MY_APP_PACKAGE_JSON.devDependencies ?? {}),
+      ]);
+      const expectedDev = provider.devDependencies.filter(
+        (spec: string) => !declared.has(specName(spec)),
+      );
+      const expectedDeps = provider.dependencies.filter(
+        (spec: string) => !declared.has(specName(spec)),
+      );
+      expect(installCalls[0][1].slice(2)).toEqual(expectedDev);
+      expect(installCalls[1][1].slice(1)).toEqual(expectedDeps);
 
       // Every installed package is declared in the final manifest.
       const final = readManifestFromDisk();

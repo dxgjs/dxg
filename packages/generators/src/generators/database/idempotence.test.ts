@@ -737,6 +737,97 @@ describe("idempotence reconciliation (satisfied state)", () => {
     expect(allSpecs).not.toContain("prisma@7.10.0");
     expect(allSpecs).not.toContain("@prisma/client@7.10.0");
   });
+
+  test("fully-declared project rerun installs NOTHING (lockfile byte-stable)", async () => {
+    // Live-proven defect this locks out (e2e rerun-noop 2026-10-10, kept
+    // project dxg-e2e-rerun-noop-npm-ZR61CI): the second run kept a
+    // RESIDUAL batch (@types/node, @types/better-sqlite3, adapter,
+    // better-sqlite3, dotenv — every one already declared) because only
+    // prisma/@prisma/client had a declared-drop. The assumption was "the
+    // manager makes the reinstall a cheap no-op" — refuted on npm: an
+    // `npm install <specs>` rewrites package-lock.json on EVERY run, even
+    // with nothing to change, so the rerun mutated the lockfile and was
+    // not a byte-stable no-op.
+    await seedProject(MY_APP_PACKAGE_JSON);
+    const context = makeContext();
+    await databaseGenerator.run(
+      { provider: "sqlite", installPrismaSkills: false },
+      context,
+    );
+    (fs.executeCommand as Mock).mockClear();
+
+    await databaseGenerator.run(
+      { provider: "sqlite", installPrismaSkills: false },
+      context,
+    );
+
+    // The declared manifest (run 1 persisted every provider dep through
+    // the install mock) must empty BOTH batches: no install-shaped call
+    // may execute at all on the rerun.
+    expect(installCalls()).toHaveLength(0);
+  });
+
+  test("seed rerun with tsx declared installs nothing", async () => {
+    // Same residual-batch defect through the seed door: tsx is pushed
+    // into the dev batch whenever the seed script is selected — a rerun
+    // of a seeded project would reinstall it (and rewrite the lockfile)
+    // although the manifest already declares it.
+    const SEED_SATISFIED_PACKAGE_JSON = {
+      ...SATISFIED_PACKAGE_JSON,
+      devDependencies: {
+        ...SATISFIED_PACKAGE_JSON.devDependencies,
+        "@types/node": "^26.6.5",
+        "@types/better-sqlite3": "^9.6.0",
+        tsx: "^4.23.15",
+      },
+      dependencies: {
+        ...SATISFIED_PACKAGE_JSON.dependencies,
+        "@prisma/adapter-better-sqlite3": "^7.10.0",
+        "better-sqlite3": "^12.6.0",
+        dotenv: "^18.0.7",
+      },
+    };
+    await seedProject(SEED_SATISFIED_PACKAGE_JSON);
+    // Same reconciled-project shape seedReconciledProject builds for the
+    // .env describe — inlined here because that helper is describe-local.
+    fsMockStore._files.set(
+      "prisma/schema.prisma",
+      [
+        "generator client {",
+        '  provider = "prisma-client"',
+        '  output = "../lib/generated/prisma"',
+        "}",
+        "",
+        "datasource db {",
+        '  provider = "sqlite"',
+        "}",
+        "",
+      ].join("\n"),
+    );
+    fsMockStore._directories.add("prisma");
+    fsMockStore._files.set("prisma7.config.ts", "// reconciled config\n");
+    // The simulated project already went through its first run END-TO-END:
+    // the declared deps were installed then, and that install landed the
+    // native binding (the mock install creates exactly this artifact when
+    // better-sqlite3 installs — l.187). This test asserts NO install runs,
+    // so nothing would create it here; seeding it mirrors the post-install
+    // state instead of bypassing verifyDatabase's probe.
+    fsMockStore._files.set(
+      "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
+      "<binary>",
+    );
+
+    await databaseGenerator.run(
+      {
+        provider: "sqlite",
+        installPrismaSkills: false,
+        databaseScripts: ["db:generate", "db:push", "db:seed"],
+      },
+      makeContext(),
+    );
+
+    expect(installCalls()).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -778,7 +869,14 @@ describe(".env additive reconciliation", () => {
 
     const env = fsMockStore._files.get(".env");
     expect(env).toBeDefined();
-    expect(env).toContain("DATABASE_URL=");
+    // SQLite is file-based: the placeholder carries the conventional file
+    // URL so db:push/db:seed work out-of-the-box. Live-proven defect of
+    // the empty placeholder (e2e sqlite-native 2026-10-10, project
+    // dxg-e2e-sqlite-native-npm-zYRENi): `prisma db push` reads
+    // datasource.url from prisma7.config.ts = process.env["DATABASE_URL"]
+    // and fails with `Error: Connection url is empty` — the whole
+    // recommended chain is unusable until the user hand-edits .env.
+    expect(env).toContain('DATABASE_URL="file:./dev.db"');
     expect(env).toContain(
       "Environment variables — declared by the database layer",
     );
@@ -802,8 +900,9 @@ describe(".env additive reconciliation", () => {
     const env = fsMockStore._files.get(".env")!;
     // Byte-preservation: the original content is a prefix of the result.
     expect(env.startsWith(originalEnv)).toBe(true);
-    // The appended declaration exists exactly once.
-    const matches = env.match(/^DATABASE_URL=$/gm) ?? [];
+    // The appended declaration exists exactly once — with the SQLite
+    // conventional file URL (same rationale as the create case above).
+    const matches = env.match(/^DATABASE_URL="file:\.\/dev\.db"$/gm) ?? [];
     expect(matches).toHaveLength(1);
   });
 
@@ -824,6 +923,31 @@ describe(".env additive reconciliation", () => {
     );
 
     expect(fsMockStore._files.get(".env")).toBe(originalEnv);
+  });
+
+  test("server providers keep the EMPTY DATABASE_URL placeholder (postgres)", async () => {
+    // The file URL default is a SQLite-only contract: server providers
+    // have nothing DXG could guess (host, credentials are the user's),
+    // so the placeholder stays empty there. Guards against the sqlite
+    // fix leaking to every provider.
+    await seedProject(SATISFIED_PACKAGE_JSON);
+    seedReconciledProject();
+    const originalEnv = [
+      "# User-owned environment file",
+      "NEXT_PUBLIC_API_KEY=abc123",
+      "",
+    ].join("\n");
+    fsMockStore._files.set(".env", originalEnv);
+
+    await databaseGenerator.run(
+      { provider: "postgresql", installPrismaSkills: false },
+      makeContext(),
+    );
+
+    const env = fsMockStore._files.get(".env")!;
+    expect(env.startsWith(originalEnv)).toBe(true);
+    const matches = env.match(/^DATABASE_URL=$/gm) ?? [];
+    expect(matches).toHaveLength(1);
   });
 });
 

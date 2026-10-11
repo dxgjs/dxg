@@ -382,6 +382,13 @@ export interface DatabaseInspection {
   clientDeclaredSpec: string | undefined;
   /** Names of provider non-Prisma dependencies missing from package.json. */
   providerDependenciesMissing: string[];
+  /**
+   * The seed runner (tsx) is declared in package.json. Not a provider
+   * dependency — planDatabase adds it dynamically when db:seed is selected,
+   * so its declared check lives here rather than in
+   * providerDependenciesMissing.
+   */
+  seedRunnerDeclared: boolean;
   /** prisma physically installed (agent-aware probe). */
   prismaInstalled: boolean;
   /** @prisma/client physically installed (agent-aware probe). */
@@ -474,6 +481,12 @@ export async function inspectDatabase(
     }
   }
 
+  // Seed runner declared check (name-only, same rule as the provider deps):
+  // planDatabase pushes tsx into the dev batch only when db:seed is
+  // selected AND the project does not declare it — this field is the
+  // rerun-side idempotence gate for that push.
+  const seedRunnerDeclared = declaredVersion(packageJson, "tsx") !== undefined;
+
   const agent = ctx.installer?.agent;
   const prismaInstalled = await isPackageInstalled(fs, agent, "prisma");
   const clientInstalled = await isPackageInstalled(fs, agent, "@prisma/client");
@@ -513,6 +526,7 @@ export async function inspectDatabase(
     clientVersion,
     clientDeclaredSpec,
     providerDependenciesMissing,
+    seedRunnerDeclared,
     prismaInstalled,
     clientInstalled,
     envExists,
