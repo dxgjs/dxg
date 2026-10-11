@@ -103,6 +103,56 @@ async function freshScenario(pm: E2EPm, dir: string): Promise<FreshTimings> {
     `db:generate exited ${gen.code}\nSTDOUT:\n${gen.stdout}\nSTDERR:\n${gen.stderr}`,
   ).toBe(0);
 
+  // 7b. H-1 contract (audit 2026-10-11): the helper guards DATABASE_URL
+  // instead of letting a missing variable silently become the string
+  // "undefined" (live-proven: driver adapters construct fine on that
+  // and only fail, confusingly, at first use).
+  expect(helper).toContain(
+    "const connectionString = process.env.DATABASE_URL;",
+  );
+  expect(helper).toMatch(/if \(!connectionString\)\s*\{/);
+  expect(helper).toContain("DATABASE_URL is not set");
+
+  // 7c. H-2 contract: .env is gitignored after a fresh run. prisma init
+  // writes a .gitignore itself when none exists (live-proven
+  // 2026-10-11); DXG appends the line when an uncovered .gitignore
+  // already exists. The product contract is the EFFECT, whichever
+  // author achieved it.
+  const gitignoreLines = mustExist(dir, ".gitignore")
+    .split(/\r?\n/)
+    .map((line) => line.trim());
+  expect(
+    gitignoreLines.some((line) =>
+      [".env", ".env*", ".env.*", "*.env"].includes(line),
+    ),
+  ).toBe(true);
+
+  // 7d. H-4 contract (CI): the lockfile must state the commanded specs.
+  // pnpm 12.5.1 bumps commanded ranges on save and npm caret-rewrites
+  // pins (both live-proven); reconcile restores package.json and the
+  // lockfile-only resync resynchronizes the lockfile — a mismatch is
+  // what `--frozen-lockfile` (pnpm) and `npm ci` hard-fail on
+  // (ERR_PNPM_OUTDATED_LOCKFILE, live-proven on the audit reference
+  // project before the fix).
+  if (pm === "pnpm") {
+    const frozen = await runPM(PM_COMMAND[pm], ["install", "--frozen-lockfile"], {
+      cwd: dir,
+      timeoutMs: 5 * 60_000,
+    });
+    expect(
+      frozen.code,
+      `frozen-lockfile exited ${frozen.code}\nSTDOUT:\n${frozen.stdout}\nSTDERR:\n${frozen.stderr}`,
+    ).toBe(0);
+  }
+  if (pm === "npm") {
+    // npm's drift sits on the PINS: package-lock.json's root specifiers
+    // must carry the commanded 7.10.0, not npm's caret rewrite —
+    // `npm ci` compares exactly these against the manifest.
+    const lock = readJson(dir, "package-lock.json");
+    expect(lock.packages[""].devDependencies.prisma).toBe("7.10.0");
+    expect(lock.packages[""].dependencies["@prisma/client"]).toBe("7.10.0");
+  }
+
   // 8. Idempotence (§13): the second REAL run must reconcile, not redo —
   // user-owned files byte-stable, manifest semantically stable, the
   // Prisma reinstall skip visible, no duplicated scripts.

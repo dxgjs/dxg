@@ -1260,8 +1260,10 @@ export async function executeDatabase(
   // `prisma init` preserves an existing .env byte-for-byte but NEVER adds
   // DATABASE_URL to it (verified empirically) — the historical false
   // success: green run, broken runtime. DXG owns the gap:
-  // - .env absent + init will run → init creates it; nothing to do here.
-  // - .env absent + init skipped → create a minimal one.
+  // - .env absent → create a minimal one. When init ran, it created a
+  //   .env with DATABASE_URL="" (empty) that the write below REPLACES
+  //   with the minimal file — envExists holds the PRE-RUN truth, so the
+  //   "absent" branch wins over init's empty placeholder.
   // - .env present without DATABASE_URL → APPEND one line; every existing
   //   byte is preserved.
   // - .env already defines DATABASE_URL → untouched.
@@ -1311,6 +1313,62 @@ export async function executeDatabase(
         result.updated.push(".env (appended DATABASE_URL)");
       }
       // envHasDatabaseUrl=true never reaches here (marker false).
+    }
+  }
+
+  // Step 4c: .gitignore coverage for the .env this run wrote. `prisma
+  // init` warns about it ("Don't forget to add .env in it to not commit
+  // any private information" — live-captured in the audit reference
+  // run) but never acts. DXG owns the DATABASE_URL declaration, so DXG
+  // closes the hygiene loop — additively and byte-preservingly,
+  // mirroring Step 4b's philosophy:
+  // - .gitignore absent → create a minimal one covering .env.
+  // - present without .env coverage → APPEND the line; every existing
+  //   byte is preserved.
+  // - already covering .env (whole-line spellings: .env, .env*, .env.*,
+  //   *.env) → untouched.
+  // - an explicit `!.env` negation is a deliberate user choice to track
+  //   .env → respected, untouched.
+  // Scoped to envNeedsDatabaseUrl — the same marker that gates the .env
+  // write: a user-owned .env that already declared DATABASE_URL is
+  // none of DXG's business, and reruns find DATABASE_URL already
+  // declared, never re-entering this path (idempotent by construction).
+  if (planToUse.envNeedsDatabaseUrl) {
+    if (ctx.dryRun) {
+      result.wouldRun.push("ensure .gitignore covers .env");
+    } else {
+      const gitignorePath = join(ctx.awareness.projectRoot, ".gitignore");
+      // pathExists BEFORE readFile: readFile throws ENOENT on a missing
+      // file (there is no pre-run inspection for .gitignore — unlike
+      // .env's envExists marker), so existence is checked here.
+      const gitignoreText = (await fs.pathExists(gitignorePath))
+        ? ((await fs.readFile(gitignorePath, {
+            encoding: "utf8",
+          })) as string)
+        : undefined;
+      const lines =
+        typeof gitignoreText === "string"
+          ? gitignoreText.split(/\r?\n/)
+          : [];
+      const coversEnv = lines.some((line) =>
+        [".env", ".env*", ".env.*", "*.env"].includes(line.trim()),
+      );
+      const negatesEnv = lines.some((line) => line.trim() === "!.env");
+      if (!coversEnv && !negatesEnv) {
+        if (typeof gitignoreText !== "string") {
+          await fs.writeFile(gitignorePath, ".env\n", "utf8");
+          result.created.push(".gitignore (covers .env)");
+        } else {
+          const needsLeadingNewline =
+            gitignoreText.length > 0 && !gitignoreText.endsWith("\n");
+          await fs.writeFile(
+            gitignorePath,
+            `${gitignoreText}${needsLeadingNewline ? "\n" : ""}.env\n`,
+            "utf8",
+          );
+          result.updated.push(".gitignore (appended .env)");
+        }
+      }
     }
   }
 
