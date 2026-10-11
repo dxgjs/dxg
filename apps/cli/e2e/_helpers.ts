@@ -261,7 +261,28 @@ export async function withProject(
   const dir = mkdtempSync(path.join(os.tmpdir(), `dxg-e2e-${name}-`));
   try {
     await fn(dir);
-    rmSync(dir, { recursive: true, force: true });
+    // Windows teardown lag: the row's real installs leave OS/AV handles
+    // on the freshly written node_modules for a moment AFTER the child
+    // processes exit — an instant rmSync fails EPERM even though the
+    // same tree deletes cleanly minutes later (live proof: bun row
+    // 2026-10-10, dxg-e2e-fresh-bun-TN3d7C — every row assertion had
+    // passed, the EPERM came from cleanup alone). Node's maxRetries
+    // retries the transient Windows errors (EBUSY/EPERM/ENOTEMPTY…);
+    // if the tree STILL will not go, keep it and SAY so — the proof
+    // the row came for is already made, and a leftover temp dir must
+    // not turn a passing row red. The kept dir is reported (never
+    // silent) for later inspection.
+    try {
+      rmSync(dir, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 300,
+      });
+    } catch (cleanupError) {
+      console.error(`[e2e] cleanup failed — project kept: ${dir}`);
+      console.error(cleanupError);
+    }
   } catch (error) {
     console.error(`[e2e] failure — project kept for diagnosis: ${dir}`);
     throw error;
@@ -322,21 +343,6 @@ export async function bootstrapProject(
       );
     }
   }
-  if (pm === "bun") {
-    // bun writes no lockfile when a manifest declares nothing to
-    // resolve, and without a marker @antfu/ni's detection walks UP — a
-    // stray package.json above the temp tree (this machine's user home
-    // declares packageManager yarn@4) then hijacks the project as yarn
-    // berry. An empty bun.lock pins detection to THIS project (ni maps
-    // it to the bun agent); bun add rewrites a stale/empty lockfile
-    // fine (verified live: bun add ms, exit 0).
-    if (
-      !existsSync(path.join(dir, "bun.lock")) &&
-      !existsSync(path.join(dir, "bun.lockb"))
-    ) {
-      writeFileSync(path.join(dir, "bun.lock"), "", "utf8");
-    }
-  }
   const res = await runPM(PM_COMMAND[pm], ["install"], {
     cwd: dir,
     timeoutMs: 6 * 60_000,
@@ -345,6 +351,26 @@ export async function bootstrapProject(
     throw new Error(
       `bootstrap: ${pm} install failed (exit ${res.code})\n${res.stdout}\n${res.stderr}`,
     );
+  }
+  if (pm === "bun") {
+    // Detection marker, written AFTER the install: bun DELETES an
+    // empty lockfile when the manifest declares nothing to resolve
+    // (live-proven, dxg-probe-bunlock 2026-10-10: bun.lock present →
+    // `bun install` → gone in 57ms). Written before the install the
+    // marker never survives to the DXG run, so @antfu/ni's detection
+    // walks UP to the nearest packageManager — a stray package.json
+    // above the temp tree (this machine's user home declares yarn@4)
+    // then hijacks the project as yarn berry, and the DXG run
+    // installs through yarn and fails on the home manifest. An empty
+    // bun.lock pins detection to THIS project (ni maps it to the bun
+    // agent); bun add rewrites a stale/empty lockfile fine (verified
+    // live: bun add ms, exit 0).
+    if (
+      !existsSync(path.join(dir, "bun.lock")) &&
+      !existsSync(path.join(dir, "bun.lockb"))
+    ) {
+      writeFileSync(path.join(dir, "bun.lock"), "", "utf8");
+    }
   }
   return res.ms;
 }
@@ -400,6 +426,85 @@ export function depSection(
 
 export function scriptSection(pkg: Json): Record<string, string> {
   return (pkg.scripts ?? {}) as Record<string, string>;
+}
+
+/**
+ * Normalizes terminal rendering for content assertions: strips ANSI
+ * escapes and Clack's box borders, then collapses whitespace.
+ *
+ * Why this is assertion-correctness, NOT a test exception: dxg
+ * renders its summaries through @clack/prompts note(), which wraps
+ * long lines at (columns-6) and borders each line — the fragments of
+ * one sentence end up separated by a box border, not a space. Under a
+ * spawned pipe `stdout.columns` is undefined and the wrap hits ~80
+ * columns (live capture, 2026-10-10 baseline). On top of that, Clack
+ * 1.7.0 picks its border glyphs from the spawn-INHERITED environment
+ * (isUnicodeSupported: CI, WT_SESSION, TERM_PROGRAM=vscode, TERM…),
+ * so the same note renders in two modes:
+ *
+ *   • unicode (parent sets WT_SESSION — morning Windows-Terminal
+ *     baseline): "│" U+2502 borders,
+ *       │  • prisma@7.10.0 … reinstall (already declared at  │
+ *       │  the verified pin)                                  │
+ *   • ASCII (parent sets none of the markers — VS Code session,
+ *     2026-10-10 evening runs): "|" U+007C borders and "T"/"o"/"+"
+ *     corners (S_BAR_START/S_STEP_SUBMIT/S_CORNER_* fallbacks),
+ *       |  • prisma@7.10.0 … reinstall (already declared at  |
+ *       |  the verified pin)                                  |
+ *
+ * In BOTH modes the CLI said exactly the asserted string — a raw
+ * toContain on the wrapped bytes fails on the inserted border alone.
+ * unwrapped() strips per line: ANSI escapes, box-drawing U+2500–U+257F
+ * (unicode mode), and border pipes at LINE EDGES only (ASCII mode —
+ * inner pipes are content, e.g. "dev: X | deps: Y", and survive).
+ * Spinner/step glyphs (◒ ✔ ◇) are outside U+2500–U+257F and survive.
+ */
+export function unwrapped(output: string): string {
+  return output
+    .split(/\r?\n/)
+    .map((line) =>
+      line
+        .replace(/\u001b\[[0-9;:?]*[@-~]/g, " ") // ANSI CSI (SGR colors…)
+        .replace(/[─-╿]/g, " ") // unicode-mode borders (│ ─ ╮ ╯…)
+        .replace(/^\s*(?:\|\s?)+/, "") // ASCII-mode left border pipe(s)
+        .replace(/(?:\s?\|)+\s*$/, ""), // ASCII-mode right border pipe(s)
+    )
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * True when this Node build hits the upstream CJS-in-ESM zip-fstat
+ * bug (yarnpkg/berry#7065): Node's ESM loader caches the unpatched
+ * fs before yarn berry's patchFs runs, so translating CommonJS from
+ * PnP zip archives dies with "EBADF: bad file descriptor, fstat".
+ *
+ * Live-proven on this machine for Node 24.15.0, WITHOUT dxg and
+ * WITHOUT vitest: a bare `yarn dlx prisma@7 init` on an empty berry
+ * project crashed identically, as did the project-local binary, and
+ * yarn 4.18.1's own workaround (shipped 4.14.1, PRs #7070/#7104)
+ * does NOT save 24.15.0 here (dxg-probe-ebadf-4: full stack
+ * createCJSModuleWrap → getSourceSync → readFileSync → fstat).
+ *
+ * Fixed Node-side in 26.1.0 (nodejs/node#62835, backported to the
+ * 24.x line at 24.16.0). Affected: 24.14.1–24.15.x (live + upstream
+ * reports), 25.7.0+ (upstream; the 25.x line is EOL, never fixed),
+ * 26.0.0 (upstream report). Everything else is healthy.
+ */
+export function nodeHasBrokenCjsInEsmFstat(version: string): boolean {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version);
+  if (!m) return false;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  const patch = Number(m[3]);
+  if (major === 24) {
+    if (minor === 14) return patch >= 1;
+    return minor === 15;
+  }
+  if (major === 25) return minor >= 7; // EOL line, never fixed
+  if (major === 26) return minor === 0; // fixed in 26.1.0
+  return false;
 }
 
 /**

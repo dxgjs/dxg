@@ -21,7 +21,9 @@ import {
   runPM,
   scriptSection,
   snapshotUserFiles,
+  unwrapped,
   withProject,
+  nodeHasBrokenCjsInEsmFstat,
   type E2EPm,
 } from "./_helpers";
 
@@ -113,7 +115,9 @@ async function freshScenario(pm: E2EPm, dir: string): Promise<FreshTimings> {
   ).toBe(0);
   expect(snapshotUserFiles(dir)).toEqual(filesBefore);
   expect(readJson(dir, "package.json")).toEqual(pkgBefore);
-  expect(run2.stdout).toContain("already declared at the verified pin");
+  // The skip note renders inside a Clack box that wraps at the pipe's
+  // ~80 columns — assert on the said content, not the wrapping.
+  expect(unwrapped(run2.stdout)).toContain("already declared at the verified pin");
   expect(
     Object.keys(scriptSection(readJson(dir, "package.json"))).filter((s) =>
       s.startsWith("db:"),
@@ -131,6 +135,21 @@ describe("E2E: dxg add database — fresh project matrix (real installs)", () =>
       async (ctx) => {
         if (!(await pmAvailable(pm))) {
           return ctx.skip(`${pm} is not installed on this machine`);
+        }
+        // Environment gate, NOT a product defect: on affected Node
+        // builds, yarn berry's PnP runtime itself crashes (upstream
+        // Node×yarn bug — see nodeHasBrokenCjsInEsmFstat in
+        // _helpers.ts for the live proof) BEFORE any dxg code runs.
+        // The full row executes on every healthy Node (22.x, 24.16+,
+        // 26.1+).
+        if (pm === "yarn-berry" && nodeHasBrokenCjsInEsmFstat(process.version)) {
+          return ctx.skip(
+            `Node ${process.version} × yarn berry PnP: upstream CJS-in-ESM ` +
+              `zip-fstat bug (yarnpkg/berry#7065) crashes prisma before dxg ` +
+              `runs — live-reproduced without dxg and without vitest, and ` +
+              `yarn 4.18.1's workaround does not save this Node. Fixed Node-side ` +
+              `in 26.1.0 (backported at 24.16.0).`,
+          );
         }
         await withProject(`fresh-${pm}`, async (dir) => {
           const timings = await freshScenario(pm, dir);

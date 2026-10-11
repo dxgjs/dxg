@@ -30,6 +30,7 @@ import {
   scriptSection,
   sha,
   snapshotUserFiles,
+  unwrapped,
   withProject,
 } from "./_helpers";
 
@@ -165,8 +166,9 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
       expect(mustExist(dir, "lib/generated/prisma/client.ts")).toContain(
         "PrismaClient",
       );
-      // The satisfied skip is visible (no Prisma reinstall).
-      expect(run.stdout).toContain("already declared at the verified pin");
+      // The satisfied skip is visible (no Prisma reinstall) — said
+      // content, not the pipe-width box wrapping (unwrapped()).
+      expect(unwrapped(run.stdout)).toContain("already declared at the verified pin");
     });
   });
 
@@ -186,8 +188,10 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         `dxg exited ${run1.code}\nSTDOUT:\n${run1.stdout}\nSTDERR:\n${run1.stderr}`,
       ).toBe(0);
       // Run 1 initialized Prisma for real — the init-skip summary line
-      // must NOT be there yet.
-      expect(run1.stdout).not.toContain(
+      // must NOT be there yet. Same normalized view as the rerun
+      // assertion below: a raw not.toContain could pass for the wrong
+      // reason if the skip line were present but box-wrapped.
+      expect(unwrapped(run1.stdout)).not.toContain(
         "(schema.prisma or prisma7.config.ts already exists)",
       );
 
@@ -210,12 +214,14 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
       console.log(
         `[e2e] rerun timings — fresh run: ${run1.ms}ms, rerun: ${run2.ms}ms`,
       );
-      // Init skipped — surfaced in the operation summary.
-      expect(run2.stdout).toContain(
+      // Init skipped — surfaced in the operation summary. Both skip
+      // lines wrap inside the ~80-column Clack box under the spawned
+      // pipe; assert on the said content (unwrapped()).
+      expect(unwrapped(run2.stdout)).toContain(
         "Prisma initialization (schema.prisma or prisma7.config.ts already exists)",
       );
       // No reinstall — the pins run 1 wrote are already satisfied.
-      expect(run2.stdout).toContain("already declared at the verified pin");
+      expect(unwrapped(run2.stdout)).toContain("already declared at the verified pin");
       // No user-facing file mutated by the rerun.
       expect(snapshotUserFiles(dir)).toEqual(snapshot1);
       // npm never ran again: lockfile byte-identical, manifest unchanged.
@@ -471,8 +477,17 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         expect(mustExist(dir, `${outputDir}/client.ts`)).toContain(
           "PrismaClient",
         );
-        expect(readText(dir, "prisma/schema.prisma")).toContain(
-          `output = "../${outputDir}"`,
+        // Prisma 7's `init --output` writes the generator block with
+        // aligned "=" signs (`provider = `, `output   = `) —
+        // live-verified with a bare prisma init, no dxg involved
+        // (dxg-probe-output-fmt, 2026-10-10). Prove the declared
+        // output VALUE, not prisma's column alignment.
+        const escapedOutputDir = outputDir.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        );
+        expect(readText(dir, "prisma/schema.prisma")).toMatch(
+          new RegExp(`output\\s+=\\s+"\\.\\./${escapedOutputDir}"`),
         );
       }
       // Escape proof: the isolated root holds exactly the two projects —
