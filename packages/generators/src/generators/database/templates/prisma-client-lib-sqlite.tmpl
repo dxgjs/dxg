@@ -2,7 +2,16 @@ import "dotenv/config";
 import { {{adapterImport}} } from "{{adapterPackage}}";
 import { PrismaClient } from "{{generatedClientImport}}";
 
-const connectionString = `${process.env.DATABASE_URL}`;
+// Fail loudly at import time: a missing DATABASE_URL must never silently
+// coerce to the string "undefined" — the better-sqlite3 adapter accepts
+// it and only fails, confusingly, at first use (live-proven 2026-10-11).
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+  throw new Error(
+    "DATABASE_URL is not set. Add it to your .env file or export it in your environment.",
+  );
+}
 
 const adapter = new {{adapterClass}}({ url: connectionString });
 const prisma = new PrismaClient({ adapter });

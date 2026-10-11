@@ -748,7 +748,10 @@ describe("Database Generator", () => {
       ],
       sqlserver: ["new PrismaMssql(sqlConfig)"],
       planetscale: [
-        "new PrismaPlanetScale({ url: process.env.DATABASE_URL, fetch: undiciFetch })",
+        // H-1 fix (2026-10-11): url flows through the GUARDED
+        // connectionString variable — never raw process.env, which
+        // passes undefined silently (live-proven).
+        "new PrismaPlanetScale({ url: connectionString, fetch: undiciFetch })",
       ],
     };
 
