@@ -107,10 +107,12 @@ async function freshScenario(pm: E2EPm, dir: string): Promise<FreshTimings> {
   // instead of letting a missing variable silently become the string
   // "undefined" (live-proven: driver adapters construct fine on that
   // and only fail, confusingly, at first use).
+  // FIXED: guard is now `if (connectionString === undefined)` to allow
+  // empty string for server providers (out-of-the-box db:seed support).
   expect(helper).toContain(
     "const connectionString = process.env.DATABASE_URL;",
   );
-  expect(helper).toMatch(/if \(!connectionString\)\s*\{/);
+  expect(helper).toMatch(/if \(connectionString === undefined\)\s*\{/);
   expect(helper).toContain("DATABASE_URL is not set");
 
   // 7c. H-2 contract: .env is gitignored after a fresh run. prisma init
@@ -120,10 +122,10 @@ async function freshScenario(pm: E2EPm, dir: string): Promise<FreshTimings> {
   // author achieved it.
   const gitignoreLines = mustExist(dir, ".gitignore")
     .split(/\r?\n/)
-    .map((line) => line.trim());
+    .map((line) => line.trimEnd());
   expect(
     gitignoreLines.some((line) =>
-      [".env", ".env*", ".env.*", "*.env"].includes(line),
+      [".env", ".env*", "*.env"].includes(line),
     ),
   ).toBe(true);
 

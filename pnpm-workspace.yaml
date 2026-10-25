@@ -4,3 +4,6 @@ packages:
   - "tooling/*"
 allowBuilds:
   esbuild: true
+  prisma: true
+  better-sqlite3: true
+  '@prisma/engines': true

@@ -8,6 +8,12 @@
  *        driver adapters accept silently (live-proven 2026-10-11: the
  *        better-sqlite3 adapter constructs without error on
  *        url="undefined") and only surfaces, confusingly, at first use.
+ *        The guard tests ABSENCE (undefined), not emptiness: DXG itself
+ *        writes "DATABASE_URL=" (empty placeholder) for server providers
+ *        and the driver adapters are lazy, so the skeleton db:seed chain
+ *        must run out-of-the-box on that state (live-proven
+ *        2026-10-11: a falsy guard made `pnpm run db:seed` exit 1 on
+ *        DXG's own fresh output; the postgres-seed e2e row locks this).
  *
  *   H-2: a .env that DXG itself created or appended must be gitignored.
  *        `prisma init` warns about it ("Don't forget to add .env in it
@@ -365,7 +371,8 @@ describe("environment contract (DATABASE_URL guard + .env gitignore)", () => {
         expect(helper).toContain(
           "const connectionString = process.env.DATABASE_URL;",
         );
-        expect(helper).toMatch(/if \(!connectionString\)\s*\{/);
+        expect(helper).toMatch(/if \(connectionString === undefined\)\s*\{/);
+        expect(helper).not.toMatch(/if \(!connectionString\)/);
         // ...that throws a message naming the missing variable.
         expect(helper).toMatch(/throw new Error\(/);
         expect(helper).toContain("DATABASE_URL is not set");
@@ -403,7 +410,7 @@ describe("environment contract (DATABASE_URL guard + .env gitignore)", () => {
       expect(gitignore).toBe(`${existing}.env\n`);
     });
 
-    test.each([".env", ".env*", ".env.*", "*.env"])(
+    test.each([".env", ".env*", "*.env"])(
       "a .gitignore already covering .env (%s) is left untouched",
       async (spelling) => {
         const existing = `node_modules/\n${spelling}\n`;
@@ -417,6 +424,42 @@ describe("environment contract (DATABASE_URL guard + .env gitignore)", () => {
         expect(fsMockStore._files.get(".gitignore")).toBe(existing);
       },
     );
+
+    test('".env.*" should provoke an append (".env" added after the line)', async () => {
+      const existing = "node_modules/\n.env.*\n";
+      await fs.writeFile(".gitignore", existing, "utf8");
+
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      expect(fsMockStore._files.get(".gitignore")).toBe("node_modules/\n.env.*\n.env\n");
+    });
+
+    test('"  .env" (leading space) should provoke an append (".env" added after the line)', async () => {
+      const existing = "node_modules/\n  .env\n";
+      await fs.writeFile(".gitignore", existing, "utf8");
+
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      expect(fsMockStore._files.get(".gitignore")).toBe("node_modules/\n  .env\n.env\n");
+    });
+
+    test('".env " (trailing space) should be left intact (already covered)', async () => {
+      const existing = "node_modules/\n.env \n";
+      await fs.writeFile(".gitignore", existing, "utf8");
+
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      expect(fsMockStore._files.get(".gitignore")).toBe(existing);
+    });
 
     test("an explicit !.env negation is respected (user tracks .env deliberately)", async () => {
       const existing = "node_modules/\n!.env\n";

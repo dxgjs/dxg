@@ -1325,8 +1325,12 @@ export async function executeDatabase(
   // - .gitignore absent → create a minimal one covering .env.
   // - present without .env coverage → APPEND the line; every existing
   //   byte is preserved.
-  // - already covering .env (whole-line spellings: .env, .env*, .env.*,
-  //   *.env) → untouched.
+  //   - already covering .env (whole-line spellings: .env, .env*,
+  //   *.env — the only spellings git actually ignores .env under,
+  //   probe-verified 2026-10-11; ".env.*" does NOT cover .env) →
+  //   untouched. Trailing spaces are insignificant to git (trimmed
+  //   for the comparison); leading spaces are significant — an
+  //   indented "  .env" is not coverage and must not count.
   // - an explicit `!.env` negation is a deliberate user choice to track
   //   .env → respected, untouched.
   // Scoped to envNeedsDatabaseUrl — the same marker that gates the .env
@@ -1351,9 +1355,9 @@ export async function executeDatabase(
           ? gitignoreText.split(/\r?\n/)
           : [];
       const coversEnv = lines.some((line) =>
-        [".env", ".env*", ".env.*", "*.env"].includes(line.trim()),
+        [".env", ".env*", "*.env"].includes(line.trimEnd()),
       );
-      const negatesEnv = lines.some((line) => line.trim() === "!.env");
+      const negatesEnv = lines.some((line) => line.trimEnd() === "!.env");
       if (!coversEnv && !negatesEnv) {
         if (typeof gitignoreText !== "string") {
           await fs.writeFile(gitignorePath, ".env\n", "utf8");

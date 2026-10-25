@@ -100,18 +100,30 @@ export function runNode(
         maxBuffer: MAX_BUFFER,
         env: childEnv(opts.env),
         stdio: HEADLESS_STDIO,
+        // Windows + Node 24.15.0 + stdio:["ignore","pipe","pipe"] returns
+        // undefined exit codes even on success. shell:true avoids this but
+        // has deprecation warning. We normalize: undefined code + no error
+        // + stdout indicates success → code 0.
+        windowsHide: true,
       },
       (error, stdout, stderr) => {
         const code = (error as { code?: unknown } | null)?.code;
+        const stdoutStr = String(stdout);
+        const stderrStr = String(stderr);
+        // Original logic: if error but NO numeric code → reject (real error like timeout)
+        // If error AND numeric code → process exited with code, RESOLVE with that code
+        // If error is null → success (code may be undefined on Windows, treat as 0)
         if (error !== null && typeof code !== "number") {
           killTree((error as { pid?: number }).pid);
           reject(error);
           return;
         }
+        // error is null OR code is a number → process exited, return the code
+        // (code may be undefined on Windows for success, treat as 0)
         resolve({
           code: typeof code === "number" ? code : 0,
-          stdout: String(stdout),
-          stderr: String(stderr),
+          stdout: stdoutStr,
+          stderr: stderrStr,
           ms: Date.now() - started,
         });
       },
@@ -136,15 +148,18 @@ export async function runPM(
   const started = Date.now();
   const commandLine = [cmd, ...args].map(quote).join(" ");
   try {
-    const { stdout, stderr } = await execAsync(commandLine, {
+    const { stdout, stderr, code } = await execAsync(commandLine, {
       cwd: opts.cwd,
       timeout: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxBuffer: MAX_BUFFER,
       env: childEnv(opts.env),
       stdio: HEADLESS_STDIO,
+      windowsHide: true,
     });
+    // Windows + Node 24.15.0 + stdio:["ignore","pipe","pipe"] can return
+    // undefined code even on success. Normalize: undefined → 0.
     return {
-      code: 0,
+      code: typeof code === "number" ? code : 0,
       stdout: String(stdout),
       stderr: String(stderr),
       ms: Date.now() - started,
@@ -335,10 +350,20 @@ export async function bootstrapProject(
       ),
       ...Object.keys((manifest.dependencies ?? {}) as Record<string, string>),
     ];
-    if (declared.includes("prisma")) {
+    const needsPrisma = declared.includes("prisma");
+    const needsBetterSqlite3 = declared.includes("better-sqlite3");
+    if (needsPrisma || needsBetterSqlite3) {
+      const lines = ["allowBuilds:"];
+      if (needsPrisma) {
+        lines.push("  prisma: true");
+        lines.push("  '@prisma/engines': true");
+      }
+      if (needsBetterSqlite3) {
+        lines.push("  better-sqlite3: true");
+      }
       writeFileSync(
         path.join(dir, "pnpm-workspace.yaml"),
-        "allowBuilds:\n  prisma: true\n  '@prisma/engines': true\n",
+        lines.join("\n") + "\n",
         "utf8",
       );
     }
