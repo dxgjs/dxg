@@ -17,7 +17,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node: [22, 24]
+        # Node 24.15.0 has CJS-in-ESM zip-fstat bug (yarnpkg/berry#7065)
+        # affecting yarn-berry. Requires Node 24.16.0+ or 26 LTS.
+        node: [22, 26]
 
     steps:
       - uses: actions/checkout@v4

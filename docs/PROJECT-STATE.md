@@ -191,3 +191,29 @@ Focus remains on improving the quality, reliability, UX, composability, diagnost
   - tests: PASS (workspace package and CLI package)
   - build: PASS (all packages)
 - Verified FS type ownership is correctly maintained in workspace package usage
+
+## KNOWN ENVIRONMENT CONSTRAINTS (2026-10-25)
+
+### yarn-berry (yarn@4.x) Node Version Requirement
+
+**Issue**: Node.js 24.15.0 has a CJS-in-ESM zip-fstat bug ([yarnpkg/berry#7065](https://github.com/yarnpkg/berry/issues/7065)) causing `EBADF` errors during yarn-berry operations.
+
+**Requirement**: Node 24.16.0+ or Node 26 LTS (current CI matrix pins Node 26).
+
+**CI Configuration**: `.github/workflows/ci.yml` matrix updated from `node: [22, 24]` to `node: [22, 26]`.
+
+**Impact**: yarn-berry E2E tests will fail on Node 24.15.0. This is an upstream Node.js bug, not a DXG code issue.
+
+### TLS Certificate Issues (npm / yarn-classic)
+
+**Issue**: `registry.yarnpkg.com` and `registry.npmjs.org` TLS certificate mismatches in some CI environments.
+
+**Workaround**: Use registry mirror (e.g., `npmmirror.com`) or set `NODE_EXTRA_CA_CERTS` in CI.
+
+**Impact**: npm and yarn-classic fresh matrix tests fail on TLS. pnpm and yarn-berry fresh tests pass completely.
+
+### SQLite Native Build (better-sqlite3)
+
+**Issue**: `better-sqlite3` requires Visual Studio C++ build tools on Windows.
+
+**Workaround**: Add `better-sqlite3: true` to `pnpm-workspace.yaml` `allowBuilds` (done in H-4 fix). Long-term: LibSQL/Turso provider eliminates native dependency.
