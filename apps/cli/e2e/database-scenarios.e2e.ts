@@ -10,8 +10,9 @@
  * carries the sqlite native chain (its allowScripts pre-approval is
  * the strongest real native-build proof). All installs are real.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import * as path from "node:path";
+import * as os from "node:os";
 import { describe, expect, test } from "vitest";
 import {
   CLI_BIN,
@@ -20,6 +21,7 @@ import {
   installedVersion,
   listDir,
   mustExist,
+  nodeHasBrokenCjsInEsmFstat,
   pmAvailable,
   readJson,
   readText,
@@ -583,5 +585,192 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
       expect(seed.code, `db:seed\n${seed.stdout}\n${seed.stderr}`).toBe(0);
       expect(seed.stdout).toContain("Seed script ready");
     });
+  });
+
+  /**
+   * CI CONTRACT MATRIX
+   *
+   * These rows verify that the lockfile state DXG leaves behind satisfies
+   * the exact checks each PM's CI command performs:
+   *
+   *   pnpm: install --frozen-lockfile  (fails on ERR_PNPM_OUTDATED_LOCKFILE)
+   *   npm:  ci                          (fails on lockfile/manifest drift)
+   *   yarn: install --frozen-lockfile  (fails on lockfile/manifest drift)
+   *
+   * The test runs the full dxg add database chain (bootstrap → dxg →
+   * driver answers for provider + scripts) for each provider × PM
+   * combination, then executes the CI command against the resulting
+   * project. Providers that install native deps (sqlite → better-sqlite3)
+   * exercise the strongest proof because pnpm 12.5.1 rewrites commanded
+   * ranges on save (live-proven: ^12.6.0 → ^12.11.1 in both manifest and
+   * lockfile), reconcile restores the manifest, and the lockfile-only
+   * resync fixes the lockfile. Without the resync, CI dies.
+   *
+   * The matrix is parameterised by provider so every officially supported
+   * database is covered. Offline/prefer-offline installs are also tested
+   * where the PM supports them.
+   */
+  const CI_PROVIDERS = [
+    "sqlite",
+    "postgresql",
+    "mysql",
+    "sqlserver",
+    "cockroachdb",
+    "planetscale",
+    "prismapostgres",
+  ] as const;
+
+  const CI_PMS = ["pnpm", "npm", "yarn-classic", "yarn-berry", "bun"] as const;
+
+  type CiPm = (typeof CI_PMS)[number];
+  type CiProvider = (typeof CI_PROVIDERS)[number];
+
+  interface CiContractResult {
+    pm: CiPm;
+    provider: CiProvider;
+    frozenLockfile: boolean;
+    npmCi: boolean;
+    yarnFrozen: boolean;
+    offline: boolean;
+  }
+
+  async function runCiContract(
+    pm: CiPm,
+    provider: CiProvider,
+  ): Promise<CiContractResult> {
+    const dir = mkdtempSync(path.join(os.tmpdir(), `dxg-ci-${pm}-${provider}-`));
+    try {
+      await bootstrapProject(dir, pm);
+      const run = await runDriver(dir, {
+        provider,
+        installPrismaSkills: false,
+        databaseScripts: ["db:generate", "db:push"],
+        helperPath: "lib/prisma.ts",
+      });
+      expect(run.code, `driver exited ${run.code}\n${run.stdout}\n${run.stderr}`).toBe(0);
+
+      const results: CiContractResult = {
+        pm,
+        provider,
+        frozenLockfile: false,
+        npmCi: false,
+        yarnFrozen: false,
+        offline: false,
+      };
+
+      // pnpm frozen-lockfile
+      if (pm === "pnpm") {
+        const frozen = await runPM("pnpm", ["install", "--frozen-lockfile"], {
+          cwd: dir,
+          timeoutMs: 5 * 60_000,
+        });
+        results.frozenLockfile = frozen.code === 0;
+      }
+
+      // npm ci (works on any PM that produces package-lock.json)
+      if (pm === "npm" || pm === "yarn-classic" || pm === "yarn-berry" || pm === "bun") {
+        // npm ci requires package-lock.json; yarn/bun produce their own lockfiles
+        // but we test npm ci specifically on npm projects
+        if (pm === "npm") {
+          const ci = await runPM("npm", ["ci"], {
+            cwd: dir,
+            timeoutMs: 5 * 60_000,
+          });
+          results.npmCi = ci.code === 0;
+        }
+      }
+
+      // yarn frozen-lockfile
+      if (pm === "yarn-classic" || pm === "yarn-berry") {
+        const frozen = await runPM("yarn", ["install", "--frozen-lockfile"], {
+          cwd: dir,
+          timeoutMs: 5 * 60_000,
+        });
+        results.yarnFrozen = frozen.code === 0;
+      }
+
+      // Offline installs
+      if (pm === "npm") {
+        const offline = await runPM("npm", ["install", "--prefer-offline"], {
+          cwd: dir,
+          timeoutMs: 5 * 60_000,
+        });
+        results.offline = offline.code === 0;
+      } else if (pm === "pnpm") {
+        const offline = await runPM("pnpm", ["install", "--offline"], {
+          cwd: dir,
+          timeoutMs: 5 * 60_000,
+        });
+        results.offline = offline.code === 0;
+      } else if (pm === "yarn-classic" || pm === "yarn-berry") {
+        const offline = await runPM("yarn", ["install", "--offline"], {
+          cwd: dir,
+          timeoutMs: 5 * 60_000,
+        });
+        results.offline = offline.code === 0;
+      } else if (pm === "bun") {
+        const offline = await runPM("bun", ["install", "--offline"], {
+          cwd: dir,
+          timeoutMs: 5 * 60_000,
+        });
+        results.offline = offline.code === 0;
+      }
+
+      // Cleanup
+      try {
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 });
+      } catch {
+        console.error(`[e2e] cleanup failed — project kept: ${dir}`);
+      }
+
+      return results;
+    } catch (error) {
+      console.error(`[e2e] failure — project kept for diagnosis: ${dir}`);
+      throw error;
+    }
+  }
+
+  describe("E2E: CI contract matrix — frozen-lockfile / npm ci / yarn frozen / offline", () => {
+    for (const pm of CI_PMS) {
+      for (const provider of CI_PROVIDERS) {
+        test(
+          `CI contract: ${pm} × ${provider}`,
+          { timeout: 20 * 60_000 },
+          async (ctx) => {
+            if (!(await pmAvailable(pm))) {
+              return ctx.skip(`${pm} is not installed on this machine`);
+            }
+            // Environment gate for yarn berry on broken Node builds
+            if (
+              pm === "yarn-berry" &&
+              nodeHasBrokenCjsInEsmFstat(process.version)
+            ) {
+              return ctx.skip(
+                `Node ${process.version} × yarn berry PnP: upstream CJS-in-ESM ` +
+                  `zip-fstat bug (yarnpkg/berry#7065) crashes prisma before dxg ` +
+                  `runs — live-reproduced without dxg and without vitest, and ` +
+                  `yarn 4.18.1's workaround does not save this Node. Fixed Node-side ` +
+                  `in 26.1.0 (backported at 24.16.0).`,
+              );
+            }
+
+            const results = await runCiContract(pm, provider);
+
+            // Assert the CI contract checks that are relevant for this PM
+            if (pm === "pnpm") {
+              expect(results.frozenLockfile).toBe(true);
+            }
+            if (pm === "npm") {
+              expect(results.npmCi).toBe(true);
+            }
+            if (pm === "yarn-classic" || pm === "yarn-berry") {
+              expect(results.yarnFrozen).toBe(true);
+            }
+            // Offline install should work for all PMs that support it
+            expect(results.offline).toBe(true);
+          },
+        );
+      }
+    }
   });
 });

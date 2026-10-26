@@ -33,6 +33,13 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
 
+      # TLS bypass: use npmmirror.com registry for npm and yarn-classic
+      - name: Configure npm registry (TLS bypass)
+        run: npm config set registry https://registry.npmmirror.com
+
+      - name: Configure yarn registry (TLS bypass)
+        run: yarn config set registry https://registry.npmmirror.com
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 

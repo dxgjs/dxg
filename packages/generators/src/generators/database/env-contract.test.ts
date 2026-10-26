@@ -45,6 +45,7 @@ import * as path from "path";
 import * as os from "os";
 import type { FSInterface, Generator } from "../../types";
 import type { ProjectAwareness } from "@dxgjs/workspace";
+import { execFileSync } from "node:child_process";
 
 type PackageJson = ProjectAwareness["packageJson"];
 
@@ -504,6 +505,333 @@ describe("environment contract (DATABASE_URL guard + .env gitignore)", () => {
       // business either (the user owns the hygiene decision here).
       expect(fsMockStore._files.get(".env")).toBe(userEnv);
       expect(fsMockStore._files.has(".gitignore")).toBe(false);
+    });
+  });
+});
+
+describe("security/secret leakage prevention", () => {
+  let originalCwd: string;
+  let tempDir: string;
+
+  beforeEach(async () => {
+    originalCwd = process.cwd();
+    tempDir = path.join(
+      os.tmpdir(),
+      `dxg-secret-leakage-${Date.now()}-${Math.random()
+        .toString(36)
+        .substring(2, 15)}`,
+    );
+    fs.mkdirSync(tempDir, { recursive: true });
+    process.chdir(tempDir);
+    vi.clearAllMocks();
+    fsMockStore._files.clear();
+    fsMockStore._directories.clear();
+    await seedProject();
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  describe(".gitignore coverage and git status", () => {
+    test("fresh run creates .gitignore with .env entry when neither exists", async () => {
+      // Precondition: neither .env nor .gitignore exists
+      expect(fsMockStore._files.has(".env")).toBe(false);
+      expect(fsMockStore._files.has(".gitignore")).toBe(false);
+
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      // Verify .gitignore was created and contains .env
+      const gitignore = fsMockStore._files.get(".gitignore");
+      expect(gitignore).toBeDefined();
+      expect(gitignore).toMatch(/(^|\n)\.env(\r?\n|$)/);
+    });
+
+    test("fresh run appends .env to existing .gitignore", async () => {
+      const existingGitignore = "node_modules/\ndist/\n";
+      await fs.writeFile(".gitignore", existingGitignore, "utf8");
+
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const gitignore = fsMockStore._files.get(".gitignore");
+      expect(gitignore).toBe(`${existingGitignore}.env\n`);
+    });
+
+    test("git status would show .env as ignored (simulated via .gitignore content)", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const gitignore = fsMockStore._files.get(".gitignore") ?? "";
+      const lines = gitignore.split(/\r?\n/).map((l) => l.trimEnd());
+      const hasEnvIgnore = lines.some((line) =>
+        [".env", ".env*", "*.env"].includes(line),
+      );
+      expect(hasEnvIgnore).toBe(true);
+
+      // The .env file should exist (written by DXG)
+      const envContent = fsMockStore._files.get(".env");
+      expect(envContent).toBeDefined();
+      expect(envContent).toContain("DATABASE_URL");
+    });
+  });
+
+  describe("DATABASE_URL placeholders contain no real credentials", () => {
+    test("server providers get empty DATABASE_URL placeholder", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      // Server providers get empty placeholder: DATABASE_URL=
+      expect(envContent).toContain("DATABASE_URL=");
+      // Should NOT contain real connection strings
+      expect(envContent).not.toMatch(/DATABASE_URL=postgresql:\/\//);
+      expect(envContent).not.toMatch(/DATABASE_URL=mysql:\/\//);
+      expect(envContent).not.toMatch(/DATABASE_URL=cockroachdb:\/\//);
+      expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/); // No credentials in URL
+    });
+
+    test("sqlite gets file: URL placeholder (not real credentials)", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "sqlite" },
+        makeContext(),
+      );
+
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      // SQLite gets a local file URL
+      expect(envContent).toContain('DATABASE_URL="file:./dev.db"');
+      // Should not contain remote URLs or credentials
+      expect(envContent).not.toMatch(/DATABASE_URL=postgresql:\/\//);
+      expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/);
+    });
+
+    test("planetscale gets empty placeholder (server provider)", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "planetscale" },
+        makeContext(),
+      );
+
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      expect(envContent).toContain("DATABASE_URL=");
+      expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/);
+    });
+
+    test("prismapostgres gets empty placeholder (server provider)", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "prismapostgres" },
+        makeContext(),
+      );
+
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      expect(envContent).toContain("DATABASE_URL=");
+      expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/);
+    });
+
+    test("cockroachdb gets empty placeholder (server provider)", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "cockroachdb" },
+        makeContext(),
+      );
+
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      expect(envContent).toContain("DATABASE_URL=");
+      expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/);
+    });
+
+    test("user-owned .env with real DATABASE_URL is never modified", async () => {
+      // User already has a .env with real credentials
+      const userEnv = "DATABASE_URL=postgresql://realuser:realpass@prod.db:5432/proddb\n";
+      await fs.writeFile(".env", userEnv, "utf8");
+
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      // DXG must NOT touch user's .env when it already has DATABASE_URL
+      const envContent = fsMockStore._files.get(".env");
+      expect(envContent).toBe(userEnv);
+    });
+  });
+
+  describe("generated prisma client lib does not leak secrets", () => {
+    test("helper template has no hardcoded credentials", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const helper = fsMockStore._files.get("lib/prisma.ts");
+      expect(helper).toBeDefined();
+
+      // Must read from process.env.DATABASE_URL, not hardcode anything
+      expect(helper).toContain("const connectionString = process.env.DATABASE_URL;");
+      // No literal connection strings
+      expect(helper).not.toMatch(/postgresql:\/\//);
+      expect(helper).not.toMatch(/mysql:\/\//);
+      expect(helper).not.toMatch(/mongodb:\/\//);
+      expect(helper).not.toMatch(/redis:\/\//);
+      // No credentials in any form - more specific patterns to avoid false positives
+      // AWS access key: AKIA followed by 16 alphanumerics
+      expect(helper).not.toMatch(/AKIA[0-9A-Z]{16}/);
+      // AWS secret: 40 chars base64
+      expect(helper).not.toMatch(/[A-Za-z0-9/+=]{40}/);
+      // Generic long base64 strings (likely secrets) - 32+ chars with padding
+      expect(helper).not.toMatch(/[A-Za-z0-9+/]{32,}={0,2}/);
+      // Hex secrets (32+ chars = 128+ bits)
+      expect(helper).not.toMatch(/[a-f0-9]{32,}/);
+    });
+
+    test("helper has no template literal interpolation of DATABASE_URL", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const helper = fsMockStore._files.get("lib/prisma.ts");
+      expect(helper).toBeDefined();
+
+      // The old bug: template literal `${process.env.DATABASE_URL}` which
+      // becomes the literal string "undefined" when missing
+      expect(helper).not.toMatch(/\$\{process\.env\.DATABASE_URL\}/);
+      expect(helper).not.toMatch(/url:\s*process\.env\.DATABASE_URL/);
+      // Must use direct guarded read
+      expect(helper).toContain("const connectionString = process.env.DATABASE_URL;");
+      expect(helper).toMatch(/if \(connectionString === undefined\)\s*\{/);
+    });
+
+    test("helper throws descriptive error on missing DATABASE_URL", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const helper = fsMockStore._files.get("lib/prisma.ts");
+      expect(helper).toBeDefined();
+
+      expect(helper).toMatch(/throw new Error\(/);
+      expect(helper).toContain("DATABASE_URL is not set");
+    });
+
+    test("all provider templates use the same guard pattern", async () => {
+      const connectionStringProviders = [
+        "postgresql",
+        "sqlite",
+        "cockroachdb",
+        "planetscale",
+        "prismapostgres",
+      ];
+
+      for (const provider of connectionStringProviders) {
+        vi.clearAllMocks();
+        fsMockStore._files.clear();
+        fsMockStore._directories.clear();
+        await seedProject(); // Re-seed package.json for each iteration
+
+        await databaseGenerator.run(
+          { ...ANSWERS, provider },
+          makeContext(),
+        );
+
+        const helper = fsMockStore._files.get("lib/prisma.ts");
+        expect(helper).toBeDefined();
+        expect(helper).toContain("const connectionString = process.env.DATABASE_URL;");
+        expect(helper).toMatch(/if \(connectionString === undefined\)\s*\{/);
+        expect(helper).toContain("DATABASE_URL is not set");
+      }
+    });
+  });
+
+  describe("secret scanning patterns", () => {
+    test("no AWS keys in generated files", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const helper = fsMockStore._files.get("lib/prisma.ts") ?? "";
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      const allContent = helper + envContent;
+
+      // AWS access key pattern
+      expect(allContent).not.toMatch(/AKIA[0-9A-Z]{16}/);
+      // AWS secret key pattern
+      expect(allContent).not.toMatch(/[A-Za-z0-9/+=]{40}/);
+    });
+
+    test("no GitHub tokens in generated files", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const helper = fsMockStore._files.get("lib/prisma.ts") ?? "";
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      const allContent = helper + envContent;
+
+      // GitHub token patterns
+      expect(allContent).not.toMatch(/gh[pousr]_[A-Za-z0-9_]{36,}/);
+      expect(allContent).not.toMatch(/github_pat_[A-Za-z0-9_]{82,}/);
+    });
+
+    test("no generic API keys in generated files", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const helper = fsMockStore._files.get("lib/prisma.ts") ?? "";
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      const allContent = helper + envContent;
+
+      // Generic API key patterns (common prefixes)
+      expect(allContent).not.toMatch(/api[_-]?key["\s:=]+[A-Za-z0-9_-]{20,}/i);
+      expect(allContent).not.toMatch(/secret[_-]?key["\s:=]+[A-Za-z0-9_-]{20,}/i);
+      expect(allContent).not.toMatch(/access[_-]?token["\s:=]+[A-Za-z0-9_-]{20,}/i);
+    });
+
+    test("no private keys in generated files", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const helper = fsMockStore._files.get("lib/prisma.ts") ?? "";
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      const allContent = helper + envContent;
+
+      // Private key patterns
+      expect(allContent).not.toMatch(/-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----/);
+      expect(allContent).not.toMatch(/-----BEGIN CERTIFICATE-----/);
+    });
+
+    test("no database connection strings with embedded credentials in generated files", async () => {
+      await databaseGenerator.run(
+        { ...ANSWERS, provider: "postgresql" },
+        makeContext(),
+      );
+
+      const helper = fsMockStore._files.get("lib/prisma.ts") ?? "";
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      const allContent = helper + envContent;
+
+      // Connection strings with user:pass@host pattern
+      expect(allContent).not.toMatch(/[a-zA-Z]+:\/\/[^:]+:[^@]+@/);
+      // MongoDB connection strings
+      expect(allContent).not.toMatch(/mongodb\+srv:\/\/[^:]+:[^@]+@/);
+      // Redis connection strings
+      expect(allContent).not.toMatch(/redis:\/\/[^:]+:[^@]+@/);
     });
   });
 });

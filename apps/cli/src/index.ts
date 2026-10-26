@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { isCancel } from "@dxgjs/prompts";
 import { initGenerator } from "@dxgjs/generators";
-import { formatDXGError } from "./errors";
+import { formatError } from "@dxgjs/errors";
 import {
   type CommanderOptions,
   detectProjectAwarenessSilently,
@@ -62,7 +62,7 @@ export function createProgram(): Command {
         if (isCancel(err)) {
           return;
         }
-        console.error(formatDXGError(err));
+        console.error(formatError(err));
         process.exitCode = 1;
       }
     });
