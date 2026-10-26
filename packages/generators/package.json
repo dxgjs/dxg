@@ -21,6 +21,7 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "dependencies": {
+    "@dxgjs/errors": "workspace:*",
     "@dxgjs/fs": "workspace:*",
     "@dxgjs/logger": "workspace:*",
     "@dxgjs/prompts": "workspace:*",

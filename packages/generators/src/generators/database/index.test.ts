@@ -1288,7 +1288,7 @@ describe("Database Generator", () => {
       // renders. No silent swallowing, no raw stack dump.
       await expect(
         databaseGenerator.run({ provider: "sqlite" }, context),
-      ).rejects.toThrow(/Failed to install dependencies \(build-script-blocked\)/);
+      ).rejects.toThrow(/Build scripts blocked for: unknown/);
       // The install aborted before Prisma steps: init never ran.
       const calls = (fs.executeCommand as Mock).mock.calls;
       expect(
@@ -1362,7 +1362,7 @@ describe("Database Generator", () => {
       // …and the run ultimately FAILS: verification detects the missing
       // native binding — "exit 0" never masquerades as "operational".
       await expect(runPromise).rejects.toThrow(
-        /better-sqlite3 native binding is missing/,
+        /Build scripts blocked for: better-sqlite3/,
       );
 
       const blockedNote = (noteMock as Mock).mock.calls.find(
@@ -1371,8 +1371,9 @@ describe("Database Generator", () => {
       expect(blockedNote).toBeDefined();
       expect(String(blockedNote![0])).toContain("better-sqlite3");
       // The remediation message carries the per-manager commands.
-      const verifyError = await runPromise.catch((e: Error) => e) as Error;
-      expect(verifyError.message).toContain("pnpm approve-builds");
+      const verifyError = await runPromise.catch((e: Error) => e) as Error & { hints?: string[] };
+      expect(verifyError.hints).toBeDefined();
+      expect(verifyError.hints!.some((h) => h.includes("pnpm approve-builds"))).toBe(true);
     });
 
     test("prisma generate mis-resolved as 'add' falls back to npx with the original args", async () => {

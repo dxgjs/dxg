@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 import { isCancel } from "@dxgjs/prompts";
 import { initGenerator, tailwindGenerator, databaseGenerator, type Generator } from "@dxgjs/generators";
-import { formatDXGError } from "../errors";
+import { formatError, ValidationError } from "@dxgjs/errors";
 import {
   type CommanderOptions,
   detectProjectAwarenessSilently,
@@ -55,7 +55,7 @@ export function registerAddCommand(program: Command): void {
 
         const generator = generatorMap[generatorName];
         if (!generator) {
-          throw new Error(`Unknown generator: ${generatorName}`);
+          throw new ValidationError(`Unknown generator: ${generatorName}`);
         }
 
         // Build initial answers from CLI options and package.json
@@ -79,7 +79,7 @@ export function registerAddCommand(program: Command): void {
         if (isCancel(err)) {
           return;
         }
-        console.error(formatDXGError(err));
+        console.error(formatError(err));
         process.exitCode = 1;
       }
     });

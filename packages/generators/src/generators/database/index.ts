@@ -26,6 +26,17 @@ import type {
 } from "../../install/types";
 import { installerFailureHint } from "../../install/installer";
 import { withDlxBuildApprovals } from "../../install/dlx";
+
+// DXG Error types
+import {
+  PrismaVersionConflictError,
+  ProviderUnsupportedError,
+  BuildBlockedError,
+  TemplateMissingError,
+  InstallerFailureError,
+  ValidationError,
+  SpawnError,
+} from "@dxgjs/errors";
 import {
   specName,
   DEFAULT_GENERATOR_OUTPUT,
@@ -426,7 +437,7 @@ async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
   // 1. package.json must exist (we are adding to an existing project)
   const packageJsonExists = await ctx.fs.pathExists("package.json");
   if (!packageJsonExists) {
-    throw new Error(
+    throw new ValidationError(
       "package.json not found. Please initialize your project (e.g., npm init) before running dxg add database.",
     );
   }
@@ -445,7 +456,7 @@ export function planDatabase(
   const provider = providerData[providerKey as keyof typeof providerData];
 
   if (!provider) {
-    throw new Error(`Unsupported provider: ${providerKey}`);
+    throw new ProviderUnsupportedError(providerKey);
   }
 
   // Helper path resolution (decision document, section 6). Deterministic
@@ -462,7 +473,7 @@ export function planDatabase(
         : DEFAULT_HELPER_PATH;
   const helperError = validateHelperPath(helperPath);
   if (helperError !== undefined) {
-    throw new Error(`Invalid helper path "${helperPath}": ${helperError}`);
+    throw new ValidationError(`Invalid helper path "${helperPath}": ${helperError}`);
   }
 
   // Generator-output resolution — the single source of truth for the plan
@@ -921,7 +932,8 @@ export async function executeDatabase(
   // install and the captured output is echoed on completion.
   if (!ctx.dryRun) {
     if (!ctx.installer) {
-      throw new Error(
+      throw new InstallerFailureError(
+        "installer-unavailable",
         "Dependency installer unavailable: the generator context was built without one (package manager could not be detected).",
       );
     }
@@ -967,9 +979,10 @@ export async function executeDatabase(
         });
       } catch (error) {
         s.stop("Failed to install dependencies");
-        throw new Error(
-          `Failed to install dependencies: ${error instanceof Error ? error.message : String(error)}`,
-          { cause: error },
+        throw new InstallerFailureError(
+          "unknown",
+          error instanceof Error ? error.message : String(error),
+          { cause: error instanceof Error ? error : undefined },
         );
       }
 
@@ -980,14 +993,18 @@ export async function executeDatabase(
         // outcome is reported as what it is — an approval gap, not a
         // broken install.
         const hint = installerFailureHint(installResult);
-        throw new Error(
-          `Failed to install dependencies (${installResult.reason}): ${installResult.output.trim().split("\n").slice(-8).join("\n")}${hint ? `\n${hint}` : ""}`,
-          {
-            cause:
-              installResult.reason === "build-script-blocked"
-                ? new Error(hint)
-                : undefined,
-          },
+        if (installResult.reason === "build-script-blocked") {
+          // Extract blocked package names from the hint/output
+          const blockedMatch = installResult.output.match(/build scripts for ([\w@\/,-]+) \(blocked/);
+          const blockedPackages = blockedMatch
+            ? blockedMatch[1].split(", ")
+            : ["unknown"];
+          throw new BuildBlockedError(blockedPackages, { cause: new Error(hint) });
+        }
+        throw new InstallerFailureError(
+          installResult.reason,
+          installResult.output.trim().split("\n").slice(-8).join("\n"),
+          { cause: new Error(hint) },
         );
       }
 
@@ -1075,7 +1092,11 @@ export async function executeDatabase(
       );
 
       if (!prismaResolved) {
-        throw new Error("Failed to resolve prisma command");
+        throw new SpawnError(
+          "prisma",
+          ["init"],
+          "Failed to resolve prisma command",
+        );
       }
 
       const {
@@ -1127,15 +1148,19 @@ export async function executeDatabase(
         );
       } catch (executeError) {
         s.stop(`Failed to initialize Prisma`);
-        throw new Error(
-          `Failed to initialize Prisma: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
-          { cause: executeError },
+        throw new SpawnError(
+          prismaCmd,
+          prismaArgs,
+          executeError instanceof Error ? executeError.message : String(executeError),
+          { cause: executeError instanceof Error ? executeError : undefined },
         );
       }
     } catch (error) {
-      throw new Error(
-        `Failed to initialize Prisma: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
+      throw new SpawnError(
+        "prisma",
+        ["init"],
+        error instanceof Error ? error.message : String(error),
+        { cause: error instanceof Error ? error : undefined },
       );
     }
   }
@@ -1174,7 +1199,11 @@ export async function executeDatabase(
         },
       );
       if (!generateResolved) {
-        throw new Error("Failed to resolve prisma generate command");
+        throw new SpawnError(
+          "prisma",
+          ["generate", "--no-hints"],
+          "Failed to resolve prisma generate command",
+        );
       }
 
       const {
@@ -1214,15 +1243,19 @@ export async function executeDatabase(
         s.stop("Prisma Client generated");
       } catch (executeError) {
         s.stop(`Failed to generate Prisma Client`);
-        throw new Error(
-          `Failed to generate Prisma Client: ${executeError instanceof Error ? executeError.message : String(executeError)}`,
-          { cause: executeError },
+        throw new SpawnError(
+          generateCmd,
+          generateArgs,
+          executeError instanceof Error ? executeError.message : String(executeError),
+          { cause: executeError instanceof Error ? executeError : undefined },
         );
       }
     } catch (error) {
-      throw new Error(
-        `Failed to generate Prisma Client: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
+      throw new SpawnError(
+        "prisma",
+        ["generate", "--no-hints"],
+        error instanceof Error ? error.message : String(error),
+        { cause: error instanceof Error ? error : undefined },
       );
     }
   } else {
@@ -1503,10 +1536,7 @@ export async function executeDatabase(
         encoding: "utf8",
       })) as string;
     } catch (error) {
-      throw new Error(
-        `Failed to read template file ${templatePath}: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
+      throw new TemplateMissingError(templatePath, { cause: error instanceof Error ? error : undefined });
     }
 
     const rendered = ctx.templates.render(template, data);
@@ -1590,7 +1620,7 @@ export async function verifyDatabase(
   for (const { path } of planToUse.filesToCreate) {
     const exists = await fs.pathExists(path);
     if (!exists) {
-      throw new Error(`Expected file missing after generation: ${path}`);
+      throw new ValidationError(`Expected file missing after generation: ${path}`);
     }
   }
 
@@ -1603,7 +1633,7 @@ export async function verifyDatabase(
   // e2e-pnpm/e2e-npm.
   const generatedClientPath = `${planToUse.generatorOutput}/client.ts`;
   if (!(await fs.pathExists(generatedClientPath))) {
-    throw new Error(
+    throw new ValidationError(
       `Prisma Client was not generated: ${generatedClientPath} is missing. Run "npm run db:generate" (prisma generate) and try again.`,
     );
   }
@@ -1633,8 +1663,9 @@ export async function verifyDatabase(
       }
     }
     if (!bindingFound) {
-      throw new Error(
-        'better-sqlite3 native binding is missing (expected node_modules/better-sqlite3/build/Release/better_sqlite3.node or prebuilds/). The install script was likely blocked by your package manager — approve the build and rebuild, e.g. "pnpm approve-builds" / "npm install-scripts approve better-sqlite3 && npm rebuild better-sqlite3" / "bun pm trust better-sqlite3".',
+      throw new BuildBlockedError(
+        ["better-sqlite3"],
+        { cause: new Error("Native binding not found after install") },
       );
     }
   }
@@ -1767,7 +1798,7 @@ export const databaseGenerator: Generator = {
       // In non-interactive mode, throw error for missing required values
       const missing = [];
       if (needsProvider) missing.push("provider");
-      throw new Error(
+      throw new ValidationError(
         `Missing required values in non-interactive mode: ${missing.join(", ")}`,
       );
     }
@@ -1804,7 +1835,7 @@ export const databaseGenerator: Generator = {
     if (!validateDatabase()) {
       // Use Clack cancel for validation failure
       cancel("Invalid responses for database generator");
-      throw new Error("Invalid responses for database generator");
+      throw new ValidationError("Invalid responses for database generator");
     }
 
     try {
@@ -1822,7 +1853,7 @@ export const databaseGenerator: Generator = {
       // unrecoverable for this generator: it must neither install (the user
       // decides the resolution) nor init (it would fail anyway).
       if (inspection.prismaDirEmpty) {
-        throw new Error(
+        throw new ValidationError(
           [
             "The prisma/ directory exists but contains no schema.prisma.",
             "Prisma init refuses to run when a prisma/ folder already exists,",
@@ -1852,7 +1883,7 @@ export const databaseGenerator: Generator = {
         ]
           .filter(Boolean)
           .join(", ");
-        throw new Error(
+        throw new PrismaVersionConflictError(
           [
             `Prisma version conflict: this project declares ${declared},`,
             `but DXG verifies against prisma@${PRISMA_PINNED_VERSION} (exact pin).`,
