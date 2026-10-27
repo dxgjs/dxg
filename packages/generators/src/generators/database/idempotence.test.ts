@@ -210,13 +210,23 @@ vi.mock("@dxgjs/fs", async () => {
             outputPathRelativeToPrisma = "node_modules/@prisma/client";
           }
           lastPrismaInitOutput = outputPathRelativeToPrisma;
+          // Extract --datasource-provider from args
+          let provider = "sqlite"; // default
+          const providerIndex = args.indexOf("--datasource-provider");
+          if (providerIndex !== -1 && args[providerIndex + 1]) {
+            provider = args[providerIndex + 1];
+          }
           // Write schema.prisma with the output path relative to the prisma directory
           _files.set(
             "prisma/schema.prisma",
-            `generator client {\n  provider = "prisma-client"\n  output = "${lastPrismaInitOutput}"\n}\ndatasource db {\n  provider = "sqlite"\n}`,
+            `generator client {\n  provider = "prisma-client"\n  output = "${lastPrismaInitOutput}"\n}\ndatasource db {\n  provider = "${provider}"\n}`,
           );
           _files.set("prisma7.config.ts", _prismaInitConfig);
-          _files.set(".env", 'DATABASE_URL="file:./dev.db"\n');
+          // Use provider-appropriate DATABASE_URL
+          const dbUrl = provider === "sqlite"
+            ? 'DATABASE_URL="file:./dev.db"\n'
+            : "DATABASE_URL=\n";
+          _files.set(".env", dbUrl);
           _directories.add("prisma");
           return { all: "prisma init ok", stdout: "", stderr: "" };
         }
@@ -931,23 +941,19 @@ describe(".env additive reconciliation", () => {
     // so the placeholder stays empty there. Guards against the sqlite
     // fix leaking to every provider.
     await seedProject(SATISFIED_PACKAGE_JSON);
-    seedReconciledProject();
-    const originalEnv = [
-      "# User-owned environment file",
-      "NEXT_PUBLIC_API_KEY=abc123",
-      "",
-    ].join("\n");
-    fsMockStore._files.set(".env", originalEnv);
-
+    // Fresh project (no existing Prisma schema) — provider detection returns
+    // installed: false, so no mismatch block occurs.
+    // In fresh project mode, .env is created with header and placeholder.
     await databaseGenerator.run(
       { provider: "postgresql", installPrismaSkills: false },
       makeContext(),
     );
 
     const env = fsMockStore._files.get(".env")!;
-    expect(env.startsWith(originalEnv)).toBe(true);
-    const matches = env.match(/^DATABASE_URL=$/gm) ?? [];
-    expect(matches).toHaveLength(1);
+    // Fresh project: .env contains header and empty DATABASE_URL placeholder
+    expect(env).toContain("Environment variables — declared by the database layer");
+    expect(env).toContain("DATABASE_URL=");
+    expect(env.endsWith("DATABASE_URL=\n")).toBe(true);
   });
 });
 

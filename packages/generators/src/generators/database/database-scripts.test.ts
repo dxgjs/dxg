@@ -222,6 +222,12 @@ vi.mock("@dxgjs/fs", async () => {
           args[1] === "init" &&
           !_files.has("prisma7.config.ts")
         ) {
+          // Extract --datasource-provider from args
+          let provider = "sqlite"; // default
+          const providerIndex = args.indexOf("--datasource-provider");
+          if (providerIndex !== -1 && args[providerIndex + 1]) {
+            provider = args[providerIndex + 1];
+          }
           _files.set(
             "prisma/schema.prisma",
             [
@@ -231,13 +237,17 @@ vi.mock("@dxgjs/fs", async () => {
               "}",
               "",
               "datasource db {",
-              "  provider = \"sqlite\"",
+              `  provider = "${provider}"`,
               "}",
               "",
             ].join("\n"),
           );
           _files.set("prisma7.config.ts", _prismaInitConfig);
-          _files.set(".env", 'DATABASE_URL="file:./dev.db"\n');
+          // Use provider-appropriate DATABASE_URL
+          const dbUrl = provider === "sqlite"
+            ? 'DATABASE_URL="file:./dev.db"\n'
+            : "DATABASE_URL=\n";
+          _files.set(".env", dbUrl);
           _directories.add("prisma");
         }
         // Simulate `prisma generate`: emits the generated client at the
@@ -846,10 +856,15 @@ describe("interactive database scripts phase", () => {
   test("existing migrations.seed config is never overwritten without force", async () => {
     await seedProject();
     // The user customized the seed command in their Prisma config.
-    const custom = fsMockStore._prismaInitConfig.replace(
-      '    path: "prisma/migrations",',
-      '    path: "prisma/migrations",\n    seed: "node custom-seed.js",',
-    );
+    const custom = fsMockStore._prismaInitConfig
+      .replace(
+        '    path: "prisma/migrations",',
+        '    path: "prisma/migrations",\n    seed: "node custom-seed.js",',
+      )
+      .replace(
+        '  datasource: {',
+        '  datasource: {\n    provider: "postgresql",',
+      );
     fsMockStore._files.set("prisma7.config.ts", custom);
 
     await databaseGenerator.run(
@@ -872,10 +887,15 @@ describe("interactive database scripts phase", () => {
 
   test("--force replaces a conflicting migrations.seed with the DXG command", async () => {
     await seedProject();
-    const custom = fsMockStore._prismaInitConfig.replace(
-      '    path: "prisma/migrations",',
-      '    path: "prisma/migrations",\n    seed: "node custom-seed.js",',
-    );
+    const custom = fsMockStore._prismaInitConfig
+      .replace(
+        '    path: "prisma/migrations",',
+        '    path: "prisma/migrations",\n    seed: "node custom-seed.js",',
+      )
+      .replace(
+        '  datasource: {',
+        '  datasource: {\n    provider: "postgresql",',
+      );
     fsMockStore._files.set("prisma7.config.ts", custom);
 
     await databaseGenerator.run(
@@ -1007,10 +1027,15 @@ describe("interactive database scripts phase", () => {
 
   test("a conflicting migrations.seed still leaves the other seed pieces coherent", async () => {
     await seedProject();
-    const custom = fsMockStore._prismaInitConfig.replace(
-      '    path: "prisma/migrations",',
-      '    path: "prisma/migrations",\n    seed: "node custom-seed.js",',
-    );
+    const custom = fsMockStore._prismaInitConfig
+      .replace(
+        '    path: "prisma/migrations",',
+        '    path: "prisma/migrations",\n    seed: "node custom-seed.js",',
+      )
+      .replace(
+        '  datasource: {',
+        '  datasource: {\n    provider: "postgresql",',
+      );
     fsMockStore._files.set("prisma7.config.ts", custom);
 
     await databaseGenerator.run(
@@ -1045,10 +1070,15 @@ describe("interactive database scripts phase", () => {
     await seedProject();
     // A previous DXG run (or an identical user choice) already configured
     // the exact same seed command.
-    const preConfigured = fsMockStore._prismaInitConfig.replace(
-      '    path: "prisma/migrations",',
-      '    path: "prisma/migrations",\n    seed: "tsx prisma/seed.ts",',
-    );
+    const preConfigured = fsMockStore._prismaInitConfig
+      .replace(
+        '    path: "prisma/migrations",',
+        '    path: "prisma/migrations",\n    seed: "tsx prisma/seed.ts",',
+      )
+      .replace(
+        '  datasource: {',
+        '  datasource: {\n    provider: "postgresql",',
+      );
     fsMockStore._files.set("prisma7.config.ts", preConfigured);
     const manifest = {
       ...MY_APP_PACKAGE_JSON,

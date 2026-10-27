@@ -66,7 +66,7 @@ describe("ProviderUnsupportedError", () => {
     const error = new ProviderUnsupportedError("unknown-db");
 
     expect(error.name).toBe("ProviderUnsupportedError");
-    expect(error.code).toBe("DXG_E_PROVIDER_UNSUPPORTED");
+    expect(error.code).toBe("DXG_E_UNSUPPORTED_PROVIDER");
     expect(error.message).toContain("unknown-db");
   });
 });

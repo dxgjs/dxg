@@ -9,6 +9,7 @@ export type RecoveryAction =
   | "retry"
   | "reconfigure"
   | "manual-intervention"
+  | "manual"
   | "abort";
 
 export interface DXGErrorOptions {
@@ -93,23 +94,54 @@ export class PrismaVersionConflictError extends DXGError {
 export class ProviderUnsupportedError extends DXGError {
   constructor(
     provider: string,
+    supportedProviders: string[] = [],
     options: DXGErrorOptions = {}
   ) {
     super(
-      "DXG_E_PROVIDER_UNSUPPORTED",
-      `Unsupported database provider: ${provider}`,
+      "DXG_E_UNSUPPORTED_PROVIDER",
+      `Provider "${provider}" is not supported.`,
       {
         recoverable: true,
-        hints: [
-          "Choose a supported provider: sqlite, postgresql, mysql, sqlserver, cockroachdb, planetscale, prismapostgres",
-          "Check the provider spelling and try again",
-        ],
+        hints:
+          supportedProviders.length > 0
+            ? [
+                `Supported providers: ${supportedProviders.join(", ")}`,
+                `Rerun with a supported provider: --provider <name>`,
+              ]
+            : [`Rerun with a supported provider: --provider <name>`],
         docsUrl: "https://dxg.dev/errors/provider-unsupported",
         recoveryAction: "reconfigure",
         ...options,
       }
     );
     this.name = "ProviderUnsupportedError";
+  }
+}
+
+/**
+ * Thrown when the requested database provider differs from the existing Prisma configuration.
+ */
+export class ProviderMismatchError extends DXGError {
+  constructor(
+    existingProvider: string,
+    requestedProvider: string,
+    options: DXGErrorOptions = {}
+  ) {
+    super(
+      "DXG_E_PROVIDER_MISMATCH",
+      `Prisma is already configured with "${existingProvider}".\n  You requested "${requestedProvider}".`,
+      {
+        recoverable: false,
+        hints: [
+          `Rerun with the already configured provider: --provider ${existingProvider}`,
+          "To change provider, follow the Prisma guide: https://www.prisma.io/docs/orm/prisma-migrate/workflows/switching-databases",
+        ],
+        docsUrl: "https://dxg.dev/errors/provider-mismatch",
+        recoveryAction: "manual",
+        ...options,
+      }
+    );
+    this.name = "ProviderMismatchError";
   }
 }
 

@@ -207,9 +207,15 @@ vi.mock("@dxgjs/fs", async () => {
           args[1] === "init" &&
           !_files.has("prisma/schema.prisma")
         ) {
+          // Extract --datasource-provider from args
+          let provider = "sqlite"; // default
+          const providerIndex = args.indexOf("--datasource-provider");
+          if (providerIndex !== -1 && args[providerIndex + 1]) {
+            provider = args[providerIndex + 1];
+          }
           _files.set(
             "prisma/schema.prisma",
-            "generator client {\n  output = \"../lib/generated/prisma\"\n}\n",
+            `generator client {\n  output = "../lib/generated/prisma"\n}\ndatasource db {\n  provider = "${provider}"\n}`,
           );
           _directories.add("prisma");
         }

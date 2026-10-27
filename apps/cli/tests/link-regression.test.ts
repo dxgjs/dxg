@@ -119,7 +119,7 @@ describe("npm link regression", () => {
     );
 
     // Should show dry-run plan without module resolution errors
-    expect(output).toContain("DXG Database Setup");
+    expect(output).toContain("Operation Summary");
     expect(output).toContain("Would run:");
   });
 

@@ -81,16 +81,28 @@ const defaultExecuteFake = vi.hoisted(() => {
         // Default output if not specified (relative to prisma directory)
         lastPrismaInitOutput = "node_modules/@prisma/client";
       }
+      // Extract --datasource-provider from args
+      let provider = "sqlite"; // default
+      const providerIndex = args.indexOf("--datasource-provider");
+      if (providerIndex !== -1 && args[providerIndex + 1]) {
+        provider = args[providerIndex + 1];
+      }
+      // Normalize provider: "postgres" -> "postgresql" for comparison
+      const normalizedProvider = provider === "postgres" ? "postgresql" : provider;
       // Write schema.prisma with the output path relative to the prisma directory
       fsMockStore._files.set(
         "prisma/schema.prisma",
-        `generator client {\n  provider = "prisma-client"\n  output = "${lastPrismaInitOutput}"\n}\ndatasource db {\n  provider = "sqlite"\n}`,
+        `generator client {\n  provider = "prisma-client"\n  output = "${lastPrismaInitOutput}"\n}\ndatasource db {\n  provider = "${normalizedProvider}"\n}`,
       );
       fsMockStore._files.set(
         "prisma7.config.ts",
         'import { defineConfig } from "prisma/config";\nexport default defineConfig({\n  migrations: {\n    path: "prisma/migrations",\n  },\n});\n',
       );
-      fsMockStore._files.set(".env", 'DATABASE_URL="file:./dev.db"\n');
+      // Use provider-appropriate DATABASE_URL
+      const dbUrl = normalizedProvider === "sqlite"
+        ? 'DATABASE_URL="file:./dev.db"\n'
+        : "DATABASE_URL=\n";
+      fsMockStore._files.set(".env", dbUrl);
       return { all: "prisma init ok", stdout: "", stderr: "" };
     }
     if (command === "npx" && args[0] === "prisma@7" && args[1] === "generate") {

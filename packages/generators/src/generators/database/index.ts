@@ -31,6 +31,7 @@ import { withDlxBuildApprovals } from "../../install/dlx";
 import {
   PrismaVersionConflictError,
   ProviderUnsupportedError,
+  ProviderMismatchError,
   BuildBlockedError,
   TemplateMissingError,
   InstallerFailureError,
@@ -48,6 +49,11 @@ import {
   normalizeHelperPath,
   validateHelperPath,
 } from "./inspect";
+import {
+  detectPrismaState,
+  providersMatch,
+  normalizePrismaProvider,
+} from "./detect-prisma-state";
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
@@ -427,6 +433,19 @@ export const databasePrompts = [
     ];
   }
 
+
+/**
+ * Normalizes content for comparison: CRLF -> LF, trim trailing spaces per line.
+ * Used for idempotence checks (e.g., lib/prisma.ts template vs existing file).
+ */
+export function normalizeContent(content: string): string {
+  return content
+    .replace(/\r\n/g, "\n") // CRLF -> LF
+    .split("\n")
+    .map((line) => line.trimEnd()) // trim trailing spaces
+    .join("\n");
+}
+
 // Validation function
 export function validateDatabase(): boolean {
   // Validation will happen in the run method; we keep this for interface compliance
@@ -458,7 +477,8 @@ export function planDatabase(
   const provider = providerData[providerKey as keyof typeof providerData];
 
   if (!provider) {
-    throw new ProviderUnsupportedError(providerKey);
+    const supportedProviders = Object.keys(providerData);
+    throw new ProviderUnsupportedError(providerKey, supportedProviders);
   }
 
   // Helper path resolution (decision document, section 6). Deterministic
@@ -1588,9 +1608,9 @@ export async function executeDatabase(
         continue;
       }
 
-      // It's a file, check content
+      // It's a file, check content (normalize line endings and trailing spaces for idempotence)
       const current = (await fs.readFile(path, { encoding: "utf8" })) as string;
-      if (current === rendered) {
+      if (normalizeContent(current) === normalizeContent(rendered)) {
         result.skipped.push(path);
         continue;
       }
@@ -1715,16 +1735,57 @@ export async function verifyDatabase(
 // plan — is consolidated into a single coherent Operation Summary note.
 // Fully Clack-native: no logger output (completion itself is communicated
 // by the generator's outro).
-export function summarizeDatabase(result: {
+export interface SummarizeDatabaseOptions {
   created: string[];
   updated: string[];
   skipped: string[];
   conflicts: { path: string; existsAs: "file" | "directory" }[];
   wouldRun?: string[];
-}): void {
-  const { created, updated, skipped, conflicts, wouldRun } = result;
+  /** Detected Prisma provider (for the "Detected" section in dry-run). */
+  detectedProvider?: string | null;
+  /** Requested provider (for the "Detected" section in dry-run). */
+  requestedProvider?: string;
+}
+
+/**
+ * Summarizes the database generator operation.
+ * Includes a "Detected" section showing the existing Prisma provider vs requested.
+ */
+export function summarizeDatabase(options: SummarizeDatabaseOptions): void {
+  const {
+    created,
+    updated,
+    skipped,
+    conflicts,
+    wouldRun,
+    detectedProvider,
+    requestedProvider,
+  } = options;
 
   const sections: string[] = [];
+
+  // Detected section (shown in dry-run and normal execution when Prisma exists)
+  if (detectedProvider !== undefined) {
+    const detectedLine = detectedProvider
+      ? `Prisma provider: ${detectedProvider}`
+      : "Prisma provider: (non déterminé)";
+    const requestedLine = requestedProvider
+      ? `Requested: ${requestedProvider}`
+      : "Requested: (inconnu)";
+
+    let matchStatus = "";
+    if (detectedProvider && requestedProvider) {
+      matchStatus = providersMatch(detectedProvider, requestedProvider)
+        ? " → ✔ match"
+        : " → ✖ mismatch, aucune action";
+    }
+
+    sections.push(
+      ["Detected:", `  • ${detectedLine}`, `  • ${requestedLine}${matchStatus}`].join(
+        "\n",
+      ),
+    );
+  }
 
   if (created.length) {
     sections.push(["Created:", ...created.map((p) => `  • ${p}`)].join("\n"));
@@ -1772,19 +1833,58 @@ export const databaseGenerator: Generator = {
   async run(cliAnswers: Record<string, unknown>, context: GeneratorContext) {
     const ctx = context;
 
-    // Intro
-    intro(pc.bgCyan(pc.black(" DXG Database Setup ")));
-
-    // Collect inputs - use CLI/provided answers, fallback to interactive prompts
+    // Collect inputs - use CLI/provided answers
     let answers = { ...cliAnswers };
 
-    // Check if we need to prompt for missing required fields
+    // ============================================================
+    // STEP 1: Validate provider BEFORE any prompts or side effects
+    // ============================================================
+    // Normalize provider (postgres -> postgresql) and validate it's supported
+    const rawProvider = answers.provider as string | undefined;
+    let normalizedProvider: string | undefined;
+    if (rawProvider !== undefined) {
+      normalizedProvider = normalizePrismaProvider(rawProvider);
+      answers.provider = normalizedProvider;
+    }
+
+    // Check if provider is supported (fail fast with dedicated error code)
+    const supportedProviders = Object.keys(providerData);
+    if (normalizedProvider !== undefined && !providerData[normalizedProvider as keyof typeof providerData]) {
+      throw new ProviderUnsupportedError(normalizedProvider, supportedProviders);
+    }
+
+    // ============================================================
+    // STEP 2: Detect existing Prisma state (read-only)
+    // ============================================================
+    const prismaState = await detectPrismaState(ctx);
+
+    // ============================================================
+    // STEP 3: Compare providers (mismatch -> error, before prompts)
+    // ============================================================
+    if (
+      prismaState.installed &&
+      prismaState.provider &&
+      normalizedProvider !== undefined &&
+      !providersMatch(prismaState.provider, normalizedProvider)
+    ) {
+      throw new ProviderMismatchError(prismaState.provider, normalizedProvider);
+    }
+
+    // ============================================================
+    // STEP 4: Now handle prompts (only if validation passed)
+    // ============================================================
+    // Intro (only show if we might prompt or in interactive mode)
     const needsProvider = answers.provider === undefined;
     const needsSkillsAnswer = answers.installPrismaSkills === undefined;
     const needsScriptsAnswer = answers.databaseScripts === undefined;
 
     // Only prompt in interactive mode (not dry-run and not CI)
     const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
+
+    if (shouldPrompt) {
+      // Show intro only in interactive mode
+      intro(pc.bgCyan(pc.black(" DXG Database Setup ")));
+    }
 
     if (
       shouldPrompt &&
@@ -1939,6 +2039,79 @@ export const databaseGenerator: Generator = {
         );
       }
 
+
+      // GATE 3b: Provider installed but undetermined (unreadable schema).
+      // Warn but continue — don't block, just inform.
+      if (prismaState.installed && prismaState.provider === null) {
+        note(
+          [
+            "Provider Prisma existant non détecté, vérification impossible.",
+            "DXG continuera en complétant ce qui manque.",
+          ].join("\n"),
+          "Warning",
+        );
+      }
+
+      // ============================================================
+      // Idempotence check for lib/prisma.ts: compare generated content
+      // with existing file (normalized CRLF/LF, trimmed trailing spaces)
+      // ============================================================
+      const helperPath = answers.helperPath as string | undefined;
+      let skipHelperPrompt = false;
+      if (helperPath) {
+        const fs = ctx.fs;
+        const existingHelper = await fs.pathExists(helperPath);
+        if (existingHelper) {
+          // Get the provider to generate the expected template content
+          const providerKey = answers.provider as string;
+          const provider = providerData[providerKey as keyof typeof providerData];
+          if (provider) {
+            const templatePath = provider.templatePath;
+            const templateContent = (await fs.readFile(templatePath, { encoding: "utf8" })) as string;
+            // We need to render the template with the same data that executeDatabase would use
+            // The template uses these variables: outputPath, provider, adapterImport, adapterClass, etc.
+            // Let's compute the expected rendered content
+            const outputPath = helperPath.replace(/\\/g, "/");
+            const generatedContent = templateContent
+              .replace(/\{\{outputPath\}\}/g, provider.templateOutputPath)
+              .replace(/\{\{provider\}\}/g, provider.key)
+              .replace(/\{\{adapterImport\}\}/g, provider.adapterImport)
+              .replace(/\{\{adapterClass\}\}/g, provider.adapterClass)
+              .replace(/\{\{instantiationPattern\}\}/g, provider.instantiationPattern)
+              .replace(/\{\{importPath\}\}/g, computeRelativeImport(outputPath, provider.templateOutputPath));
+
+            // Read existing file and compare normalized
+            const existingContent = (await fs.readFile(helperPath, { encoding: "utf8" })) as string;
+            const normalizedGenerated = normalizeContent(generatedContent);
+            const normalizedExisting = normalizeContent(existingContent);
+
+            if (normalizedGenerated === normalizedExisting) {
+              // Identical -> skip silently, don't ask for helper path again
+              skipHelperPrompt = true;
+            }
+            // If different, it will be reported as conflict in plan/execute
+          }
+        }
+      }
+
+      // Helper path question — asked AFTER the database scripts phase
+      // (including the customize multiselect) so the flow is:
+      // provider → skills → databaseScripts → [customize multiselect] → helperPath
+      // Skip if idempotence check found identical content
+      const needsHelperPathNow = answers.helperPath === undefined;
+      if (shouldPrompt && needsHelperPathNow && !skipHelperPrompt) {
+        const helperPrompt = databasePrompts[3]; // helper path prompt
+        try {
+          const helperAnswer = await prompt([helperPrompt] as Parameters<typeof prompt>[0]);
+          answers = { ...answers, ...helperAnswer };
+        } catch (error) {
+          if (isCancel(error)) {
+            cancel("Operation cancelled");
+          }
+          throw error;
+        }
+      }
+
       // Plan (state-aware: the inspection drives init/install gating and
       // the dynamic imports for the template files)
       const plan = planDatabase(answers, inspection);
@@ -1952,7 +2125,11 @@ export const databaseGenerator: Generator = {
       }
 
       // Summarize using Clack UX
-      summarizeDatabase(execResult);
+      summarizeDatabase({
+        ...execResult,
+        detectedProvider: prismaState.provider,
+        requestedProvider: answers.provider as string,
+      });
 
       // Outro
       outro(`Database setup completed for ${answers.provider}!`);
