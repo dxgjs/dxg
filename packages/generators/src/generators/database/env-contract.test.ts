@@ -45,7 +45,6 @@ import * as path from "path";
 import * as os from "os";
 import type { FSInterface, Generator } from "../../types";
 import type { ProjectAwareness } from "@dxgjs/workspace";
-import { execFileSync } from "node:child_process";
 
 type PackageJson = ProjectAwareness["packageJson"];
 

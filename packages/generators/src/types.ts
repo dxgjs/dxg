@@ -44,6 +44,7 @@ export interface GeneratorPrompt {
   name: string;
   message: string;
   default?: string | (() => string) | boolean;
+  initialValue?: unknown;
   choices?: Array<{ name: string; value: string }>;
   validate?: (input: unknown) => boolean | string;
 }

@@ -492,9 +492,15 @@ describe("interactive database scripts phase", () => {
 
   test("customize: only the scripts selected in the multiselect are added", async () => {
     await seedProject();
-    (promptMock as unknown as Mock).mockResolvedValue({
-      databaseScripts: "customize",
-    });
+    // First prompt call: databaseScripts = "customize" (provider and skills already provided)
+    // Second prompt call: helperPath
+    (promptMock as unknown as Mock)
+      .mockResolvedValueOnce({
+        databaseScripts: "customize",
+      })
+      .mockResolvedValueOnce({
+        helperPath: "lib/prisma.ts",
+      });
     (multiselectMock as unknown as Mock).mockResolvedValue([
       "db:generate",
       "db:migrate",

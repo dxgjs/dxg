@@ -199,6 +199,8 @@ function expectPrismaInitContract(
 
 describe("prisma init argument contract (real @antfu/ni resolution)", () => {
   test("every supported provider keeps <provider> + --no-skills through real resolution", async () => {
+    // This test uses real @antfu/ni resolution against fixture projects which can be slow
+    // on CI/machines without warm npm cache. 30s timeout accommodates cold starts.
     // Provider mapping is preserved (PlanetScale keeps its MySQL mapping).
     expect(providerData.planetscale.prismaProvider).toBe("mysql");
 

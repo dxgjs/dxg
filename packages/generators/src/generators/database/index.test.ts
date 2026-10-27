@@ -1529,7 +1529,7 @@ describe("Database Generator", () => {
   });
 
   describe("Prisma agent skills decision (DXG-owned)", () => {
-    const baseContext = (overrides: Record<string, unknown> = {}) => ({
+    const makeContext = (overrides: Record<string, unknown> = {}) => ({
       logger: {
         info: vi.fn(),
         error: vi.fn(),
@@ -1588,7 +1588,7 @@ describe("Database Generator", () => {
 
       await databaseGenerator.run(
         { provider: "sqlite", installPrismaSkills: false },
-        baseContext(),
+        makeContext(),
       );
 
       // Exact contract: --no-skills sits between the provider and --output.
@@ -1610,7 +1610,7 @@ describe("Database Generator", () => {
 
       await databaseGenerator.run(
         { provider: "sqlite", installPrismaSkills: true },
-        baseContext(),
+        makeContext(),
       );
 
       // prisma@7.10.0 installs agent skills UNCONDITIONALLY and
@@ -1634,7 +1634,7 @@ describe("Database Generator", () => {
 
       await databaseGenerator.run(
         { provider: "sqlite" },
-        baseContext({ nonInteractive: true }),
+        makeContext({ nonInteractive: true }),
       );
 
       // DXG did not ask, and Prisma must not be left to ask either: the
@@ -1650,7 +1650,7 @@ describe("Database Generator", () => {
 
       await databaseGenerator.run(
         { provider: "sqlite", installPrismaSkills: false },
-        baseContext({ dryRun: true }),
+        makeContext({ dryRun: true }),
       );
 
       // Semantic dry-run UX: everything the run WOULD do is collected and
@@ -1666,7 +1666,7 @@ describe("Database Generator", () => {
 
       await databaseGenerator.run(
         { provider: "sqlite", installPrismaSkills: true },
-        baseContext({ dryRun: true }),
+        makeContext({ dryRun: true }),
       );
       const noteCallsYes = (noteMock as Mock).mock.calls;
       expect(noteCallsYes.length).toBe(1);
@@ -1683,7 +1683,7 @@ describe("Database Generator", () => {
 
       await databaseGenerator.run(
         { provider: "planetscale", installPrismaSkills: true },
-        baseContext(),
+        makeContext(),
       );
       let args = getPrismaInitArgs();
       expect(args[args.indexOf("--datasource-provider") + 1]).toBe("mysql");
@@ -1705,7 +1705,7 @@ describe("Database Generator", () => {
 
       await databaseGenerator.run(
         { provider: "planetscale", installPrismaSkills: false },
-        baseContext(),
+        makeContext(),
       );
       args = getPrismaInitArgs();
       expect(args[args.indexOf("--datasource-provider") + 1]).toBe("mysql");
@@ -1716,37 +1716,49 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      (promptMock as unknown as Mock).mockResolvedValue({
-        provider: "postgresql",
-        installPrismaSkills: false,
-        databaseScripts: "recommended",
-        helperPath: "lib/prisma.ts",
-      });
+      // First call: provider, skills, databaseScripts
+      // Second call: helperPath (after databaseScripts, since it's "recommended" not "customize")
+      (promptMock as unknown as Mock)
+        .mockResolvedValueOnce({
+          provider: "postgresql",
+          installPrismaSkills: false,
+          databaseScripts: "recommended",
+        })
+        .mockResolvedValueOnce({
+          helperPath: "lib/prisma.ts",
+        });
 
-      await databaseGenerator.run({}, baseContext());
+      await databaseGenerator.run({}, makeContext());
 
-      const questions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
+      // First prompt call: provider, skills, databaseScripts
+      const firstCallQuestions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
         name: string;
         type: string;
         message: string;
         default?: unknown;
       }>;
-      expect(questions.map((q) => q.name)).toEqual([
+      expect(firstCallQuestions.map((q) => q.name)).toEqual([
         "provider",
         "installPrismaSkills",
         "databaseScripts",
-        "helperPath",
       ]);
-      expect(questions[1].type).toBe("confirm");
-      expect(questions[1].message).toBe("Install Prisma agent skills?");
-      expect(questions[1].default).toBe(false);
+      expect(firstCallQuestions[1].type).toBe("confirm");
+      expect(firstCallQuestions[1].message).toBe("Install Prisma agent skills?");
+      expect(firstCallQuestions[1].default).toBe(false);
       // The database scripts phase question follows the skills question.
-      expect(questions[2].type).toBe("select");
-      expect(questions[2].default).toBe("recommended");
-      // The helper path question closes the phase; its default is the
-      // canonical DXG helper location.
-      expect(questions[3].type).toBe("input");
-      expect(questions[3].default).toBe("lib/prisma.ts");
+      expect(firstCallQuestions[2].type).toBe("select");
+      expect(firstCallQuestions[2].default).toBe("recommended");
+
+      // Second prompt call: helperPath
+      const secondCallQuestions = (promptMock as unknown as Mock).mock.calls[1][0] as Array<{
+        name: string;
+        type: string;
+        message: string;
+        default?: unknown;
+      }>;
+      expect(secondCallQuestions.map((q) => q.name)).toEqual(["helperPath"]);
+      expect(secondCallQuestions[0].type).toBe("input");
+      expect(secondCallQuestions[0].default).toBe("lib/prisma.ts");
 
       // The "No" answer flows through to the Prisma arguments.
       expect(getPrismaInitArgs()).toContain("--no-skills");
@@ -1756,22 +1768,41 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      (promptMock as unknown as Mock).mockResolvedValue({
-        installPrismaSkills: true,
-        databaseScripts: "recommended",
-        helperPath: "lib/prisma.ts",
-      });
+      // First call: skills, databaseScripts (provider already provided)
+      // Second call: helperPath
+      (promptMock as unknown as Mock)
+        .mockResolvedValueOnce({
+          installPrismaSkills: true,
+          databaseScripts: "recommended",
+        })
+        .mockResolvedValueOnce({
+          helperPath: "lib/prisma.ts",
+        });
 
-      await databaseGenerator.run({ provider: "sqlite" }, baseContext());
+      await databaseGenerator.run({ provider: "sqlite" }, makeContext());
 
-      const questions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
+      // First prompt call: skills, databaseScripts
+      const firstCallQuestions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
         name: string;
+        type: string;
+        message: string;
+        default?: unknown;
       }>;
-      expect(questions.map((q) => q.name)).toEqual([
+      expect(firstCallQuestions.map((q) => q.name)).toEqual([
         "installPrismaSkills",
         "databaseScripts",
-        "helperPath",
       ]);
+
+      // Second prompt call: helperPath
+      const secondCallQuestions = (promptMock as unknown as Mock).mock.calls[1][0] as Array<{
+        name: string;
+        type: string;
+        message: string;
+        default?: unknown;
+      }>;
+      expect(secondCallQuestions.map((q) => q.name)).toEqual(["helperPath"]);
+      expect(secondCallQuestions[0].type).toBe("input");
+      expect(secondCallQuestions[0].default).toBe("lib/prisma.ts");
 
       // "Yes" → no --no-skills flag (Prisma installs skills non-interactively).
       expect(getPrismaInitArgs()).not.toContain("--no-skills");
@@ -1995,6 +2026,192 @@ describe("Database Generator", () => {
       await expect(databaseGenerator.run(answers, context)).rejects.toThrow(
         "Missing required values in non-interactive mode: provider"
       );
+    });
+  });
+
+  describe("regression: helper path initialValue", () => {
+    test("helperPath prompt includes initialValue equal to DEFAULT_HELPER_PATH", () => {
+      const prompts = databaseGenerator.prompts;
+      const helperPathPrompt = prompts.find((p) => p.name === "helperPath");
+      expect(helperPathPrompt).toBeDefined();
+      expect(helperPathPrompt!.type).toBe("input");
+      expect(helperPathPrompt!.initialValue).toBe("lib/prisma.ts");
+      expect(helperPathPrompt!.default).toBe("lib/prisma.ts");
+    });
+  });
+
+  describe("regression: subprocess output suppression", () => {
+    test("successful prisma init does not leak child-process output to terminal", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+      vi.clearAllMocks();
+
+      const mockLogger = {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as unknown as Logger;
+
+      const context = {
+        logger: mockLogger,
+        fs,
+        templates: { render: vi.fn(realRender) },
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: ".",
+          workspaceRoot: ".",
+          framework: { name: "unknown" as const, detected: false },
+          language: { name: "javascript" as const, detected: true },
+          packageManager: "npm",
+          styling: { name: "none", detected: false, version: null, configFile: null },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false,
+          },
+          packageJson: { name: "test-project", version: "1.0.0", private: true },
+        },
+        dryRun: false,
+        force: false,
+      };
+
+      // Execute the generator
+      await databaseGenerator.run({ provider: "sqlite" }, context);
+
+      // Verify that executeCommand was called with stdio: "pipe" for prisma init
+      // The third call is prisma init (after two install calls)
+      const initCall = (fs.executeCommand as Mock).mock.calls[2];
+      expect(initCall).toBeDefined();
+      expect(initCall[0]).toBe("npx");
+      const initOptions = initCall[2];
+      expect(initOptions).toBeDefined();
+      expect(initOptions.stdio).toBe("pipe");
+    });
+
+    test("successful prisma generate does not leak child-process output to terminal", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+      vi.clearAllMocks();
+
+      const mockLogger = {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as unknown as Logger;
+
+      const context = {
+        logger: mockLogger,
+        fs,
+        templates: { render: vi.fn(realRender) },
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: ".",
+          workspaceRoot: ".",
+          framework: { name: "unknown" as const, detected: false },
+          language: { name: "javascript" as const, detected: true },
+          packageManager: "npm",
+          styling: { name: "none", detected: false, version: null, configFile: null },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false,
+          },
+          packageJson: { name: "test-project", version: "1.0.0", private: true },
+        },
+        dryRun: false,
+        force: false,
+      };
+
+      // Execute the generator
+      await databaseGenerator.run({ provider: "sqlite" }, context);
+
+      // Verify that executeCommand was called with stdio: "pipe" for prisma generate
+      // The fourth call is prisma generate (after two installs + prisma init)
+      const generateCall = (fs.executeCommand as Mock).mock.calls[3];
+      expect(generateCall).toBeDefined();
+      expect(generateCall[0]).toBe("npx");
+      const generateOptions = generateCall[2];
+      expect(generateOptions).toBeDefined();
+      expect(generateOptions.stdio).toBe("pipe");
+    });
+
+    test("failing subprocess produces actionable error with captured diagnostics", async () => {
+      await fs.writeFile("package.json", '{"devDependencies":{}}', {
+        encoding: "utf8",
+      });
+      vi.clearAllMocks();
+
+      // Make prisma init fail with captured output
+      (fs.executeCommand as Mock).mockImplementation(
+        async (command: string, args: string[]) => {
+          if (command === "npm-mock" && args[0] === "install") {
+            return { all: "added packages", stdout: "", stderr: "" };
+          }
+          if (command === "npx" && args[1] === "init") {
+            // Simulate a failed prisma init with output
+            const error = new Error("prisma init failed") as Error & {
+              stdout: string;
+              stderr: string;
+            };
+            error.stdout = "Error: Prisma schema validation failed\n  → datasource \"db\": URL must not be empty";
+            error.stderr = "prisma init error output";
+            throw error;
+          }
+          if (command === "npx" && args[1] === "generate") {
+            return { all: "prisma generate ok", stdout: "", stderr: "" };
+          }
+          return { all: "", stdout: "", stderr: "" };
+        },
+      );
+
+      const mockLogger = {
+        info: vi.fn(),
+        error: vi.fn(),
+        warn: vi.fn(),
+        debug: vi.fn(),
+      } as unknown as Logger;
+
+      const context = {
+        logger: mockLogger,
+        fs,
+        templates: { render: vi.fn(realRender) },
+        installer: makeInstaller(),
+        awareness: {
+          projectRoot: ".",
+          workspaceRoot: ".",
+          framework: { name: "unknown" as const, detected: false },
+          language: { name: "javascript" as const, detected: true },
+          packageManager: "npm",
+          styling: { name: "none", detected: false, version: null, configFile: null },
+          capabilities: {
+            hasTests: false,
+            hasLinting: false,
+            hasFormatter: false,
+            hasCI: false,
+            hasDocker: false,
+          },
+          packageJson: { name: "test-project", version: "1.0.0", private: true },
+        },
+        dryRun: false,
+        force: false,
+      };
+
+      // Expect the error to contain the captured output
+      await expect(
+        databaseGenerator.run({ provider: "sqlite" }, context),
+      ).rejects.toThrow(/Captured output:/);
+
+      await expect(
+        databaseGenerator.run({ provider: "sqlite" }, context),
+      ).rejects.toThrow(/Prisma schema validation failed/);
     });
   });
 });

@@ -17,6 +17,7 @@ export interface PromptQuestion {
   name: string;
   message: string;
   default?: unknown;
+  initialValue?: unknown;
   choices?: Array<{ name: string; value: string }>;
   validate?: (input: unknown) => boolean | string;
 }
@@ -33,14 +34,20 @@ export async function prompt<T extends Record<string, unknown>>(
     let result: unknown;
     switch (q.type) {
       case "input": {
-        const { default: defaultVal, validate } = q;
+        const { default: defaultVal, validate, initialValue } = q;
         const placeholder =
           typeof defaultVal === "function"
             ? (defaultVal as () => string)()
             : ((defaultVal as string) ?? "");
+        // Use initialValue if provided, otherwise fall back to placeholder for backward compatibility
+        const initialVal: string | undefined =
+          initialValue !== undefined
+            ? String(initialValue)
+            : placeholder;
         result = await text({
           message: q.message,
           placeholder,
+          initialValue: initialVal,
           validate: (input) => {
             if (validate) {
               const v = validate(input);

@@ -358,6 +358,7 @@ export const databasePrompts = [
     name: "helperPath",
     message: "Where should the Prisma client helper be created?",
     default: DEFAULT_HELPER_PATH,
+    initialValue: DEFAULT_HELPER_PATH,
     validate: (value) =>
       typeof value === "string" &&
       (value === "" ||
@@ -369,6 +370,7 @@ export const databasePrompts = [
   name: string;
   message: string;
   default?: unknown;
+  initialValue?: unknown;
   choices?: Array<{ name: string; value: string }>;
   validate?: (input: unknown) => boolean | string;
 }[];
@@ -1139,20 +1141,37 @@ export async function executeDatabase(
       const prismaExecuteCwd = prismaResolvedCwd ?? process.cwd();
 
       try {
-        await executeCommand(prismaCmd, prismaArgs, {
+        // Use stdio: "pipe" to capture output and prevent leakage into the terminal.
+        // Output is only surfaced on failure for diagnostics.
+        const result = await executeCommand(prismaCmd, prismaArgs, {
           cwd: prismaExecuteCwd,
-          stdio: "inherit",
+          stdio: "pipe",
         });
         s.stop(
           `Prisma initialized successfully with provider ${providerObj.prismaProvider}`,
         );
+        // Success: output is intentionally discarded to keep the terminal clean.
+        // The Clack spinner provides the user-facing progress indication.
+        void result; // Acknowledge captured output is intentionally unused on success.
       } catch (executeError) {
         s.stop(`Failed to initialize Prisma`);
+        // Capture stdout/stderr from the error for diagnostics.
+        const errorOutput = executeError instanceof Error
+          ? (executeError as any).stdout ?? (executeError as any).stderr ?? ""
+          : "";
+        const errorMessage =
+          executeError instanceof Error ? executeError.message : String(executeError);
+        // Include captured output in the error message for actionable diagnostics.
+        const fullMessage = errorOutput
+          ? `${errorMessage}\n\nCaptured output:\n${errorOutput}`
+          : errorMessage;
         throw new SpawnError(
           prismaCmd,
           prismaArgs,
-          executeError instanceof Error ? executeError.message : String(executeError),
-          { cause: executeError instanceof Error ? executeError : undefined },
+          fullMessage,
+          {
+            cause: executeError instanceof Error ? executeError : undefined,
+          },
         );
       }
     } catch (error) {
@@ -1236,18 +1255,34 @@ export async function executeDatabase(
       );
 
       try {
-        await executeCommand(generateCmd, generateArgs, {
+        // Use stdio: "pipe" to capture output and prevent leakage into the terminal.
+        // Output is only surfaced on failure for diagnostics.
+        const result = await executeCommand(generateCmd, generateArgs, {
           cwd: generateResolvedCwd ?? process.cwd(),
-          stdio: "inherit",
+          stdio: "pipe",
         });
         s.stop("Prisma Client generated");
+        // Success: output is intentionally discarded to keep the terminal clean.
+        void result; // Acknowledge captured output is intentionally unused on success.
       } catch (executeError) {
         s.stop(`Failed to generate Prisma Client`);
+        // Capture stdout/stderr from the error for diagnostics.
+        const errorOutput = executeError instanceof Error
+          ? (executeError as any).stdout ?? (executeError as any).stderr ?? ""
+          : "";
+        const errorMessage =
+          executeError instanceof Error ? executeError.message : String(executeError);
+        // Include captured output in the error message for actionable diagnostics.
+        const fullMessage = errorOutput
+          ? `${errorMessage}\n\nCaptured output:\n${errorOutput}`
+          : errorMessage;
         throw new SpawnError(
           generateCmd,
           generateArgs,
-          executeError instanceof Error ? executeError.message : String(executeError),
-          { cause: executeError instanceof Error ? executeError : undefined },
+          fullMessage,
+          {
+            cause: executeError instanceof Error ? executeError : undefined,
+          },
         );
       }
     } catch (error) {
@@ -1747,7 +1782,6 @@ export const databaseGenerator: Generator = {
     const needsProvider = answers.provider === undefined;
     const needsSkillsAnswer = answers.installPrismaSkills === undefined;
     const needsScriptsAnswer = answers.databaseScripts === undefined;
-    const needsHelperPath = answers.helperPath === undefined;
 
     // Only prompt in interactive mode (not dry-run and not CI)
     const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
@@ -1756,16 +1790,13 @@ export const databaseGenerator: Generator = {
       shouldPrompt &&
       (needsProvider ||
         needsSkillsAnswer ||
-        needsScriptsAnswer ||
-        needsHelperPath)
+        needsScriptsAnswer)
     ) {
       // Use interactive prompts for missing fields. DXG owns the Prisma
       // agent skills decision ("Install Prisma agent skills?") — it is asked
       // here, after the provider selection, so the Prisma CLI itself never
       // has to ask it. The database scripts phase question follows: it
-      // decides which db:* npm scripts land in package.json. The helper
-      // path question (where the Prisma client singleton lands) completes
-      // the phase; its default is lib/prisma.ts.
+      // decides which db:* npm scripts land in package.json.
       const promptQuestions = [];
 
       if (needsProvider) {
@@ -1776,9 +1807,6 @@ export const databaseGenerator: Generator = {
       }
       if (needsScriptsAnswer) {
         promptQuestions.push(databasePrompts[2]); // database scripts prompt
-      }
-      if (needsHelperPath) {
-        promptQuestions.push(databasePrompts[3]); // helper path prompt
       }
 
       let promptAnswers: Record<string, unknown>;
@@ -1823,6 +1851,23 @@ export const databaseGenerator: Generator = {
         answers.databaseScripts = await promptCustomScripts(
           answers.provider as string,
         );
+      } catch (error) {
+        if (isCancel(error)) {
+          cancel("Operation cancelled");
+        }
+        throw error;
+      }
+    }
+
+    // Helper path question — asked AFTER the database scripts phase
+    // (including the customize multiselect) so the flow is:
+    // provider → skills → databaseScripts → [customize multiselect] → helperPath
+    const needsHelperPathNow = answers.helperPath === undefined;
+    if (shouldPrompt && needsHelperPathNow) {
+      const helperPrompt = databasePrompts[3]; // helper path prompt
+      try {
+        const helperAnswer = await prompt([helperPrompt] as Parameters<typeof prompt>[0]);
+        answers = { ...answers, ...helperAnswer };
       } catch (error) {
         if (isCancel(error)) {
           cancel("Operation cancelled");
