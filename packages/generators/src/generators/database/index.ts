@@ -2045,8 +2045,8 @@ export const databaseGenerator: Generator = {
       if (prismaState.installed && prismaState.provider === null) {
         note(
           [
-            "Provider Prisma existant non détecté, vérification impossible.",
-            "DXG continuera en complétant ce qui manque.",
+            "Existing Prisma provider not detected, verification impossible.",
+            "DXG will continue by filling in what is missing.",
           ].join("\n"),
           "Warning",
         );
