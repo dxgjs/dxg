@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import { isCancel } from "@dxgjs/prompts";
-import { initGenerator, tailwindGenerator, databaseGenerator, type Generator } from "@dxgjs/generators";
+import { databaseGenerator, type Generator } from "@dxgjs/generators";
 import { formatError, ValidationError } from "@dxgjs/errors";
 import {
   type CommanderOptions,
@@ -19,7 +19,7 @@ export function registerAddCommand(program: Command): void {
     .description("Add a generator to the project")
     .option(
       "--provider <value>",
-      "provider to use (for database: sqlite|postgresql|mysql; for auth: better-auth|auth.js|clerk|lucia)",
+      "Provider to use (for database: sqlite|postgresql|mysql|sqlserver|cockroachdb|planetscale|prisma-postgres)",
     )
     .option(
       "--non-interactive",
@@ -27,15 +27,13 @@ export function registerAddCommand(program: Command): void {
     )
     .option("--dry-run", "Perform a dry run without making any changes")
     .option("--force", "Force overwrite of conflicting files")
-    .option("--verbose", "Enable verbose logging")
-    .option("--quiet", "Suppress non-essential output")
     .action(async (generatorName, _options, cmd) => {
       // Merge local options with the root's global options so flags given
-      // before the subcommand (e.g. `dxg --dry-run add tailwind`) are honored
+      // before the subcommand (e.g. `dxg --dry-run add database`) are honored
       // too. Commander's root parser consumes the flag wherever it appears;
       // without this merge the action would only see options declared
       // locally on this command, and root-level flags would be silently
-      // dropped (the classic `dxg add tailwind --dry-run` prompt bug).
+      // dropped (the classic `dxg add database --dry-run` prompt bug).
       const options = cmd.optsWithGlobals() as CommanderOptions;
 
       try {
@@ -47,10 +45,7 @@ export function registerAddCommand(program: Command): void {
 
         // Get generator instance
         const generatorMap: Record<string, Generator> = {
-          init: initGenerator,
-          tailwind: tailwindGenerator,
           database: databaseGenerator,
-          auth: (await import("@dxgjs/generators")).authGenerator,
         };
 
         const generator = generatorMap[generatorName];

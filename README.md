@@ -22,27 +22,27 @@ pnpm add -g @dxgjs/cli
 ## Usage
 
 ```bash
-dxg               # Initialize a new project in the current directory
-dxg add <generator>  # Add a generator to the current project
+dxg add database  # Add database setup with Prisma ORM
 ```
 
 ## Available Generators
 
-- `init` – Create a new project with basic structure (package.json, tsconfig, src/index.ts, .gitignore)
-- `tailwind` – Add Tailwind CSS v4 configuration
-- `database` – Add database setup with Prisma ORM (SQLite, PostgreSQL, MySQL)
-- `auth` – Add authentication support (better-auth, auth.js, clerk, lucia)
+- `database` – Add database setup with Prisma ORM (SQLite, PostgreSQL, MySQL, SQL Server, CockroachDB, PlanetScale, Prisma Postgres)
 
 ## Options
 
-Common options (available on `dxg` and `dxg add <generator>`):
+### `dxg add database`
+
+- `--provider <value>` – Specify database provider (sqlite|postgresql|mysql|sqlserver|cockroachdb|planetscale|prisma-postgres)
+- `--non-interactive` – Do not prompt for input; fail if required values are missing
+- `--dry-run` – Perform a dry run without making any changes
+- `--force` – Force overwrite of conflicting files
+
+### Global Options (available on `dxg` and `dxg add database`)
 
 - `--non-interactive` – Do not prompt for input; fail if required values are missing
 - `--dry-run` – Perform a dry run without making any changes
 - `--force` – Force overwrite of conflicting files
-- `--verbose` – Enable verbose logging
-- `--quiet` – Suppress non-essential output
-- `--provider <value>` – Specify provider (for database: sqlite|postgresql|mysql; for auth: better-auth|auth.js|clerk|lucia) — `dxg add` only
 
 ## Requirements
 

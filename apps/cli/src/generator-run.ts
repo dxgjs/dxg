@@ -23,8 +23,6 @@ import type { PackageManagerAgent } from "@dxgjs/generators";
  * The index signature keeps room for generator-specific flags.
  */
 export interface CommanderOptions {
-  verbose: boolean;
-  quiet: boolean;
   dryRun: boolean;
   force: boolean;
   nonInteractive: boolean;
@@ -77,13 +75,8 @@ function agentDisplayName(agent: PackageManagerAgent): string {
  * Prepares the generator context with logger, fs, and templates
  */
 export async function prepareContext(options: CommanderOptions, awareness: ProjectAwareness) {
-  // Determine log level based on verbosity options
-  let minLevel: LogLevel = "info";
-  if (options.verbose) {
-    minLevel = "debug";
-  } else if (options.quiet) {
-    minLevel = "warn";
-  }
+  // Default log level is "info" (no verbose/quiet flags)
+  const minLevel: LogLevel = "info";
 
   const logger = new Logger({ minLevel });
   // Provide stat and readdir functions (not used by all generators but required by type)

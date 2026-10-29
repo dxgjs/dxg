@@ -82,8 +82,9 @@ describe("npm link regression", () => {
     expect(output).toContain("add");
   });
 
-  test("built CLI runs --non-interactive from temp directory", () => {
+  test("built CLI runs --non-interactive from temp directory (shows help/error - no default action)", () => {
     let output = "";
+    let exitCode = 0;
     try {
       output = execSync(`node "${cliDistIndex}" --non-interactive`, {
         cwd: testDir,
@@ -93,17 +94,17 @@ describe("npm link regression", () => {
         env: { ...process.env, VITEST: undefined },
       });
     } catch (err: unknown) {
-      // May fail with exit code 1 due to missing required values
-      const error = err as { stdout?: Buffer; stderr?: Buffer; message?: string };
+      // Expected to fail with exit code 1 because no subcommand provided
+      const error = err as { stdout?: Buffer; stderr?: Buffer; message?: string; status?: number };
       output = (error.stdout?.toString() || "") + (error.stderr?.toString() || "") + (error.message || "");
+      exitCode = error.status ?? 1;
     }
 
-    // Either succeeds with "Created:"/"initialized" (package.json exists)
-    // or fails with "Missing required values" (no package.json name)
-    // Either way, no "Cannot find module" error
-    const success = output.includes("Created:") || output.includes("initialized") || output.includes("Project Initializer");
-    const expectedFailure = output.includes("Missing required values");
-    expect(success || expectedFailure).toBe(true);
+    // Without a subcommand, CLI should show help/error (exit code 1)
+    // No "Cannot find module" error
+    expect(exitCode).toBe(1);
+    expect(output).not.toContain("Cannot find module");
+    expect(output).not.toContain("Module not found");
   });
 
   test("built CLI runs add database --dry-run from temp directory", () => {
@@ -144,7 +145,7 @@ describe("npm link regression", () => {
           env: { ...process.env, VITEST: undefined },
         });
       } catch (err: unknown) {
-        // Some commands may fail with expected errors (e.g., --non-interactive needs name)
+        // Some commands may fail with expected errors (e.g., --non-interactive needs subcommand)
         // but we only care about module resolution errors
         const error = err as { stdout?: Buffer; stderr?: Buffer; message?: string };
         output = (error.stdout?.toString() || "") + (error.stderr?.toString() || "") + (error.message || "");

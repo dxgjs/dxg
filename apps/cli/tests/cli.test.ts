@@ -4,13 +4,9 @@ import type { Command } from "commander";
 // Generator implementations are mocked: these tests exercise Commander
 // parsing — how argv flags reach the action, the generator context and the
 // answer mappings — not the generators themselves (covered by their own
-// suites). The mocks must provide every runtime export the CLI imports,
-// including the dynamic `authGenerator` import.
+// suites). The mocks must provide every runtime export the CLI imports.
 vi.mock("@dxgjs/generators", () => ({
-  initGenerator: { run: vi.fn() },
-  tailwindGenerator: { run: vi.fn() },
   databaseGenerator: { run: vi.fn() },
-  authGenerator: { run: vi.fn() },
   // prepareContext calls this before building the generator context; the
   // mocked return nulls the installer (no PM detected) so contexts stay
   // lightweight — matches the real CLI's "cannot detect" path.
@@ -33,7 +29,7 @@ vi.mock("@dxgjs/prompts", async (importOriginal) => {
   };
 });
 
-import { initGenerator, tailwindGenerator, databaseGenerator, authGenerator } from "@dxgjs/generators";
+import { databaseGenerator } from "@dxgjs/generators";
 import { createProgram } from "../src/index";
 
 /**
@@ -82,66 +78,27 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("root command (dxg -> init generator on the current directory)", () => {
-  test("--dry-run reaches the init generator", async () => {
-    await runCli(["--dry-run"]);
-
-    const calls = vi.mocked(initGenerator.run).mock.calls;
-    expect(calls).toHaveLength(1);
-    const [answers, context] = calls[0];
-    expect(answers.dryRun).toBe(true);
-    expect(context.dryRun).toBe(true);
+describe("root command (dxg without subcommand shows help/error)", () => {
+  test("dxg without arguments shows help (no default action)", async () => {
+    const program = makeProgram();
+    const helpOutput = program.helpInformation();
+    expect(helpOutput).toContain("dxg");
+    expect(helpOutput).toContain("add");
   });
 
-  test("--force reaches the generator context", async () => {
-    await runCli(["--force"]);
-
-    const calls = vi.mocked(initGenerator.run).mock.calls;
-    expect(calls).toHaveLength(1);
-    const [, context] = calls[0];
-    expect(context.force).toBe(true);
-  });
-
-  test("--verbose lowers the logger minLevel to debug", async () => {
-    await runCli(["--verbose"]);
-
-    const calls = vi.mocked(initGenerator.run).mock.calls;
-    expect(calls).toHaveLength(1);
-    const [, context] = calls[0];
-    // minLevel is private on Logger; probe it through a structural cast
-    const logger = context.logger as unknown as { minLevel: unknown };
-    expect(logger.minLevel).toBe("debug");
-  });
-
-  test("--quiet raises the logger minLevel to warn", async () => {
-    await runCli(["--quiet"]);
-
-    const calls = vi.mocked(initGenerator.run).mock.calls;
-    expect(calls).toHaveLength(1);
-    const [, context] = calls[0];
-    const logger = context.logger as unknown as { minLevel: unknown };
-    expect(logger.minLevel).toBe("warn");
-  });
-
-  test("a positional directory argument is rejected", async () => {
-    // With no registered argument, Commander treats the bare token as an
-    // excess argument and fails before the action runs.
+  test("unknown global option is rejected", async () => {
     await expectCommanderError(
-      ["some-project"],
-      "too many arguments. Expected 0 arguments but got 1",
-    );
-    await expectCommanderError(
-      ["."],
-      "too many arguments. Expected 0 arguments but got 1",
+      ["--unknown-option"],
+      "unknown option '--unknown-option'",
     );
   });
 });
 
 describe("add command (dxg add <generator>)", () => {
-  test("--dry-run AFTER the subcommand activates dry run (the original collision bug)", async () => {
-    await runCli(["add", "tailwind", "--dry-run"]);
+  test("--dry-run AFTER the subcommand activates dry run", async () => {
+    await runCli(["add", "database", "--dry-run"]);
 
-    const calls = vi.mocked(tailwindGenerator.run).mock.calls;
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
     const [answers, context] = calls[0];
     expect(answers.dryRun).toBe(true);
@@ -149,9 +106,9 @@ describe("add command (dxg add <generator>)", () => {
   });
 
   test("--dry-run BEFORE the subcommand activates dry run too", async () => {
-    await runCli(["--dry-run", "add", "tailwind"]);
+    await runCli(["--dry-run", "add", "database"]);
 
-    const calls = vi.mocked(tailwindGenerator.run).mock.calls;
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
     const [answers, context] = calls[0];
     expect(answers.dryRun).toBe(true);
@@ -159,27 +116,27 @@ describe("add command (dxg add <generator>)", () => {
   });
 
   test("--non-interactive AFTER the subcommand reaches the generator context", async () => {
-    await runCli(["add", "tailwind", "--non-interactive"]);
+    await runCli(["add", "database", "--non-interactive"]);
 
-    const calls = vi.mocked(tailwindGenerator.run).mock.calls;
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
     const [, context] = calls[0];
     expect(context.nonInteractive).toBe(true);
   });
 
   test("--non-interactive BEFORE the subcommand reaches the generator context too", async () => {
-    await runCli(["--non-interactive", "add", "tailwind"]);
+    await runCli(["--non-interactive", "add", "database"]);
 
-    const calls = vi.mocked(tailwindGenerator.run).mock.calls;
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
     const [, context] = calls[0];
     expect(context.nonInteractive).toBe(true);
   });
 
   test("--force AFTER the subcommand reaches the generator context", async () => {
-    await runCli(["add", "tailwind", "--force"]);
+    await runCli(["add", "database", "--force"]);
 
-    const calls = vi.mocked(tailwindGenerator.run).mock.calls;
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
     const [, context] = calls[0];
     expect(context.force).toBe(true);
@@ -194,21 +151,18 @@ describe("add command (dxg add <generator>)", () => {
     expect(answers.provider).toBe("postgresql");
   });
 
-  test("add auth dispatches through the dynamic generator import", async () => {
-    await runCli(["add", "auth", "--provider", "better-auth"]);
+  test("add database dispatches to the database generator", async () => {
+    await runCli(["add", "database", "--provider", "sqlite"]);
 
-    // authGenerator is resolved via `(await import(...)).authGenerator` in
-    // the action — this pins that the dynamic path dispatches like the
-    // statically imported generators and forwards its answers.
-    const calls = vi.mocked(authGenerator.run).mock.calls;
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
     const [answers] = calls[0];
-    expect(answers.provider).toBe("better-auth");
+    expect(answers.provider).toBe("sqlite");
   });
 
   test("a positional directory argument after the generator is rejected", async () => {
     await expectCommanderError(
-      ["add", "tailwind", "some-project"],
+      ["add", "database", "some-project"],
       "too many arguments for 'add'",
     );
   });
@@ -224,8 +178,6 @@ describe("add command (dxg add <generator>)", () => {
         expect.stringContaining("Error [DXG_E_VALIDATION]: Unknown generator: nope"),
       );
       // The failed run must not dispatch to any generator
-      expect(vi.mocked(initGenerator.run).mock.calls).toHaveLength(0);
-      expect(vi.mocked(tailwindGenerator.run).mock.calls).toHaveLength(0);
       expect(vi.mocked(databaseGenerator.run).mock.calls).toHaveLength(0);
     } finally {
       // The action sets process.exitCode on failure; restore it so later
@@ -251,13 +203,13 @@ describe("add command (dxg add <generator>)", () => {
     // mockImplementationOnce (not mockImplementation): clearAllMocks resets
     // call history, not implementations — once keeps the override scoped to
     // this test's single invocation.
-    vi.mocked(tailwindGenerator.run).mockImplementationOnce(async () => {
+    vi.mocked(databaseGenerator.run).mockImplementationOnce(async () => {
       throw CANCEL_STANDIN;
     });
 
     const before = process.exitCode;
     try {
-      await runCli(["add", "tailwind"]);
+      await runCli(["add", "database"]);
 
       // isCancel(CANCEL_STANDIN) is true (see the module-level mock): the
       // CLI must treat it as a clean user exit — no error print, no failure
