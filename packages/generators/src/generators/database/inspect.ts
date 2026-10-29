@@ -313,6 +313,38 @@ const PROTECTED_PATHS = new Set([
 ]);
 
 /**
+ * Validates whether a file's content matches a recognized Prisma client
+ * helper pattern. This prevents treating arbitrary prisma.ts files as
+ * valid helpers (requirement: inspect content, not just filename).
+ */
+export function isValidPrismaClientHelper(content: string): boolean {
+  if (!content || typeof content !== "string") return false;
+
+  // Must import PrismaClient from generated client
+  const hasPrismaClientImport = /import\s+\{\s*PrismaClient\s*\}\s+from\s+["'][^"']*["']/.test(content);
+
+  // Must import an adapter from a known provider adapter package
+  const hasAdapterImport = /import\s+\{\s*\w+\s*\}\s+from\s+["']@prisma\/adapter-[^"']*["']/.test(content);
+
+  // Must create adapter instance (new AdapterClass(...))
+  const hasAdapterInstantiation = /const\s+\w+\s*=\s*new\s+\w+\s*\(/.test(content);
+
+  // Must create PrismaClient with adapter - accepts both { adapter: adapter } and { adapter } shorthand
+  const hasPrismaClientWithAdapter = /const\s+prisma\s*=\s*new\s+PrismaClient\s*\(\s*\{\s*adapter\s*(?::\s*\w+)?\s*\}\s*\)/.test(content);
+
+  // Must export prisma
+  const hasPrismaExport = /export\s+\{\s*prisma\s*\}/.test(content);
+
+  return (
+    hasPrismaClientImport &&
+    hasAdapterImport &&
+    hasAdapterInstantiation &&
+    hasPrismaClientWithAdapter &&
+    hasPrismaExport
+  );
+}
+
+/**
  * Normalizes a user-entered helper path: backslashes to forward slashes,
  * leading ./ stripped, trailing / stripped, .ts appended when omitted,
  * empty → default.
@@ -503,12 +535,21 @@ export async function inspectDatabase(
   }
 
   // Helper candidates: paths a previous DXG run may have created. Discovery
-  // is path-based only (no content signature sniffing — fragile and
-  // forbidden by the design).
+  // now includes CONTENT VALIDATION (requirement: inspect Prisma Client
+  // imports/initialization patterns, not just file existence).
   const helperCandidates: string[] = [];
-  for (const candidate of [DEFAULT_HELPER_PATH, "src/lib/prisma.ts"]) {
+  // Plausible locations where DXG may have created the helper
+  const plausibleHelperPaths = [
+    DEFAULT_HELPER_PATH,
+    "src/lib/prisma.ts",
+    "lib2/prisma.ts",
+  ];
+  for (const candidate of plausibleHelperPaths) {
     if (await fs.pathExists(candidate)) {
-      helperCandidates.push(candidate);
+      const content = (await fs.readFile(candidate, { encoding: "utf8" })) as string | undefined;
+      if (content && isValidPrismaClientHelper(content)) {
+        helperCandidates.push(candidate);
+      }
     }
   }
 

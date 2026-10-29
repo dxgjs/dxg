@@ -36,6 +36,57 @@ import {
 } from "./inspect";
 import type { FSInterface } from "../../types";
 
+// Valid Prisma client helper content for sqlite (matches the template output)
+// For lib/prisma.ts with default generator output at lib/generated/prisma
+const VALID_HELPER_CONTENT_LIB = [
+  'import "dotenv/config";',
+  'import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";',
+  'import { PrismaClient } from "./generated/prisma/client";',
+  "",
+  "// Fail loudly at import time: a missing DATABASE_URL must never silently",
+  "// DXG writes an empty placeholder for",
+  "// server providers and adapters are lazy, so the empty string must be",
+  "// accepted to allow out-of-the-box db:seed (live-proven 2026-10-11).",
+  "const connectionString = process.env.DATABASE_URL;",
+  "",
+  "if (connectionString === undefined) {",
+  '  throw new Error(',
+  '    "DATABASE_URL is not set. Add it to your .env file or export it in your environment.",',
+  "  );",
+  "}",
+  "",
+  "const adapter = new PrismaBetterSqlite3({ url: connectionString });",
+  "const prisma = new PrismaClient({ adapter });",
+  "",
+  "export { prisma };",
+  "",
+].join("\n");
+
+// For src/lib/prisma.ts with co-located generator output at src/lib/generated/prisma
+const VALID_HELPER_CONTENT_SRC_LIB = [
+  'import "dotenv/config";',
+  'import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";',
+  'import { PrismaClient } from "./generated/prisma/client";',
+  "",
+  "// Fail loudly at import time: a missing DATABASE_URL must never silently",
+  "// DXG writes an empty placeholder for",
+  "// server providers and adapters are lazy, so the empty string must be",
+  "// accepted to allow out-of-the-box db:seed (live-proven 2026-10-11).",
+  "const connectionString = process.env.DATABASE_URL;",
+  "",
+  "if (connectionString === undefined) {",
+  '  throw new Error(',
+  '    "DATABASE_URL is not set. Add it to your .env file or export it in your environment.",',
+  "  );",
+  "}",
+  "",
+  "const adapter = new PrismaBetterSqlite3({ url: connectionString });",
+  "const prisma = new PrismaClient({ adapter });",
+  "",
+  "export { prisma };",
+  "",
+].join("\n");
+
 // ---------------------------------------------------------------------------
 // In-memory fs double — the minimum surface inspectDatabase touches
 // ---------------------------------------------------------------------------
@@ -439,7 +490,7 @@ describe("inspectDatabase", () => {
         'generator client {\n  provider = "prisma-client"\n  output = "../lib/generated/prisma"\n}\ndatasource db {\n  provider = "sqlite"\n}',
       "prisma7.config.ts": 'import "dotenv/config";\n',
       ".env": 'DATABASE_URL="file:./dev.db"\n',
-      "lib/prisma.ts": "export {};\n",
+      "lib/prisma.ts": VALID_HELPER_CONTENT_LIB,
       "node_modules/prisma/package.json": "{}",
       "node_modules/@prisma/client/package.json": "{}",
     });
@@ -569,8 +620,8 @@ describe("inspectDatabase", () => {
   test("both helper candidates are reported when both exist", async () => {
     const { fs } = baseFixture({
       "package.json": "{}",
-      "lib/prisma.ts": "export {};\n",
-      "src/lib/prisma.ts": "export {};\n",
+      "lib/prisma.ts": VALID_HELPER_CONTENT_LIB,
+      "src/lib/prisma.ts": VALID_HELPER_CONTENT_SRC_LIB,
     });
     const insp = await inspectDatabase({ fs }, "sqlite");
     expect(insp.helperCandidates).toEqual([

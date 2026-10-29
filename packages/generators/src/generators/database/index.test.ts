@@ -124,6 +124,12 @@ const defaultExecuteFake = vi.hoisted(() => {
       );
       return { all: "prisma generate ok", stdout: "", stderr: "" };
     }
+    if (command === "npx" && args[0] === "prisma@7" && args[1] === "db" && args[2] === "push") {
+      // prisma db push: for SQLite, this creates the dev.db file
+      // In the test environment, we just need to simulate success
+      // The actual database file creation is not needed for the tests
+      return { all: "prisma db push ok", stdout: "", stderr: "" };
+    }
     return { all: "", stdout: "", stderr: "" };
   };
 });
@@ -310,6 +316,13 @@ vi.mock("@antfu/ni", () => {
           }
           return { command: "npx", args: [...args] };
         }
+        // prisma db push — same dlx passthrough semantics as init/generate,
+        // must be checked BEFORE the install heuristics: ["prisma@7", "db", "push"]
+        // carries no "-D", so the plain-specs branch would otherwise
+        // mis-resolve it into "npm-mock install prisma@7 db push".
+        if (args[0] === "prisma@7" && args[1] === "db" && args[2] === "push") {
+          return { command: "npx", args: [...args] };
+        }
         // For dependency installation commands
         if (args.includes("-D") && !args.includes("add")) {
           return {
@@ -422,15 +435,20 @@ describe("Database Generator", () => {
     expect(choiceValues).toContain("planetscale");
     expect(choiceValues).toContain("prismapostgres");
 
-    // Second prompt: the Prisma agent skills decision — owned by DXG
+    // Second prompt: DATABASE_URL for SQLite (conditional prompt)
+    // This prompt is shown when provider is sqlite and databaseUrl is not provided.
+    expect(prompts[1].name).toBe("databaseUrl");
+    expect(prompts[1].type).toBe("input");
+    expect(prompts[1].message).toBe("Database connection URL (DATABASE_URL):");
+    // Third prompt: the Prisma agent skills decision — owned by DXG
     // (a Clack confirm), so Prisma itself never asks this question.
-    expect(prompts[1].name).toBe("installPrismaSkills");
-    expect(prompts[1].type).toBe("confirm");
-    expect(prompts[1].message).toBe("Install Prisma agent skills?");
+    expect(prompts[2].name).toBe("installPrismaSkills");
+    expect(prompts[2].type).toBe("confirm");
+    expect(prompts[2].message).toBe("Install Prisma agent skills?");
     // Default is No: skills artifacts (.claude/skills/, .windsurf/skills/,
     // .agents/skills/, skills-lock.json) only land in the project when the
     // user explicitly opts in.
-    expect(prompts[1].default).toBe(false);
+    expect(prompts[2].default).toBe(false);
   });
 
   test("databaseGenerator should validate correctly", () => {
@@ -936,9 +954,9 @@ describe("Database Generator", () => {
       expect(getCliCommand).toHaveBeenCalled();
 
       // Verify that executeCommand was called for: dev dependencies install,
-      // regular dependencies install, prisma init, and prisma generate —
-      // 4 commands total through the installer seam + Prisma steps.
-      expect(fs.executeCommand).toHaveBeenCalledTimes(4);
+      // regular dependencies install, prisma init, prisma generate, and prisma db push —
+      // 5 commands total through the installer seam + Prisma steps.
+      expect(fs.executeCommand).toHaveBeenCalledTimes(5);
 
       // The summary is fully Clack-native: the generator flow must not emit
       // logger output into the interactive UX (no logger.debug from summary).
@@ -1036,9 +1054,9 @@ describe("Database Generator", () => {
       expect(getCliCommand).toHaveBeenCalled();
 
       // Verify that executeCommand was called for: dev dependencies install,
-      // regular dependencies install, prisma init, and prisma generate —
-      // 4 commands total through the installer seam + Prisma steps.
-      expect(fs.executeCommand).toHaveBeenCalledTimes(4);
+      // regular dependencies install, prisma init, prisma generate, and prisma db push —
+      // 5 commands total through the installer seam + Prisma steps.
+      expect(fs.executeCommand).toHaveBeenCalledTimes(5);
 
       // The summary is fully Clack-native: the generator flow must not emit
       // logger output into the interactive UX (no logger.debug from summary).
@@ -1169,7 +1187,7 @@ describe("Database Generator", () => {
 
       // Expect that the workaround was triggered: command should be "npx" and args should be the original args
       // (which include --no-skills)
-      expect(fs.executeCommand).toHaveBeenCalledTimes(4); // deps, deps, prisma init, prisma generate
+      expect(fs.executeCommand).toHaveBeenCalledTimes(5); // deps, deps, prisma init, prisma generate, prisma db push
       // The third call to executeCommand is the prisma init invocation
       const prismaInitCall = (fs.executeCommand as Mock).mock.calls[2];
       expect(prismaInitCall[0]).toBe("npx");
@@ -1246,7 +1264,7 @@ describe("Database Generator", () => {
 
       // Expect that the workaround was triggered: command should be "npx" and args should be the original args
       // (which include --no-skills and custom output)
-      expect(fs.executeCommand).toHaveBeenCalledTimes(4); // deps, deps, prisma init, prisma generate
+      expect(fs.executeCommand).toHaveBeenCalledTimes(5); // deps, deps, prisma init, prisma generate, prisma db push
       // The third call to executeCommand is the prisma init invocation
       const prismaInitCall = (fs.executeCommand as Mock).mock.calls[2];
       expect(prismaInitCall[0]).toBe("npx");
@@ -1583,14 +1601,21 @@ describe("Database Generator", () => {
     });
 
     /**
-     * The second-to-last executeCommand call is the prisma init invocation:
-     * the flow now runs install (dev), install (deps), prisma init, prisma
-     * generate — init is 3rd of 4, generate last.
+     * The prisma init call is now the third-to-last executeCommand call:
+     * install (dev), install (deps), prisma init, prisma generate, prisma db push
+     * (5 calls total). Find it by looking for the "prisma@7" and "init" args.
      */
     function getPrismaInitArgs(): string[] {
       const calls = (fs.executeCommand as Mock).mock.calls;
       expect(calls.length).toBeGreaterThanOrEqual(4);
-      return calls[calls.length - 2][1] as string[];
+      // Find the call that contains "prisma@7" and "init"
+      const initCall = calls.find((call) =>
+        Array.isArray(call[1]) &&
+        call[1].includes("prisma@7") &&
+        call[1].includes("init")
+      );
+      expect(initCall, "prisma init call not found").toBeDefined();
+      return initCall![1] as string[];
     }
 
     test("user selects No → prisma init receives --no-skills", async () => {
@@ -1728,11 +1753,14 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      // First call: provider, skills, databaseScripts
-      // Second call: helperPath (after databaseScripts, since it's "recommended" not "customize")
+      // First call: provider
+      // Second call: skills, databaseScripts (provider is postgresql, no databaseUrl prompt)
+      // Third call: helperPath
       (promptMock as unknown as Mock)
         .mockResolvedValueOnce({
           provider: "postgresql",
+        })
+        .mockResolvedValueOnce({
           installPrismaSkills: false,
           databaseScripts: "recommended",
         })
@@ -1742,35 +1770,43 @@ describe("Database Generator", () => {
 
       await databaseGenerator.run({}, makeContext());
 
-      // First prompt call: provider, skills, databaseScripts
+      // First prompt call: provider
       const firstCallQuestions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
         name: string;
         type: string;
         message: string;
         default?: unknown;
       }>;
-      expect(firstCallQuestions.map((q) => q.name)).toEqual([
-        "provider",
-        "installPrismaSkills",
-        "databaseScripts",
-      ]);
-      expect(firstCallQuestions[1].type).toBe("confirm");
-      expect(firstCallQuestions[1].message).toBe("Install Prisma agent skills?");
-      expect(firstCallQuestions[1].default).toBe(false);
-      // The database scripts phase question follows the skills question.
-      expect(firstCallQuestions[2].type).toBe("select");
-      expect(firstCallQuestions[2].default).toBe("recommended");
+      expect(firstCallQuestions.map((q) => q.name)).toEqual(["provider"]);
 
-      // Second prompt call: helperPath
+      // Second prompt call: skills, databaseScripts
       const secondCallQuestions = (promptMock as unknown as Mock).mock.calls[1][0] as Array<{
         name: string;
         type: string;
         message: string;
         default?: unknown;
       }>;
-      expect(secondCallQuestions.map((q) => q.name)).toEqual(["helperPath"]);
-      expect(secondCallQuestions[0].type).toBe("input");
-      expect(secondCallQuestions[0].default).toBe("lib/prisma.ts");
+      expect(secondCallQuestions.map((q) => q.name)).toEqual([
+        "installPrismaSkills",
+        "databaseScripts",
+      ]);
+      expect(secondCallQuestions[0].type).toBe("confirm");
+      expect(secondCallQuestions[0].message).toBe("Install Prisma agent skills?");
+      expect(secondCallQuestions[0].default).toBe(false);
+      // The database scripts phase question follows the skills question.
+      expect(secondCallQuestions[1].type).toBe("select");
+      expect(secondCallQuestions[1].default).toBe("recommended");
+
+      // Third prompt call: helperPath
+      const thirdCallQuestions = (promptMock as unknown as Mock).mock.calls[2][0] as Array<{
+        name: string;
+        type: string;
+        message: string;
+        default?: unknown;
+      }>;
+      expect(thirdCallQuestions.map((q) => q.name)).toEqual(["helperPath"]);
+      expect(thirdCallQuestions[0].type).toBe("input");
+      expect(thirdCallQuestions[0].default).toBe("lib/prisma.ts");
 
       // The "No" answer flows through to the Prisma arguments.
       expect(getPrismaInitArgs()).toContain("--no-skills");
@@ -1780,10 +1816,11 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      // First call: skills, databaseScripts (provider already provided)
+      // First call: databaseUrl, skills, databaseScripts (provider already provided as sqlite)
       // Second call: helperPath
       (promptMock as unknown as Mock)
         .mockResolvedValueOnce({
+          databaseUrl: "file:./dev.db",
           installPrismaSkills: true,
           databaseScripts: "recommended",
         })
@@ -1793,7 +1830,7 @@ describe("Database Generator", () => {
 
       await databaseGenerator.run({ provider: "sqlite" }, makeContext());
 
-      // First prompt call: skills, databaseScripts
+      // First prompt call: databaseUrl, skills, databaseScripts (provider already provided)
       const firstCallQuestions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
         name: string;
         type: string;
@@ -1801,6 +1838,7 @@ describe("Database Generator", () => {
         default?: unknown;
       }>;
       expect(firstCallQuestions.map((q) => q.name)).toEqual([
+        "databaseUrl",
         "installPrismaSkills",
         "databaseScripts",
       ]);

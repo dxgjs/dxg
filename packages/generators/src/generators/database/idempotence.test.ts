@@ -254,6 +254,15 @@ vi.mock("@dxgjs/fs", async () => {
           );
           return { all: "prisma generate ok", stdout: "", stderr: "" };
         }
+        // Simulate `prisma db push`: creates the database file for SQLite.
+        if (
+          command === "npx" &&
+          args[0] === "prisma@7" &&
+          args[1] === "db" &&
+          args[2] === "push"
+        ) {
+          return { all: "prisma db push ok", stdout: "", stderr: "" };
+        }
         return { all: "", stdout: "", stderr: "" };
       },
     ),
@@ -269,9 +278,9 @@ vi.mock("@antfu/ni", () => {
       .fn()
       .mockImplementation((parseNiFn: unknown, args: string[]) => {
         parseNiFn;
-        // dlx passthrough (real ni behavior): prisma init/generate resolve
+        // dlx passthrough (real ni behavior): prisma init/generate/db push resolve
         // to npx with verbatim args.
-        if (args[0] === "prisma@7" && (args[1] === "init" || args[1] === "generate")) {
+        if (args[0] === "prisma@7" && (args[1] === "init" || args[1] === "generate" || (args[1] === "db" && args[2] === "push"))) {
           return { command: "npx", args: [...args], cwd: undefined };
         }
         // Dependency install batches resolve as npm install (-D → dev).

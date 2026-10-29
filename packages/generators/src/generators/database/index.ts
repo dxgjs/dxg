@@ -333,6 +333,21 @@ export const databasePrompts = [
     })),
   },
   {
+    // DATABASE_URL prompt: shown conditionally after provider selection.
+    // For SQLite, prefilled with the conventional file URL so the recommended
+    // chain works out-of-the-box. For server providers, empty placeholder
+    // (user fills in their connection string). This prompt runs BEFORE the
+    // skills/scripts/helper prompts so the value is available for planDatabase.
+    type: "input" as const,
+    name: "databaseUrl",
+    message: "Database connection URL (DATABASE_URL):",
+    // The default/initialValue will be set dynamically in run() based on provider
+    validate: (value) =>
+      typeof value === "string" && value.length > 0
+        ? true
+        : "DATABASE_URL cannot be empty",
+  },
+  {
     // DXG owns the Prisma agent skills decision: the user is asked here so
     // Prisma itself never has to ask. Default is No — Prisma agent skills
     // (.claude/skills/, .windsurf/skills/, .agents/skills/, skills-lock.json)
@@ -444,6 +459,21 @@ export function normalizeContent(content: string): string {
     .split("\n")
     .map((line) => line.trimEnd()) // trim trailing spaces
     .join("\n");
+}
+
+/**
+ * Sanitizes a value for safe embedding in a .env file.
+ * Prevents environment variable injection by removing newlines, carriage returns,
+ * and escaping shell metacharacters that could be interpreted by shell consumers.
+ * Backslashes are escaped first to avoid double-escaping.
+ */
+export function sanitizeEnvValue(value: string): string {
+  return value
+    .replace(/[\r\n]/g, "") // Remove newlines and carriage returns
+    .replace(/\\/g, "\\\\") // Escape backslashes FIRST
+    .replace(/\$/g, "\\$") // Escape $ to prevent variable expansion
+    .replace(/`/g, "\\`") // Escape backticks to prevent command substitution
+    .replace(/"/g, '\\"'); // Escape double quotes to prevent quote breaking
 }
 
 // Validation function
@@ -720,6 +750,7 @@ export function planDatabase(
     // This is the argument passed to `prisma init --output`.
     prismaInitOutput: posix.join("..", generatorOutput),
     envExists: inspection?.envExists ?? false,
+    envHasDatabaseUrl: inspection?.envHasDatabaseUrl ?? false,
     envNeedsDatabaseUrl: inspection?.envHasDatabaseUrl === false,
     // Non-Prisma provider dependencies dropped from the install batches
     // because the manifest already declares them (name-only check,
@@ -733,10 +764,15 @@ export function planDatabase(
     // dxg-e2e-sqlite-native-npm-zYRENi: prisma7.config.ts reads
     // process.env["DATABASE_URL"]). Server providers keep the empty
     // placeholder: the connection value is the user's to fill.
+    // Use user-provided databaseUrl if available (from interactive prompt).
+    // Sanitize user input to prevent environment variable injection (newlines,
+    // carriage returns, shell metacharacters).
     envDatabaseUrlLine:
       provider.key === "sqlite"
-        ? 'DATABASE_URL="file:./dev.db"'
-        : "DATABASE_URL=",
+        ? `DATABASE_URL="${sanitizeEnvValue(answers.databaseUrl as string ?? "file:./dev.db")}"`
+        : answers.databaseUrl !== undefined
+          ? `DATABASE_URL="${sanitizeEnvValue(answers.databaseUrl as string)}"`
+          : "DATABASE_URL=",
     helperPath,
     generatedClientImport,
     helperImportFromSeed,
@@ -1204,15 +1240,256 @@ export async function executeDatabase(
     }
   }
 
-  // Step 3b: Generate the Prisma Client — ALWAYS (decision document,
+  // Step 3b: .env additive reconciliation (decision document, section 5).
+  // `prisma init` preserves an existing .env byte-for-byte but NEVER adds
+  // DATABASE_URL to it (verified empirically) — the historical false
+  // success: green run, broken runtime. DXG owns the gap:
+  // - .env absent → create a minimal one. When init ran, it created a
+  //   .env with DATABASE_URL="" (empty) that the write below REPLACES
+  //   with the minimal file — envExists holds the PRE-RUN truth, so the
+  //   "absent" branch wins over init's empty placeholder.
+  // - .env present without DATABASE_URL → APPEND one line; every existing
+  //   byte is preserved.
+  // - .env already defines DATABASE_URL → untouched.
+  // The line's VALUE is provider-aware (plan.envDatabaseUrlLine): SQLite
+  // gets the conventional file URL — an empty one fails `prisma db push`
+  // with `Connection url is empty` (live-proven, e2e sqlite-native
+  // 2026-10-10) — server providers keep the empty placeholder.
+  if (planToUse.envNeedsDatabaseUrl) {
+    if (ctx.dryRun) {
+      result.wouldRun.push(
+        planToUse.envExists === false && planToUse.initRequired
+          ? "create .env with DATABASE_URL (via prisma init)"
+          : `${planToUse.envExists === false ? "create" : "append to"} .env a minimal DATABASE_URL line`,
+      );
+    } else {
+      const envPath = join(ctx.awareness.projectRoot, ".env");
+      // envExists comes from the inspection (pre-run truth); when init
+      // just created .env it holds DATABASE_URL already (marker false).
+      const envText = planToUse.envExists
+        ? ((await fs.readFile(envPath, {
+            encoding: "utf8",
+          })) as string | undefined)
+        : undefined;
+      if (typeof envText !== "string") {
+        // No .env at all: minimal file (init skipped means nothing else
+        // would create it).
+        await fs.writeFile(
+          envPath,
+          [
+            "# Environment variables — declared by the database layer",
+            planToUse.envDatabaseUrlLine,
+            "",
+          ].join("\n"),
+          "utf8",
+        );
+        result.created.push(".env (minimal, DATABASE_URL placeholder)");
+      } else if (!/^\s*(?:export\s+)?DATABASE_URL\s*=/m.test(envText)) {
+        // Byte-preserving append: original content first, untouched, then
+        // the new declaration on its own line.
+        const needsLeadingNewline =
+          envText.length > 0 && !envText.endsWith("\n");
+        await fs.writeFile(
+          envPath,
+          `${envText}${needsLeadingNewline ? "\n" : ""}${planToUse.envDatabaseUrlLine}\n`,
+          "utf8",
+        );
+        result.updated.push(".env (appended DATABASE_URL)");
+      }
+      // envHasDatabaseUrl=true never reaches here (marker false).
+    }
+  } else if (planToUse.envExists && planToUse.envHasDatabaseUrl) {
+    // .env exists and already has DATABASE_URL — nothing to do, surface as skipped
+    result.skipped.push(".env (already has DATABASE_URL)");
+  }
+
+  // Step 3c: .gitignore coverage for the .env this run wrote. `prisma
+  // init` warns about it ("Don't forget to add .env in it to not commit
+  // any private information" — live-captured in the audit reference
+  // run) but never acts. DXG owns the DATABASE_URL declaration, so DXG
+  // closes the hygiene loop — additively and byte-preservingly,
+  // mirroring Step 3b's philosophy:
+  // - .gitignore absent → create a minimal one covering .env.
+  // - present without .env coverage → APPEND the line; every existing
+  //   byte is preserved.
+  //   - already covering .env (whole-line spellings: .env, .env*,
+  //   *.env — the only spellings git actually ignores .env under,
+  //   probe-verified 2026-10-11; ".env.*" does NOT cover .env) →
+  //   untouched. Trailing spaces are insignificant to git (trimmed
+  //   for the comparison); leading spaces are significant — an
+  //   indented "  .env" is not coverage and must not count.
+  // - an explicit `!.env` negation is a deliberate user choice to track
+  //   .env → respected, untouched.
+  // Scoped to envNeedsDatabaseUrl — the same marker that gates the .env
+  // write: a user-owned .env that already declared DATABASE_URL is
+  // none of DXG's business, and reruns find DATABASE_URL already
+  // declared, never re-entering this path (idempotent by construction).
+  if (planToUse.envNeedsDatabaseUrl) {
+    if (ctx.dryRun) {
+      result.wouldRun.push("ensure .gitignore covers .env");
+    } else {
+      const gitignorePath = join(ctx.awareness.projectRoot, ".gitignore");
+      // pathExists BEFORE readFile: readFile throws ENOENT on a missing
+      // file (there is no pre-run inspection for .gitignore — unlike
+      // .env's envExists marker), so existence is checked here.
+      const gitignoreText = (await fs.pathExists(gitignorePath))
+        ? ((await fs.readFile(gitignorePath, {
+            encoding: "utf8",
+          })) as string)
+        : undefined;
+      const lines =
+        typeof gitignoreText === "string"
+          ? gitignoreText.split(/\r?\n/)
+          : [];
+      const coversEnv = lines.some((line) =>
+        [".env", ".env*", "*.env"].includes(line.trimEnd()),
+      );
+      const negatesEnv = lines.some((line) => line.trimEnd() === "!.env");
+      if (!coversEnv && !negatesEnv) {
+        if (typeof gitignoreText !== "string") {
+          await fs.writeFile(gitignorePath, ".env\n", "utf8");
+          result.created.push(".gitignore (covers .env)");
+        } else {
+          const needsLeadingNewline =
+            gitignoreText.length > 0 && !gitignoreText.endsWith("\n");
+          await fs.writeFile(
+            gitignorePath,
+            `${gitignoreText}${needsLeadingNewline ? "\n" : ""}.env\n`,
+            "utf8",
+          );
+          result.updated.push(".gitignore (appended .env)");
+        }
+      } else if (coversEnv && !negatesEnv) {
+        // .gitignore already covers .env — nothing to do
+        result.skipped.push(".gitignore (already covers .env)");
+      }
+    }
+  } else if (planToUse.envExists && planToUse.envHasDatabaseUrl) {
+    // .env already has DATABASE_URL — check if .gitignore covers it for summary
+    const gitignorePath = join(ctx.awareness.projectRoot, ".gitignore");
+    const gitignoreText = (await fs.pathExists(gitignorePath))
+      ? ((await fs.readFile(gitignorePath, {
+          encoding: "utf8",
+        })) as string)
+      : undefined;
+    const lines =
+      typeof gitignoreText === "string"
+        ? gitignoreText.split(/\r?\n/)
+        : [];
+    const coversEnv = lines.some((line) =>
+      [".env", ".env*", "*.env"].includes(line.trimEnd()),
+    );
+    if (coversEnv) {
+      result.skipped.push(".gitignore (already covers .env)");
+    }
+  }
+
+  // Step 3d: Run prisma db push to initialize the database with the schema.
+  // This MUST run after .env reconciliation (Step 3b) so that DATABASE_URL
+  // is correctly configured. For SQLite, this creates the dev.db file and
+  // applies the schema. For server providers, prisma db push is NOT run -
+  // they use migrations (prisma migrate dev) or external workflows instead.
+  // This step is required on every run (fresh or reconcile) for SQLite
+  // because schema changes between runs would leave the database stale.
+  // `prisma db push` is idempotent on an unchanged schema (verified empirically).
+  if (!ctx.dryRun && planToUse.provider === "sqlite") {
+    try {
+      const s = spinner();
+      s.start("Pushing schema to database (prisma db push)");
+
+      const pushResolved = await getCliCommand(
+        parseNlx,
+        ["prisma@7", "db", "push"],
+        {
+          cwd: process.cwd(),
+          programmatic: true,
+        },
+      );
+      if (!pushResolved) {
+        throw new SpawnError(
+          "prisma",
+          ["db", "push"],
+          "Failed to resolve prisma db push command",
+        );
+      }
+
+      const {
+        command: pushCmdInitial,
+        args: pushArgsInitial,
+        cwd: pushResolvedCwd,
+      } = pushResolved;
+
+      let pushCmd = pushCmdInitial;
+      let pushArgs = pushArgsInitial;
+
+      // Same @antfu/ni "dlx resolved as add" mis-resolution guard as init/generate.
+      if (pushArgs.includes("add")) {
+        pushCmd = "npx";
+        pushArgs = ["prisma@7", "db", "push"];
+      }
+
+      // Same pnpm dlx build approval as init/generate.
+      pushArgs = withDlxBuildApprovals(
+        pushCmd,
+        pushArgs,
+        planToUse.dependencyPlan,
+      );
+
+      try {
+        // Use stdio: "pipe" to capture output and prevent leakage into the terminal.
+        // Output is only surfaced on failure for diagnostics.
+        const result = await executeCommand(pushCmd, pushArgs, {
+          cwd: pushResolvedCwd ?? process.cwd(),
+          stdio: "pipe",
+        });
+        s.stop("Schema pushed to database (prisma db push)");
+        // Success: output is intentionally discarded to keep the terminal clean.
+        void result;
+      } catch (executeError) {
+        s.stop(`Failed to push schema to database`);
+        // Capture stdout/stderr from the error for diagnostics.
+        const errorOutput = executeError instanceof Error
+          ? (executeError as any).stdout ?? (executeError as any).stderr ?? ""
+          : "";
+        const errorMessage =
+          executeError instanceof Error ? executeError.message : String(executeError);
+        // Include captured output in the error message for actionable diagnostics.
+        const fullMessage = errorOutput
+          ? `${errorMessage}\n\nCaptured output:\n${errorOutput}`
+          : errorMessage;
+        throw new SpawnError(
+          pushCmd,
+          pushArgs,
+          fullMessage,
+          {
+            cause: executeError instanceof Error ? executeError : undefined,
+          },
+        );
+      }
+    } catch (error) {
+      throw new SpawnError(
+        "prisma",
+        ["db", "push"],
+        error instanceof Error ? error.message : String(error),
+        { cause: error instanceof Error ? error : undefined },
+      );
+    }
+  } else if (planToUse.provider === "sqlite") {
+    // Dry-run: record the planned prisma db push (SQLite only).
+    result.wouldRun.push("prisma db push");
+  }
+
+  // Step 3e: Generate the Prisma Client — ALWAYS (decision document,
   // section "always-generate"): `prisma generate` is byte-stable on an
   // unchanged schema (verified empirically, identical sha256 across runs)
   // and costs 300-700 ms, while skipping on client-existence alone is
   // indefensible (a model added between two runs would leave a stale
   // client — the staleness case). The command therefore runs on every
   // reconcile, fresh OR existing, after a skipped OR executed init.
+  // Runs AFTER prisma db push so the generated client reflects the
+  // database state.
   if (!ctx.dryRun) {
-    // Step 3b: Generate the Prisma Client. Prisma 7 has NO auto-generate —
+    // Step 3e: Generate the Prisma Client. Prisma 7 has NO auto-generate —
     // @prisma/client ships a stub that throws "did not initialize yet" at
     // import time until `prisma generate` runs, and no install-lifecycle
     // script triggers it. Without this step the generated lib/prisma.ts
@@ -1336,6 +1613,7 @@ export async function executeDatabase(
         .join(" ");
       result.wouldRun.push(`prisma ${plannedArgs}`);
     }
+    result.wouldRun.push("prisma db push");
     result.wouldRun.push("prisma generate --no-hints");
     if (planToUse.initRequired) {
       result.wouldRun.push(
@@ -1344,127 +1622,7 @@ export async function executeDatabase(
     }
   }
 
-  // Step 4b: .env additive reconciliation (decision document, section 5).
-  // `prisma init` preserves an existing .env byte-for-byte but NEVER adds
-  // DATABASE_URL to it (verified empirically) — the historical false
-  // success: green run, broken runtime. DXG owns the gap:
-  // - .env absent → create a minimal one. When init ran, it created a
-  //   .env with DATABASE_URL="" (empty) that the write below REPLACES
-  //   with the minimal file — envExists holds the PRE-RUN truth, so the
-  //   "absent" branch wins over init's empty placeholder.
-  // - .env present without DATABASE_URL → APPEND one line; every existing
-  //   byte is preserved.
-  // - .env already defines DATABASE_URL → untouched.
-  // The line's VALUE is provider-aware (plan.envDatabaseUrlLine): SQLite
-  // gets the conventional file URL — an empty one fails `prisma db push`
-  // with `Connection url is empty` (live-proven, e2e sqlite-native
-  // 2026-10-10) — server providers keep the empty placeholder.
-  if (planToUse.envNeedsDatabaseUrl) {
-    if (ctx.dryRun) {
-      result.wouldRun.push(
-        planToUse.envExists === false && planToUse.initRequired
-          ? "create .env with DATABASE_URL (via prisma init)"
-          : `${planToUse.envExists === false ? "create" : "append to"} .env a minimal DATABASE_URL line`,
-      );
-    } else {
-      const envPath = join(ctx.awareness.projectRoot, ".env");
-      // envExists comes from the inspection (pre-run truth); when init
-      // just created .env it holds DATABASE_URL already (marker false).
-      const envText = planToUse.envExists
-        ? ((await fs.readFile(envPath, {
-            encoding: "utf8",
-          })) as string | undefined)
-        : undefined;
-      if (typeof envText !== "string") {
-        // No .env at all: minimal file (init skipped means nothing else
-        // would create it).
-        await fs.writeFile(
-          envPath,
-          [
-            "# Environment variables — declared by the database layer",
-            planToUse.envDatabaseUrlLine,
-            "",
-          ].join("\n"),
-          "utf8",
-        );
-        result.created.push(".env (minimal, DATABASE_URL placeholder)");
-      } else if (!/^\s*(?:export\s+)?DATABASE_URL\s*=/m.test(envText)) {
-        // Byte-preserving append: original content first, untouched, then
-        // the new declaration on its own line.
-        const needsLeadingNewline =
-          envText.length > 0 && !envText.endsWith("\n");
-        await fs.writeFile(
-          envPath,
-          `${envText}${needsLeadingNewline ? "\n" : ""}${planToUse.envDatabaseUrlLine}\n`,
-          "utf8",
-        );
-        result.updated.push(".env (appended DATABASE_URL)");
-      }
-      // envHasDatabaseUrl=true never reaches here (marker false).
-    }
-  }
-
-  // Step 4c: .gitignore coverage for the .env this run wrote. `prisma
-  // init` warns about it ("Don't forget to add .env in it to not commit
-  // any private information" — live-captured in the audit reference
-  // run) but never acts. DXG owns the DATABASE_URL declaration, so DXG
-  // closes the hygiene loop — additively and byte-preservingly,
-  // mirroring Step 4b's philosophy:
-  // - .gitignore absent → create a minimal one covering .env.
-  // - present without .env coverage → APPEND the line; every existing
-  //   byte is preserved.
-  //   - already covering .env (whole-line spellings: .env, .env*,
-  //   *.env — the only spellings git actually ignores .env under,
-  //   probe-verified 2026-10-11; ".env.*" does NOT cover .env) →
-  //   untouched. Trailing spaces are insignificant to git (trimmed
-  //   for the comparison); leading spaces are significant — an
-  //   indented "  .env" is not coverage and must not count.
-  // - an explicit `!.env` negation is a deliberate user choice to track
-  //   .env → respected, untouched.
-  // Scoped to envNeedsDatabaseUrl — the same marker that gates the .env
-  // write: a user-owned .env that already declared DATABASE_URL is
-  // none of DXG's business, and reruns find DATABASE_URL already
-  // declared, never re-entering this path (idempotent by construction).
-  if (planToUse.envNeedsDatabaseUrl) {
-    if (ctx.dryRun) {
-      result.wouldRun.push("ensure .gitignore covers .env");
-    } else {
-      const gitignorePath = join(ctx.awareness.projectRoot, ".gitignore");
-      // pathExists BEFORE readFile: readFile throws ENOENT on a missing
-      // file (there is no pre-run inspection for .gitignore — unlike
-      // .env's envExists marker), so existence is checked here.
-      const gitignoreText = (await fs.pathExists(gitignorePath))
-        ? ((await fs.readFile(gitignorePath, {
-            encoding: "utf8",
-          })) as string)
-        : undefined;
-      const lines =
-        typeof gitignoreText === "string"
-          ? gitignoreText.split(/\r?\n/)
-          : [];
-      const coversEnv = lines.some((line) =>
-        [".env", ".env*", "*.env"].includes(line.trimEnd()),
-      );
-      const negatesEnv = lines.some((line) => line.trimEnd() === "!.env");
-      if (!coversEnv && !negatesEnv) {
-        if (typeof gitignoreText !== "string") {
-          await fs.writeFile(gitignorePath, ".env\n", "utf8");
-          result.created.push(".gitignore (covers .env)");
-        } else {
-          const needsLeadingNewline =
-            gitignoreText.length > 0 && !gitignoreText.endsWith("\n");
-          await fs.writeFile(
-            gitignorePath,
-            `${gitignoreText}${needsLeadingNewline ? "\n" : ""}.env\n`,
-            "utf8",
-          );
-          result.updated.push(".gitignore (appended .env)");
-        }
-      }
-    }
-  }
-
-  // Step 5: Add the selected database scripts to package.json
+  // Step 4: Add the selected database scripts to package.json
   const selectedScripts = resolveDatabaseScripts(
     answers.databaseScripts,
     planToUse.provider,
@@ -1871,12 +2029,28 @@ export const databaseGenerator: Generator = {
     }
 
     // ============================================================
+    // STEP 3: Inspect project state BEFORE prompts (for idempotence)
+    // ============================================================
+    // We need the provider to inspect correctly (provider-specific deps, env handling)
+    const providerForInspection = ((answers.provider as string) ?? "sqlite");
+    const inspection = await inspectDatabase(ctx, providerForInspection);
+
+    // ============================================================
     // STEP 4: Now handle prompts (only if validation passed)
     // ============================================================
     // Intro (only show if we might prompt or in interactive mode)
     const needsProvider = answers.provider === undefined;
     const needsSkillsAnswer = answers.installPrismaSkills === undefined;
-    const needsScriptsAnswer = answers.databaseScripts === undefined;
+    // Check if scripts are already configured in package.json
+    const packageJsonForScripts = await ctx.fs.readJson<
+      Record<string, unknown> & { scripts?: Record<string, string> }
+    >("package.json").catch(() => undefined);
+    const existingScripts = packageJsonForScripts?.scripts ?? {};
+    const recommendedScriptNames = recommendedScripts(providerForInspection);
+    const hasAllRecommendedScripts = recommendedScriptNames.every(
+      (name) => existingScripts[name] === databaseScriptCatalog[name].command,
+    );
+    const needsScriptsAnswer = answers.databaseScripts === undefined && !hasAllRecommendedScripts;
 
     // Only prompt in interactive mode (not dry-run and not CI)
     const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
@@ -1886,49 +2060,87 @@ export const databaseGenerator: Generator = {
       intro(pc.bgCyan(pc.black(" DXG Database Setup ")));
     }
 
-    if (
-      shouldPrompt &&
-      (needsProvider ||
-        needsSkillsAnswer ||
-        needsScriptsAnswer)
-    ) {
-      // Use interactive prompts for missing fields. DXG owns the Prisma
-      // agent skills decision ("Install Prisma agent skills?") — it is asked
-      // here, after the provider selection, so the Prisma CLI itself never
-      // has to ask it. The database scripts phase question follows: it
-      // decides which db:* npm scripts land in package.json.
-      const promptQuestions = [];
-
-      if (needsProvider) {
-        promptQuestions.push(databasePrompts[0]); // provider prompt
-      }
-      if (needsSkillsAnswer) {
-        promptQuestions.push(databasePrompts[1]); // skills prompt
-      }
-      if (needsScriptsAnswer) {
-        promptQuestions.push(databasePrompts[2]); // database scripts prompt
-      }
-
+    // First: prompt for provider if needed
+    if (shouldPrompt && needsProvider) {
+      const promptQuestions = [databasePrompts[0]]; // provider prompt
       let promptAnswers: Record<string, unknown>;
       try {
         promptAnswers = await prompt(
           promptQuestions as Parameters<typeof prompt>[0],
         );
       } catch (error) {
-        // Handle cancellation during interactive input collection
         if (isCancel(error)) {
           cancel("Operation cancelled");
         }
         throw error;
       }
       answers = { ...answers, ...promptAnswers };
+      // Re-inspect with the now-known provider
+      const newProvider = answers.provider as string;
+      if (newProvider !== providerForInspection) {
+        // Provider changed, re-inspect for accurate provider-specific checks
+        Object.assign(inspection, await inspectDatabase(ctx, newProvider));
+      }
     } else if (needsProvider && !shouldPrompt) {
       // In non-interactive mode, throw error for missing required values
-      const missing = [];
-      if (needsProvider) missing.push("provider");
       throw new ValidationError(
-        `Missing required values in non-interactive mode: ${missing.join(", ")}`,
+        "Missing required values in non-interactive mode: provider",
       );
+    }
+
+    // After provider is known (either from CLI or prompt), check if databaseUrl is needed
+    // databaseUrl prompt is needed when provider is sqlite, not provided, AND no existing DATABASE_URL in .env
+    const needsDatabaseUrl =
+      answers.provider === "sqlite" &&
+      answers.databaseUrl === undefined &&
+      !inspection.envHasDatabaseUrl;
+
+    // Second: prompt for remaining fields (databaseUrl if sqlite, skills, databaseScripts)
+    if (
+      shouldPrompt &&
+      (needsDatabaseUrl || needsSkillsAnswer || needsScriptsAnswer)
+    ) {
+      const promptQuestions = [];
+
+      // databaseUrl prompt: conditional on provider being sqlite
+      if (needsDatabaseUrl) {
+        const databaseUrlPrompt = { ...databasePrompts[1] };
+        // Set prefilled value based on provider
+        databaseUrlPrompt.initialValue = "file:./dev.db";
+        databaseUrlPrompt.default = "file:./dev.db";
+        promptQuestions.push(databaseUrlPrompt);
+      }
+      if (needsSkillsAnswer) {
+        promptQuestions.push(databasePrompts[2]); // skills prompt
+      }
+      if (needsScriptsAnswer) {
+        promptQuestions.push(databasePrompts[3]); // database scripts prompt
+      }
+
+      if (promptQuestions.length > 0) {
+        let promptAnswers: Record<string, unknown>;
+        try {
+          promptAnswers = await prompt(
+            promptQuestions as Parameters<typeof prompt>[0],
+          );
+        } catch (error) {
+          if (isCancel(error)) {
+            cancel("Operation cancelled");
+          }
+          throw error;
+        }
+        answers = { ...answers, ...promptAnswers };
+      }
+    }
+
+    // Non-interactive / dry-run / CLI: provide default databaseUrl for sqlite
+    // Only if no existing DATABASE_URL in .env (inspection.envHasDatabaseUrl)
+    if (
+      answers.provider === "sqlite" &&
+      answers.databaseUrl === undefined &&
+      !inspection.envHasDatabaseUrl
+    ) {
+      answers.databaseUrl = "file:./dev.db";
     }
 
     if (answers.installPrismaSkills === undefined) {
@@ -1951,23 +2163,6 @@ export const databaseGenerator: Generator = {
         answers.databaseScripts = await promptCustomScripts(
           answers.provider as string,
         );
-      } catch (error) {
-        if (isCancel(error)) {
-          cancel("Operation cancelled");
-        }
-        throw error;
-      }
-    }
-
-    // Helper path question — asked AFTER the database scripts phase
-    // (including the customize multiselect) so the flow is:
-    // provider → skills → databaseScripts → [customize multiselect] → helperPath
-    const needsHelperPathNow = answers.helperPath === undefined;
-    if (shouldPrompt && needsHelperPathNow) {
-      const helperPrompt = databasePrompts[3]; // helper path prompt
-      try {
-        const helperAnswer = await prompt([helperPrompt] as Parameters<typeof prompt>[0]);
-        answers = { ...answers, ...helperAnswer };
       } catch (error) {
         if (isCancel(error)) {
           cancel("Operation cancelled");
@@ -2053,54 +2248,24 @@ export const databaseGenerator: Generator = {
       }
 
       // ============================================================
-      // Idempotence check for lib/prisma.ts: compare generated content
-      // with existing file (normalized CRLF/LF, trimmed trailing spaces)
+      // Helper path resolution: detect valid existing helpers BEFORE prompting
       // ============================================================
-      const helperPath = answers.helperPath as string | undefined;
-      let skipHelperPrompt = false;
-      if (helperPath) {
-        const fs = ctx.fs;
-        const existingHelper = await fs.pathExists(helperPath);
-        if (existingHelper) {
-          // Get the provider to generate the expected template content
-          const providerKey = answers.provider as string;
-          const provider = providerData[providerKey as keyof typeof providerData];
-          if (provider) {
-            const templatePath = provider.templatePath;
-            const templateContent = (await fs.readFile(templatePath, { encoding: "utf8" })) as string;
-            // We need to render the template with the same data that executeDatabase would use
-            // The template uses these variables: outputPath, provider, adapterImport, adapterClass, etc.
-            // Let's compute the expected rendered content
-            const outputPath = helperPath.replace(/\\/g, "/");
-            const generatedContent = templateContent
-              .replace(/\{\{outputPath\}\}/g, provider.templateOutputPath)
-              .replace(/\{\{provider\}\}/g, provider.key)
-              .replace(/\{\{adapterImport\}\}/g, provider.adapterImport)
-              .replace(/\{\{adapterClass\}\}/g, provider.adapterClass)
-              .replace(/\{\{instantiationPattern\}\}/g, provider.instantiationPattern)
-              .replace(/\{\{importPath\}\}/g, computeRelativeImport(outputPath, provider.templateOutputPath));
-
-            // Read existing file and compare normalized
-            const existingContent = (await fs.readFile(helperPath, { encoding: "utf8" })) as string;
-            const normalizedGenerated = normalizeContent(generatedContent);
-            const normalizedExisting = normalizeContent(existingContent);
-
-            if (normalizedGenerated === normalizedExisting) {
-              // Identical -> skip silently, don't ask for helper path again
-              skipHelperPrompt = true;
-            }
-            // If different, it will be reported as conflict in plan/execute
-          }
-        }
-      }
-
-      // Helper path question — asked AFTER the database scripts phase
-      // (including the customize multiselect) so the flow is:
-      // provider → skills → databaseScripts → [customize multiselect] → helperPath
-      // Skip if idempotence check found identical content
+      // The inspection now returns only content-validated helpers in helperCandidates.
+      // - 0 valid helpers -> show prompt with default
+      // - 1 valid helper -> auto-reuse it, skip prompt
+      // - Multiple valid helpers -> prompt for disambiguation
       const needsHelperPathNow = answers.helperPath === undefined;
-      if (shouldPrompt && needsHelperPathNow && !skipHelperPrompt) {
-        const helperPrompt = databasePrompts[3]; // helper path prompt
+      const validHelpers = inspection.helperCandidates ?? [];
+      const validHelperCount = validHelpers.length;
+
+      if (needsHelperPathNow && validHelperCount === 1) {
+        // Exactly one valid helper found: auto-reuse it, no prompt
+        answers.helperPath = validHelpers[0];
+      } else if (shouldPrompt && needsHelperPathNow && validHelperCount > 1) {
+        // Multiple valid helpers: prompt for disambiguation
+        const helperPrompt = databasePrompts[4]; // helper path prompt (index 4)
+        // Show all valid helpers as hint
+        helperPrompt.message += ` (found ${validHelperCount} existing: ${validHelpers.join(", ")})`;
         try {
           const helperAnswer = await prompt([helperPrompt] as Parameters<typeof prompt>[0]);
           answers = { ...answers, ...helperAnswer };
@@ -2110,6 +2275,25 @@ export const databaseGenerator: Generator = {
           }
           throw error;
         }
+      } else if (needsHelperPathNow && !shouldPrompt && validHelperCount > 0) {
+        // Non-interactive mode: auto-select first valid helper
+        answers.helperPath = validHelpers[0];
+      }
+      // If no valid helpers found, show the normal prompt with default
+      if (shouldPrompt && needsHelperPathNow && validHelperCount === 0) {
+        const helperPrompt = databasePrompts[4]; // helper path prompt (index 4)
+        try {
+          const helperAnswer = await prompt([helperPrompt] as Parameters<typeof prompt>[0]);
+          answers = { ...answers, ...helperAnswer };
+        } catch (error) {
+          if (isCancel(error)) {
+            cancel("Operation cancelled");
+          }
+          throw error;
+        }
+      } else if (needsHelperPathNow && !shouldPrompt && validHelperCount === 0) {
+        // Non-interactive mode with no valid helpers: use default
+        answers.helperPath = DEFAULT_HELPER_PATH;
       }
 
       // Plan (state-aware: the inspection drives init/install gating and
