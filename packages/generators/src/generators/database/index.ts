@@ -1554,13 +1554,15 @@ export async function executeDatabase(
       try {
         // Use stdio: "pipe" to capture output and prevent leakage into the terminal.
         // Output is only surfaced on failure for diagnostics.
-        const result = await executeCommand(generateCmd, generateArgs, {
+        const generateResult = await executeCommand(generateCmd, generateArgs, {
           cwd: generateResolvedCwd ?? process.cwd(),
           stdio: "pipe",
         });
         s.stop("Prisma Client generated");
         // Success: output is intentionally discarded to keep the terminal clean.
-        void result; // Acknowledge captured output is intentionally unused on success.
+        void generateResult; // Acknowledge captured output is intentionally unused on success.
+        // Report Prisma Client generation in the operation summary.
+        result.created.push("Prisma Client generated");
       } catch (executeError) {
         s.stop(`Failed to generate Prisma Client`);
         // Capture stdout/stderr from the error for diagnostics.
