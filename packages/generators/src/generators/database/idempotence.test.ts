@@ -196,7 +196,7 @@ vi.mock("@dxgjs/fs", async () => {
         // included: the real CLI always writes it).
         if (
           command === "npx" &&
-          args[0] === "prisma@7" &&
+          args[0] === "prisma@7.10.0" &&
           args[1] === "init" &&
           !_files.has("prisma7.config.ts")
         ) {
@@ -233,7 +233,7 @@ vi.mock("@dxgjs/fs", async () => {
         // Simulate `prisma generate`: emits the generated client.
         if (
           command === "npx" &&
-          args[0] === "prisma@7" &&
+          args[0] === "prisma@7.10.0" &&
           args[1] === "generate"
         ) {
           // Determine the output path: use the last captured from prisma init, or default
@@ -257,7 +257,7 @@ vi.mock("@dxgjs/fs", async () => {
         // Simulate `prisma db push`: creates the database file for SQLite.
         if (
           command === "npx" &&
-          args[0] === "prisma@7" &&
+          args[0] === "prisma@7.10.0" &&
           args[1] === "db" &&
           args[2] === "push"
         ) {
@@ -280,7 +280,7 @@ vi.mock("@antfu/ni", () => {
         parseNiFn;
         // dlx passthrough (real ni behavior): prisma init/generate/db push resolve
         // to npx with verbatim args.
-        if (args[0] === "prisma@7" && (args[1] === "init" || args[1] === "generate" || (args[1] === "db" && args[2] === "push"))) {
+        if (args[0] === "prisma@7.10.0" && (args[1] === "init" || args[1] === "generate" || (args[1] === "db" && args[2] === "push"))) {
           return { command: "npx", args: [...args], cwd: undefined };
         }
         // Dependency install batches resolve as npm install (-D → dev).
@@ -435,7 +435,7 @@ function prismaCommandCalls(): [string, string[]][] {
       }
     )
     .filter(([cmd, args]) => {
-      return cmd === "npx" && args[0] === "prisma@7";
+      return cmd === "npx" && args[0] === "prisma@7.10.0";
     });
 }
 
@@ -457,6 +457,8 @@ beforeEach(() => {
   fsMockStore._files.clear();
   fsMockStore._directories.clear();
   delete process.env.CI;
+  // Reset the prisma init output tracker so prisma generate uses the correct path
+  lastPrismaInitOutput = null;
 });
 
 afterEach(() => {

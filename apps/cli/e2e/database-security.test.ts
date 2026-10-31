@@ -97,7 +97,9 @@ async function runSecurityScenario(
     !helperContent.match(/mysql:\/\//) &&
     !helperContent.match(/mongodb:\/\//) &&
     !helperContent.match(/redis:\/\//) &&
-    !helperContent.match(/[a-zA-Z0-9+/]{20,}={0,2}/) && // Base64-ish
+    // Base64-ish: match quoted strings that look like real secrets (40+ chars, with padding)
+    // Exclude import paths like "./generated/prisma/client" which are not secrets
+    !helperContent.match(/["'][a-zA-Z0-9+/]{40,}={1,2}["']/) &&
     !helperContent.match(/[a-f0-9]{32,}/) && // Hex secrets
     !helperContent.match(/\$\{process\.env\.DATABASE_URL\}/) && // Old bug pattern
     !helperContent.match(/url:\s*process\.env\.DATABASE_URL/); // Old bug pattern

@@ -50,7 +50,7 @@ const agentScenarios: {
   {
     name: "npm",
     expectedCommand: "npx",
-    expectedArgsPrefix: ["prisma@7"],
+    expectedArgsPrefix: ["prisma@7.10.0"],
     files: {
       "package.json": '{"name":"dxg-fixture","private":true}',
       "package-lock.json": '{"lockfileVersion":3}',
@@ -59,7 +59,7 @@ const agentScenarios: {
   {
     name: "pnpm",
     expectedCommand: "pnpm",
-    expectedArgsPrefix: ["dlx", "prisma@7"],
+    expectedArgsPrefix: ["dlx", "prisma@7.10.0"],
     files: {
       "package.json": '{"name":"dxg-fixture","private":true}',
       "pnpm-lock.yaml": "lockfileVersion: '9.0'\n",
@@ -69,7 +69,7 @@ const agentScenarios: {
     // package-manager-detector maps yarn v1 `execute` to npx.
     name: "yarn v1",
     expectedCommand: "npx",
-    expectedArgsPrefix: ["prisma@7"],
+    expectedArgsPrefix: ["prisma@7.10.0"],
     files: {
       "package.json": '{"name":"dxg-fixture","private":true}',
       "yarn.lock": "# yarn lockfile v1\n\n",
@@ -78,7 +78,7 @@ const agentScenarios: {
   {
     name: "yarn berry",
     expectedCommand: "yarn",
-    expectedArgsPrefix: ["dlx", "prisma@7"],
+    expectedArgsPrefix: ["dlx", "prisma@7.10.0"],
     files: {
       "package.json":
         '{"name":"dxg-fixture","packageManager":"yarn@4.1.1","private":true}',
@@ -87,7 +87,7 @@ const agentScenarios: {
   {
     name: "bun",
     expectedCommand: "bun",
-    expectedArgsPrefix: ["x", "prisma@7"],
+    expectedArgsPrefix: ["x", "prisma@7.10.0"],
     files: {
       "package.json": '{"name":"dxg-fixture","private":true}',
       "bun.lock": "",
@@ -155,7 +155,7 @@ function expectPrismaInitContract(
   expect(typeof command).toBe("string");
   expect(command.length).toBeGreaterThan(0);
 
-  const packageIdx = args.indexOf("prisma@7");
+  const packageIdx = args.indexOf("prisma@7.10.0");
   const initIdx = args.indexOf("init");
   const providerFlagIdx = args.indexOf("--datasource-provider");
   const noSkillsIdx = args.indexOf("--no-skills");
@@ -209,7 +209,7 @@ describe("prisma init argument contract (real @antfu/ni resolution)", () => {
       // The exact shape shared by BOTH production paths (primary call and
       // originalArgs fallback) for the DXG default (No → --no-skills).
       expect(buildPrismaInitArgs(provider.prismaProvider, false)).toEqual([
-        "prisma@7",
+        "prisma@7.10.0",
         "init",
         "--datasource-provider",
         provider.prismaProvider,
@@ -219,7 +219,7 @@ describe("prisma init argument contract (real @antfu/ni resolution)", () => {
       ]);
       // And for "Yes": identical contract minus the --no-skills flag.
       expect(buildPrismaInitArgs(provider.prismaProvider, true)).toEqual([
-        "prisma@7",
+        "prisma@7.10.0",
         "init",
         "--datasource-provider",
         provider.prismaProvider,
@@ -301,7 +301,7 @@ describe("prisma init argument contract (real @antfu/ni resolution)", () => {
       agentScenarios[1].files, // pnpm
     );
     expect(serializeCommand(noSkills)).toBe(
-      "pnpm dlx prisma@7 init --datasource-provider postgresql --no-skills --output ../lib/generated/prisma",
+      "pnpm dlx prisma@7.10.0 init --datasource-provider postgresql --no-skills --output ../lib/generated/prisma",
     );
 
     const withSkills = await resolvePrismaInitCommand(
@@ -312,7 +312,7 @@ describe("prisma init argument contract (real @antfu/ni resolution)", () => {
     // "Yes" contract: same structure, skills flag omitted. prisma@7.10.0
     // installs the skills non-interactively on this path.
     expect(serializeCommand(withSkills)).toBe(
-      "pnpm dlx prisma@7 init --datasource-provider postgresql --output ../lib/generated/prisma",
+      "pnpm dlx prisma@7.10.0 init --datasource-provider postgresql --output ../lib/generated/prisma",
     );
   });
 });

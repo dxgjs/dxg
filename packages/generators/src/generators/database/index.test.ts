@@ -72,7 +72,7 @@ const defaultExecuteFake = vi.hoisted(() => {
       }
       return { all: "added packages", stdout: "", stderr: "" };
     }
-    if (command === "npx" && args[0] === "prisma@7" && args[1] === "init") {
+    if (command === "npx" && args[0] === "prisma@7.10.0" && args[1] === "init") {
       // Extract the output path from the args (--output <path>)
       const outputIndex = args.indexOf("--output");
       if (outputIndex !== -1 && outputIndex + 1 < args.length) {
@@ -105,7 +105,7 @@ const defaultExecuteFake = vi.hoisted(() => {
       fsMockStore._files.set(".env", dbUrl);
       return { all: "prisma init ok", stdout: "", stderr: "" };
     }
-    if (command === "npx" && args[0] === "prisma@7" && args[1] === "generate") {
+    if (command === "npx" && args[0] === "prisma@7.10.0" && args[1] === "generate") {
       // Determine the output path: use the last captured from prisma init, or default
       const outputPathRelativeToPrisma = lastPrismaInitOutput ?? "node_modules/@prisma/client";
       // Convert to path relative to project root: prisma/<outputPath>
@@ -124,7 +124,7 @@ const defaultExecuteFake = vi.hoisted(() => {
       );
       return { all: "prisma generate ok", stdout: "", stderr: "" };
     }
-    if (command === "npx" && args[0] === "prisma@7" && args[1] === "db" && args[2] === "push") {
+    if (command === "npx" && args[0] === "prisma@7.10.0" && args[1] === "db" && args[2] === "push") {
       // prisma db push: for SQLite, this creates the dev.db file
       // In the test environment, we just need to simulate success
       // The actual database file creation is not needed for the tests
@@ -280,14 +280,14 @@ vi.mock("@antfu/ni", () => {
           return { command: "npm-mock", args: [] };
         }
         // For prisma init — keyed to the EXACT production argument shape
-        // (executeDatabase calls getCliCommand(parseNlx, ["prisma@7",
+        // (executeDatabase calls getCliCommand(parseNlx, ["prisma@7.10.0",
         // "init", ...])). This branch MUST be evaluated before the
         // dependency-install branches, whose "-D"/"add" heuristics would
         // otherwise swallow the prisma args. Real @antfu/ni resolves this
         // command with a verbatim args passthrough (npx / pnpm dlx /
         // yarn dlx / bun x), so the mock must never transform or drop args
         // (especially --no-skills).
-        if (args[0] === "prisma@7" && args[1] === "init") {
+        if (args[0] === "prisma@7.10.0" && args[1] === "init") {
           // If we want to trigger the workaround, simulate legacy
           // @antfu/ni versions that mis-resolved the dlx command to
           // "<agent> add ..." — the production originalArgs workaround must
@@ -304,10 +304,10 @@ vi.mock("@antfu/ni", () => {
           return { command: "npx", args: [...args] };
         }
         // prisma generate — same dlx passthrough semantics as init, and
-        // equally BEFORE the install heuristics: ["prisma@7", "generate"]
+        // equally BEFORE the install heuristics: ["prisma@7.10.0", "generate"]
         // carries no "-D", so the plain-specs branch below would otherwise
-        // mis-resolve it into "npm-mock install prisma@7 generate".
-        if (args[0] === "prisma@7" && args[1] === "generate") {
+        // mis-resolve it into "npm-mock install prisma@7.10.0 generate".
+        if (args[0] === "prisma@7.10.0" && args[1] === "generate") {
           if (triggerPrismaGenerateWorkaround) {
             return {
               command: "some-agent",
@@ -317,10 +317,10 @@ vi.mock("@antfu/ni", () => {
           return { command: "npx", args: [...args] };
         }
         // prisma db push — same dlx passthrough semantics as init/generate,
-        // must be checked BEFORE the install heuristics: ["prisma@7", "db", "push"]
+        // must be checked BEFORE the install heuristics: ["prisma@7.10.0", "db", "push"]
         // carries no "-D", so the plain-specs branch would otherwise
-        // mis-resolve it into "npm-mock install prisma@7 db push".
-        if (args[0] === "prisma@7" && args[1] === "db" && args[2] === "push") {
+        // mis-resolve it into "npm-mock install prisma@7.10.0 db push".
+        if (args[0] === "prisma@7.10.0" && args[1] === "db" && args[2] === "push") {
           return { command: "npx", args: [...args] };
         }
         // For dependency installation commands
@@ -394,6 +394,8 @@ describe("Database Generator", () => {
     );
     fsMockStore._files.clear();
     fsMockStore._directories.clear();
+    // Reset the prisma init output tracker so prisma generate uses the correct path
+    lastPrismaInitOutput = null;
   });
 
   afterEach(() => {

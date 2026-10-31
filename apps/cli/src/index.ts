@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { registerAddCommand } from "./commands/add";
+import { registerDoctorCommand } from "./commands/doctor";
 import pkg from "../package.json" with { type: "json" };
 
 /**
@@ -22,6 +23,9 @@ export function createProgram(): Command {
 
   // Add command - adds a specific generator
   registerAddCommand(program);
+
+  // Doctor command - diagnose and repair project configuration
+  registerDoctorCommand(program);
 
   return program;
 }

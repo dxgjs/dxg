@@ -38,22 +38,35 @@ import {
   ValidationError,
   SpawnError,
 } from "@dxgjs/errors";
+
+// Shared database meta (single source of truth for Prisma version, providers, scripts, paths)
 import {
-  specName,
+  providerData,
+  databaseScriptCatalog,
+  SEED_SCRIPT_NAME,
+  SEED_FILE_PATH,
+  SEED_CONFIG_COMMAND,
+  PRISMA_CONFIG_PATH,
+  PRISMA_PINNED_VERSION,
   DEFAULT_GENERATOR_OUTPUT,
   DEFAULT_HELPER_PATH,
-  PRISMA_PINNED_VERSION,
-  computeFileImport,
+  buildPrismaInitArgs,
+  providerScripts,
+  recommendedScripts,
+  resolveDatabaseScripts,
+  normalizeContent,
+  sanitizeEnvValue,
+  validateDatabase,
   computeRelativeImport,
-  inspectDatabase,
+  computeFileImport,
   normalizeHelperPath,
   validateHelperPath,
-} from "./inspect";
-import {
-  detectPrismaState,
   providersMatch,
   normalizePrismaProvider,
-} from "./detect-prisma-state";
+  specName,
+} from "@dxgjs/database-meta";
+import { detectPrismaState } from "./detect-prisma-state";
+import { inspectDatabase } from "./inspect";
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
@@ -72,253 +85,30 @@ if (isBundled) {
   templateBasePath = join(__dirname, "templates");
 }
 
-// Provider data - explicit and data-driven as required
-export const providerData = {
-  sqlite: {
-    key: "sqlite",
-    name: "SQLite",
-    displayName: "SQLite",
-    prismaProvider: "sqlite",
-    adapterPackage: "@prisma/adapter-better-sqlite3",
-    adapterImport: "PrismaBetterSqlite3",
-    adapterClass: "PrismaBetterSqlite3",
-    driverPackage: "better-sqlite3",
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/better-sqlite3"],
-    // better-sqlite3 is PINNED to ^12.6.0: @prisma/adapter-better-sqlite3@7.10.0
-    // requires ^12.6.0, and latest (13.x) changed distribution models (no
-    // install script at all). Unpinned, the two constraints could diverge
-    // into a double-copy hazard.
-    dependencies: [
-      "@prisma/client@7.10.0",
-      "@prisma/adapter-better-sqlite3",
-      "better-sqlite3@^12.6.0",
-      "dotenv",
-    ],
-    templatePath: join(templateBasePath, "prisma-client-lib-sqlite.tmpl"),
-    templateOutputPath: "lib/prisma.ts",
-    instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    notes:
-      "SQLite is a file-based database suited for development and prototyping.",
-    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
-  },
-  postgresql: {
-    key: "postgresql",
-    name: "PostgreSQL",
-    displayName: "PostgreSQL",
-    prismaProvider: "postgresql",
-    adapterPackage: "@prisma/adapter-pg",
-    adapterImport: "PrismaPg",
-    adapterClass: "PrismaPg",
-    driverPackage: "pg",
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/pg"],
-    dependencies: [
-      "@prisma/client@7.10.0",
-      "@prisma/adapter-pg",
-      "pg",
-      "dotenv",
-    ],
-    templatePath: join(templateBasePath, "prisma-client-lib.tmpl"),
-    templateOutputPath: "lib/prisma.ts",
-    instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    notes:
-      "PostgreSQL is a powerful, open source object-relational database system.",
-    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
-  },
-  mysql: {
-    key: "mysql",
-    name: "MySQL",
-    displayName: "MySQL",
-    prismaProvider: "mysql",
-    adapterPackage: "@prisma/adapter-mariadb",
-    adapterImport: "PrismaMariaDb",
-    adapterClass: "PrismaMariaDb",
-    driverPackage: "", // MariaDB adapter uses individual params, not a driver package
-    devDependencies: ["prisma@7.10.0", "@types/node"],
-    dependencies: [
-      "@prisma/client@7.10.0",
-      "@prisma/adapter-mariadb",
-      "dotenv",
-    ],
-    templatePath: join(templateBasePath, "prisma-client-lib-mysql.tmpl"),
-    templateOutputPath: "lib/prisma.ts",
-    instantiationPattern: "individualParams", // Uses individual connection parameters
-    notes:
-      "MySQL is a widely-used open source relational database management system.",
-    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
-  },
-  sqlserver: {
-    key: "sqlserver",
-    name: "SQL Server",
-    displayName: "SQL Server",
-    prismaProvider: "sqlserver",
-    adapterPackage: "@prisma/adapter-mssql",
-    adapterImport: "PrismaMssql",
-    adapterClass: "PrismaMssql",
-    driverPackage: "", // MSSQL adapter uses individual params
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/mssql"],
-    dependencies: ["@prisma/client@7.10.0", "@prisma/adapter-mssql", "dotenv"],
-    templatePath: join(templateBasePath, "prisma-client-lib-sqlserver.tmpl"),
-    templateOutputPath: "lib/prisma.ts",
-    instantiationPattern: "individualParams", // Uses individual connection parameters
-    notes:
-      "Microsoft SQL Server is a relational database management system developed by Microsoft.",
-    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
-  },
-  cockroachdb: {
-    key: "cockroachdb",
-    name: "CockroachDB",
-    displayName: "CockroachDB",
-    prismaProvider: "cockroachdb",
-    adapterPackage: "@prisma/adapter-pg",
-    adapterImport: "PrismaPg",
-    adapterClass: "PrismaPg",
-    driverPackage: "pg",
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/pg"],
-    dependencies: [
-      "@prisma/client@7.10.0",
-      "@prisma/adapter-pg",
-      "pg",
-      "dotenv",
-    ],
-    templatePath: join(templateBasePath, "prisma-client-lib.tmpl"),
-    templateOutputPath: "lib/prisma.ts",
-    instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    notes:
-      "CockroachDB is a distributed SQL database built on a transactional and strongly-consistent key-value store.",
-    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
-  },
-  planetscale: {
-    key: "planetscale",
-    name: "PlanetScale",
-    displayName: "PlanetScale (MySQL)",
-    prismaProvider: "mysql", // Uses MySQL protocol
-    adapterPackage: "@prisma/adapter-planetscale",
-    adapterImport: "PrismaPlanetScale",
-    adapterClass: "PrismaPlanetScale",
-    driverPackage: "undici", // Required for fetch polyfill
-    devDependencies: ["prisma@7.10.0", "@types/node"],
-    dependencies: [
-      "@prisma/client@7.10.0",
-      "@prisma/adapter-planetscale",
-      "undici",
-      "dotenv",
-    ],
-    templatePath: join(templateBasePath, "prisma-client-lib-planetscale.tmpl"),
-    templateOutputPath: "lib/prisma.ts",
-    instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    // Prisma migrations (migrate dev/reset) are unsupported on Vitess:
-    // schema changes go through PlanetScale's own workflow instead.
-    supportsMigrations: false,
-    notes:
-      "PlanetScale is a serverless database platform built on Vitess. Requires relationMode = 'prisma' in schema.prisma for MySQL variant.",
-    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
-  },
-  prismapostgres: {
-    key: "prismapostgres",
-    name: "Prisma Postgres",
-    displayName: "Prisma Postgres",
-    prismaProvider: "postgresql", // Uses PostgreSQL provider
-    adapterPackage: "@prisma/adapter-pg",
-    adapterImport: "PrismaPg",
-    adapterClass: "PrismaPg",
-    driverPackage: "pg",
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/pg"],
-    dependencies: [
-      "@prisma/client@7.10.0",
-      "@prisma/adapter-pg",
-      "pg",
-      "dotenv",
-    ],
-    templatePath: join(templateBasePath, "prisma-client-lib.tmpl"),
-    templateOutputPath: "lib/prisma.ts",
-    instantiationPattern: "connectionString", // Uses DATABASE_URL connection string
-    notes:
-      "Prisma Postgres is a fully managed PostgreSQL-compatible database service.",
-    recommendedScripts: ["db:generate", "db:push", "db:studio", "db:pull"],
-  },
-};
+// Provider data and script catalog are now imported from @dxgjs/database-meta
+// Re-export for backward compatibility with tests
+export { providerData } from "@dxgjs/database-meta";
+export { databaseScriptCatalog, SEED_SCRIPT_NAME, SEED_FILE_PATH, SEED_CONFIG_COMMAND, PRISMA_CONFIG_PATH } from "@dxgjs/database-meta";
+export { providerScripts, recommendedScripts, resolveDatabaseScripts } from "@dxgjs/database-meta";
+export { buildPrismaInitArgs } from "@dxgjs/database-meta";
 
-// Database script contract — owned by the database domain.
-//
-// Every entry must have a concrete, immediately-useful purpose after
-// `dxg add database`. Deliberately NOT exposed as scripts:
-// - db:reset — destructive (prisma migrate reset); developers who adopt
-//   the migrations workflow already know the prisma CLI.
-//
-// db:seed is opt-in (customize only): selecting it generates a
-// prisma/seed.ts skeleton, adds `tsx` (the seed runner) and configures
-// `migrations.seed` in prisma7.config.ts — where Prisma 7's `db seed`
-// reads the seed command (verified against the prisma@7.10.0 CLI: it
-// resolves migrations.seed from the config file ONLY; the
-// `prisma.seed` package.json field is read by the init flow's
-// "Seed the database?" prompt, never by db seed). The recommended set
-// stays minimal and seed stays opt-in because seeding is
-// workflow-dependent.
-const SEED_SCRIPT_NAME = "db:seed";
-const SEED_FILE_PATH = "prisma/seed.ts";
-const SEED_CONFIG_COMMAND = `tsx ${SEED_FILE_PATH}`;
-// The Prisma 7 config file written at the project root by `prisma init`
-// (first candidate in @prisma/config's search order, before the legacy
-// prisma.config.* names).
-const PRISMA_CONFIG_PATH = "prisma7.config.ts";
-
-export const databaseScriptCatalog: Record<
-  string,
-  { command: string; hint: string; recommended: boolean }
-> = {
-  "db:generate": {
-    command: "prisma generate",
-    hint: "Generate Prisma Client",
-    recommended: true,
-  },
-  "db:push": {
-    command: "prisma db push",
-    hint: "Push the Prisma schema to the database",
-    recommended: true,
-  },
-  "db:studio": {
-    command: "prisma studio",
-    hint: "Open Prisma Studio",
-    recommended: true,
-  },
-  "db:pull": {
-    command: "prisma db pull",
-    hint: "Pull the database schema into Prisma schema",
-    recommended: true,
-  },
-  [SEED_SCRIPT_NAME]: {
-    command: "prisma db seed",
-    hint: "Seed the database",
-    recommended: false,
-  },
-  "db:migrate": {
-    command: "prisma migrate dev",
-    hint: "Create and apply Prisma migrations",
-    recommended: false,
-  },
-};
-
-/** Scripts offered for a given provider key (provider-aware filtering). */
-export function providerScripts(providerKey: string): string[] {
-  const provider = providerData[providerKey as keyof typeof providerData];
-  // Providers without Prisma-migrations support (e.g. PlanetScale on
-  // Vitess) never see the migrate entry — the knowledge stays in the
-  // provider table, not in a generic capability framework. The flag is
-  // optional: every provider that does not opt out keeps the full catalogue.
-  const excludeMigrations =
-    (provider as { supportsMigrations?: boolean } | undefined)
-      ?.supportsMigrations === false;
-  return Object.keys(databaseScriptCatalog).filter(
-    (name) => !(excludeMigrations && name === "db:migrate"),
-  );
+// Patch providerData with correct template paths for this package
+// The database-meta package calculates paths relative to itself, but templates
+// live in this package (generators/database/templates)
+const patchedProviderData = { ...providerData };
+for (const key of Object.keys(patchedProviderData)) {
+  const provider = patchedProviderData[key];
+  if (provider.templatePath) {
+    const templateName = provider.templatePath.split(sep).pop() || provider.templatePath;
+    patchedProviderData[key] = {
+      ...provider,
+      templatePath: join(templateBasePath, templateName),
+    };
+  }
 }
 
-/** The recommended script names for a given provider key. */
-export function recommendedScripts(providerKey: string): string[] {
-  return providerScripts(providerKey).filter(
-    (name) => databaseScriptCatalog[name].recommended,
-  );
-}
+// Use patched provider data for the rest of this module
+const providerDataLocal = patchedProviderData;
 
 // Prompt questions for the database generator
 export const databasePrompts = [
@@ -327,7 +117,7 @@ export const databasePrompts = [
     name: "provider",
     message: "Choose your database provider:",
     default: "sqlite",
-    choices: Object.values(providerData).map((p) => ({
+    choices: Object.values(providerDataLocal).map((p) => ({
       name: p.displayName,
       value: p.key,
     })),
@@ -411,77 +201,6 @@ export const databasePrompts = [
  *   prompt/TTY check). Prisma therefore never asks the question DXG
  *   already asked.
  */
-/**
-   * Builds the exact `prisma init` argument contract. This is the single
-   * source of truth used by BOTH production resolution paths in
-   * executeDatabase (the primary `getCliCommand(parseNlx, ...)` call and the
-   * `originalArgs` fallback/workaround), so the skills decision can never
-   * diverge between the two paths.
-   *
-   * Skills translation (verified against the prisma@7.10.0 CLI source):
-   * - `installSkills: false` passes the explicit `--no-skills` flag → Prisma
-   *   skips agent skills entirely.
-   * - `installSkills: true` omits the flag → prisma@7 installs agent skills
-   *   unconditionally and NON-interactively (that code path contains no
-   *   prompt/TTY check). Prisma therefore never asks the question DXG
-   *   already asked.
-   *
-   * @param prismaProvider The Prisma provider (e.g. "sqlite", "postgresql")
-   * @param installSkills Whether to install Prisma agent skills
-   * @param outputPath    The path (relative to the prisma directory) where the
-   *                      generated client should be placed. If not provided,
-   *                      defaults to "../lib/generated/prisma".
-   */
-  export function buildPrismaInitArgs(
-    prismaProvider: string,
-    installSkills: boolean,
-    outputPath?: string,
-  ): string[] {
-    return [
-      "prisma@7",
-      "init",
-      "--datasource-provider",
-      prismaProvider,
-      ...(installSkills ? [] : ["--no-skills"]),
-      "--output",
-      outputPath ?? "../lib/generated/prisma",
-    ];
-  }
-
-
-/**
- * Normalizes content for comparison: CRLF -> LF, trim trailing spaces per line.
- * Used for idempotence checks (e.g., lib/prisma.ts template vs existing file).
- */
-export function normalizeContent(content: string): string {
-  return content
-    .replace(/\r\n/g, "\n") // CRLF -> LF
-    .split("\n")
-    .map((line) => line.trimEnd()) // trim trailing spaces
-    .join("\n");
-}
-
-/**
- * Sanitizes a value for safe embedding in a .env file.
- * Prevents environment variable injection by removing newlines, carriage returns,
- * and escaping shell metacharacters that could be interpreted by shell consumers.
- * Backslashes are escaped first to avoid double-escaping.
- */
-export function sanitizeEnvValue(value: string): string {
-  return value
-    .replace(/[\r\n]/g, "") // Remove newlines and carriage returns
-    .replace(/\\/g, "\\\\") // Escape backslashes FIRST
-    .replace(/\$/g, "\\$") // Escape $ to prevent variable expansion
-    .replace(/`/g, "\\`") // Escape backticks to prevent command substitution
-    .replace(/"/g, '\\"'); // Escape double quotes to prevent quote breaking
-}
-
-// Validation function
-export function validateDatabase(): boolean {
-  // Validation will happen in the run method; we keep this for interface compliance
-  // but actual validation is done in run via checkPreconditions
-  return true;
-}
 
 // Precondition checks
 async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
@@ -504,10 +223,10 @@ export function planDatabase(
   inspection?: import("./inspect").DatabaseInspection,
 ) {
   const providerKey = answers.provider as string;
-  const provider = providerData[providerKey as keyof typeof providerData];
+  const provider = providerDataLocal[providerKey as keyof typeof providerDataLocal];
 
   if (!provider) {
-    const supportedProviders = Object.keys(providerData);
+    const supportedProviders = Object.keys(providerDataLocal);
     throw new ProviderUnsupportedError(providerKey, supportedProviders);
   }
 
@@ -634,6 +353,7 @@ export function planDatabase(
   const seedSelected = resolveDatabaseScripts(
     answers.databaseScripts,
     provider.key,
+    providerDataLocal,
   ).includes(SEED_SCRIPT_NAME);
   if (
     seedSelected &&
@@ -779,44 +499,9 @@ export function planDatabase(
   };
 }
 
-/**
- * Resolves the interactive database scripts decision into the final script
- * names to add. Owned by the database domain.
- *
- * - "recommended" → the provider's recommended set.
- * - "customize"   → a Clack multiselect over the provider-appropriate
- *   catalogue (each option shows what the script does).
- * - "skip"        → no scripts.
- * - undefined     → "recommended" (non-interactive / dry-run / CI default:
- *   the generator stays deterministic without a TTY).
- *
- * Throws the Clack cancel symbol when the user cancels the multiselect
- * (existing cancellation convention: primitives resolve with the symbol,
- * `prompt()` throws it, `run` catches isCancel).
- */
-export function resolveDatabaseScripts(
-  decision: unknown,
-  providerKey: string,
-): string[] {
-  if (decision === "skip") {
-    return [];
-  }
-  if (decision === "recommended") {
-    return recommendedScripts(providerKey);
-  }
-  if (Array.isArray(decision)) {
-    // Pre-resolved selection (tests / programmatic answers).
-    const offered = new Set(providerScripts(providerKey));
-    return decision.filter(
-      (name): name is string => typeof name === "string" && offered.has(name),
-    );
-  }
-  return recommendedScripts(providerKey);
-}
-
 /** Runs the interactive part of the customize branch (the multiselect). */
 async function promptCustomScripts(providerKey: string): Promise<string[]> {
-  const offered = providerScripts(providerKey);
+  const offered = providerScripts(providerKey, providerDataLocal);
   const selected = await multiselect({
     message: "Select database scripts to add",
     options: offered.map((name) => ({
@@ -824,7 +509,7 @@ async function promptCustomScripts(providerKey: string): Promise<string[]> {
       label: name,
       hint: databaseScriptCatalog[name].hint,
     })),
-    initialValues: recommendedScripts(providerKey),
+    initialValues: recommendedScripts(providerKey, providerDataLocal),
     required: false,
   });
   if (isCancel(selected)) {
@@ -1117,7 +802,7 @@ export async function executeDatabase(
   // CLOBBERS an existing prisma7.config.ts (both verified empirically).
   // A second run therefore never re-inits; the skip is surfaced below.
   const providerObj =
-    providerData[planToUse.provider as keyof typeof providerData];
+    providerDataLocal[planToUse.provider as keyof typeof providerDataLocal];
   if (!ctx.dryRun && !planToUse.initRequired) {
     result.skipped.push(
       "Prisma initialization (schema.prisma or prisma7.config.ts already exists)",
@@ -1628,6 +1313,7 @@ export async function executeDatabase(
   const selectedScripts = resolveDatabaseScripts(
     answers.databaseScripts,
     planToUse.provider,
+    providerDataLocal,
   );
   if (selectedScripts.length === 0) {
     // "Skip" (or an empty customize selection): package.json is left
@@ -2008,8 +1694,8 @@ export const databaseGenerator: Generator = {
     }
 
     // Check if provider is supported (fail fast with dedicated error code)
-    const supportedProviders = Object.keys(providerData);
-    if (normalizedProvider !== undefined && !providerData[normalizedProvider as keyof typeof providerData]) {
+    const supportedProviders = Object.keys(providerDataLocal);
+    if (normalizedProvider !== undefined && !providerDataLocal[normalizedProvider as keyof typeof providerDataLocal]) {
       throw new ProviderUnsupportedError(normalizedProvider, supportedProviders);
     }
 
@@ -2048,7 +1734,7 @@ export const databaseGenerator: Generator = {
       Record<string, unknown> & { scripts?: Record<string, string> }
     >("package.json").catch(() => undefined);
     const existingScripts = packageJsonForScripts?.scripts ?? {};
-    const recommendedScriptNames = recommendedScripts(providerForInspection);
+    const recommendedScriptNames = recommendedScripts(providerForInspection, providerDataLocal);
     const hasAllRecommendedScripts = recommendedScriptNames.every(
       (name) => existingScripts[name] === databaseScriptCatalog[name].command,
     );

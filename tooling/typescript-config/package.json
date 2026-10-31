@@ -2,5 +2,11 @@
   "name": "@dxgjs/typescript-config",
   "version": "0.0.0",
   "private": true,
-  "license": "MIT"
+  "license": "MIT",
+  "main": "base.json",
+  "types": "base.json",
+  "exports": {
+    ".": "./base.json",
+    "./base.json": "./base.json"
+  }
 }

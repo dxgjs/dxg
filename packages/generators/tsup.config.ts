@@ -7,6 +7,7 @@ export default {
   clean: true,
   dts: true,
   format: ["esm"],
+  external: ["@dxgjs/database-meta"],
   esbuildPlugins: [
     copy({
       assets: {

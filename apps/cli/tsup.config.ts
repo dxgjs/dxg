@@ -4,5 +4,17 @@ export default {
   sourcemap: true,
   clean: true,
   dts: true,
-  format: ["esm"]
+  format: ["esm"],
+  external: [
+    "@dxgjs/doctor",
+    "@dxgjs/errors",
+    "@dxgjs/fs",
+    "@dxgjs/generators",
+    "@dxgjs/logger",
+    "@dxgjs/prompts",
+    "@dxgjs/templates",
+    "@dxgjs/workspace",
+    "commander",
+    "picocolors",
+  ],
 };

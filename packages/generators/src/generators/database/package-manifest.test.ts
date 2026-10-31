@@ -203,7 +203,7 @@ vi.mock("@dxgjs/fs", async () => {
         // one — the real CLI refuses to run in an existing Prisma project.
         if (
           command === "npx" &&
-          args[0] === "prisma@7" &&
+          args[0] === "prisma@7.10.0" &&
           args[1] === "init" &&
           !_files.has("prisma/schema.prisma")
         ) {
@@ -223,7 +223,7 @@ vi.mock("@dxgjs/fs", async () => {
         // generator's output path (see schema.prisma above).
         if (
           command === "npx" &&
-          args[0] === "prisma@7" &&
+          args[0] === "prisma@7.10.0" &&
           args[1] === "generate"
         ) {
           _files.set(
@@ -254,8 +254,8 @@ vi.mock("@antfu/ni", () => {
           return { command: "npm", args: [] };
         }
         // prisma init / prisma generate: verbatim dlx passthrough (never an
-        // install) — matches ni's real npm resolution (npx prisma@7 …).
-        if (args[0] === "prisma@7") {
+        // install) — matches ni's real npm resolution (npx prisma@7.10.0 …).
+        if (args[0] === "prisma@7.10.0") {
           return { command: "npx", args: [...args] };
         }
         // Dependency installation: `ni add -D <pkgs>` / `ni add <pkgs>`.
