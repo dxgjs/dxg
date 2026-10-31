@@ -63,7 +63,9 @@ export function registerAddCommand(program: Command): void {
         // Run generator in project root directory
         await runInTargetDirectory(projectRoot, async () => {
           const context = await prepareContext(options, awareness);
-          await generator.run(cliAnswers, context);
+          // Cast context to match GeneratorContext expected by generators
+          // The context has all required properties (fs, logger, templates, awareness, etc.)
+          await generator.run(cliAnswers, context as any);
         });
 
         // Natural exit (code 0)

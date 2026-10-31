@@ -9,13 +9,13 @@ import {
   renderReport,
   renderJson,
   validateDoctorOptions,
-  getDoctorHelp,
   showFixPreview,
   type DoctorCliOptions,
   type DoctorContext,
-  type DoctorReport,
 } from "@dxgjs/doctor";
 import { detectProjectAwarenessSilently, prepareContext, runInTargetDirectory, type CommanderOptions } from "../generator-run";
+import type { FSInterface } from "@dxgjs/doctor";
+import { executeCommand } from "@dxgjs/fs";
 
 /**
  * Registers the `doctor` command — runs diagnostic checks on the project.
@@ -43,7 +43,7 @@ Examples:
   $ dxg doctor --check-only             # CI-friendly: exit 1 on any issue
   $ dxg doctor --json                   # Machine-readable output
 `)
-    .action(async (options, cmd) => {
+    .action(async (_options, cmd) => {
       // Merge local options with root's global options
       const mergedOptions = cmd.optsWithGlobals() as CommanderOptions & {
         category?: string;
@@ -82,11 +82,19 @@ Examples:
 
         // Build context
         const context = await prepareContext(mergedOptions, awareness);
+        // Add executeCommand only for doctor context (not exposed to generators)
+        const doctorFs: FSInterface = {
+          ...context.fs,
+          executeCommand: async (command: string, args?: string[], options?: Record<string, unknown>) => {
+            const result = await executeCommand(command, args, options as any);
+            return { stdout: String(result.stdout ?? ""), stderr: String(result.stderr ?? ""), exitCode: result.exitCode ?? 0 };
+          },
+        } as FSInterface;
         const doctorContext: DoctorContext = {
           cwd: projectRoot,
           packageJson: awareness.packageJson,
           awareness,
-          fs: context.fs,
+          fs: doctorFs,
           logger: context.logger,
           templates: context.templates,
           options: doctorOptions,

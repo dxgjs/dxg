@@ -3,13 +3,21 @@ import { Logger, type LogLevel } from "@dxgjs/logger";
 import { join, dirname } from "path";
 import {
   readFile,
+  readFileSync,
   writeFile,
+  writeFileSync,
   pathExists,
+  pathExistsSync,
   stat,
+  statSync,
   readdir,
+  readdirSync,
   mkdir,
+  mkdirSync,
   readJson,
   writeJson,
+  glob,
+  globSync,
 } from "@dxgjs/fs";
 import { render as templatesRender } from "@dxgjs/templates";
 import {
@@ -79,8 +87,27 @@ export async function prepareContext(options: CommanderOptions, awareness: Proje
   const minLevel: LogLevel = "info";
 
   const logger = new Logger({ minLevel });
-  // Provide stat and readdir functions (not used by all generators but required by type)
-  const fs = { readFile, writeFile, pathExists, stat, readdir, mkdir, readJson, writeJson };
+  // Provide FS functions from @dxgjs/fs (matching generators' FSInterface)
+  // Note: executeCommand is intentionally omitted for security — it's only
+  // added to the doctor context where it's needed, not exposed to generators.
+  const fs = {
+    readFile,
+    readFileSync,
+    writeFile,
+    writeFileSync,
+    pathExists,
+    pathExistsSync,
+    readJson,
+    writeJson,
+    glob,
+    globSync,
+    stat,
+    statSync,
+    readdir,
+    readdirSync,
+    mkdir,
+    mkdirSync,
+  };
 
   // Dependency-installer seam — ONE detection feeding everything. The
   // fine-grained agent (yarn classic vs berry), resolved via the same

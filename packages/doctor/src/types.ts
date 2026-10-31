@@ -38,14 +38,20 @@ export interface DoctorCheckResult {
 
 /** FS interface for file operations. */
 export interface FSInterface {
-  readFile(filePath: string, options?: { encoding?: string }): Promise<string | Buffer>;
-  readFileSync(filePath: string, options?: { encoding?: string }): string | Buffer;
-  writeFile(filePath: string, data: string | Buffer, options?: { encoding?: string }): Promise<void>;
-  writeFileSync(filePath: string, data: string | Buffer, options?: { encoding?: string }): void;
+  readFile(filePath: string, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): Promise<string | Buffer>;
+  readFileSync(filePath: string, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): string | Buffer;
+  writeFile(filePath: string, data: string | Buffer, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): Promise<void>;
+  writeFileSync(filePath: string, data: string | Buffer, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): void;
   readJson<T = unknown>(filePath: string): Promise<T>;
   writeJson<T = unknown>(filePath: string, data: T, options?: { spaces?: number }): Promise<void>;
   pathExists(filePath: string): Promise<boolean>;
   pathExistsSync(filePath: string): boolean;
+  stat(filePath: string): Promise<import("fs").Stats>;
+  statSync(filePath: string): import("fs").Stats;
+  mkdir(filePath: string, options?: { recursive?: boolean }): Promise<void>;
+  mkdirSync(filePath: string, options?: { recursive?: boolean }): void;
+  readdir(filePath: string, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): Promise<string[]>;
+  readdirSync(filePath: string, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): string[];
   glob(pattern: string, options?: { cwd?: string }): Promise<string[]>;
   globSync(pattern: string, options?: { cwd?: string }): string[];
   executeCommand(command: string, args?: string[], options?: Record<string, unknown>): Promise<{
