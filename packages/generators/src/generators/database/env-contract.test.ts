@@ -350,8 +350,10 @@ function notes(): string[] {
 /** The single Operation Summary of the latest run (see package-manifest.test.ts). */
 function operationSummary(runs = 1): string {
   const summaryNotes = notes();
-  expect(summaryNotes.length).toBe(runs);
-  return summaryNotes[runs - 1];
+  // Each run now produces 2 notes: Operation Summary + Next Steps
+  expect(summaryNotes.length).toBe(runs * 2);
+  // The Operation Summary is the first note of each pair (index 0, 2, 4...)
+  return summaryNotes[(runs - 1) * 2];
 }
 
 const ANSWERS = {

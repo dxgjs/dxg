@@ -409,8 +409,10 @@ function notes(): string[] {
 
 function operationSummary(runs = 1): string {
   const summaryNotes = notes();
-  expect(summaryNotes.length).toBe(runs);
-  return summaryNotes[runs - 1];
+  // Each run now produces 2 notes: Operation Summary + Next Steps
+  expect(summaryNotes.length).toBe(runs * 2);
+  // The Operation Summary is the first note of each pair (index 0, 2, 4...)
+  return summaryNotes[(runs - 1) * 2];
 }
 
 /** The databaseScripts question asked by the interactive phase. */
@@ -761,8 +763,8 @@ describe("interactive database scripts phase", () => {
     // lib/prisma.ts (DXG-owned template) was created — the generator's
     // verification step passed.
     expect(fsMockStore._files.has("lib/prisma.ts")).toBe(true);
-    // A single coherent Operation Summary was rendered.
-    expect(notes().length).toBe(1);
+    // Each run produces 2 notes: Operation Summary + Next Steps.
+    expect(notes().length).toBe(2);
   });
 
   test("db:seed is offered in customize (optional, not recommended)", async () => {

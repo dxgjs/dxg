@@ -1751,9 +1751,10 @@ describe("Database Generator", () => {
 
       // Semantic dry-run UX: everything the run WOULD do is collected and
       // rendered in ONE coherent Operation Summary note — no note-by-note
-      // narration of individual steps.
+      // narration of individual steps. Note: each run now produces 2 notes
+      // (Operation Summary + Next Steps).
       const noteCalls = (noteMock as Mock).mock.calls;
-      expect(noteCalls.length).toBe(1);
+      expect(noteCalls.length).toBe(2);
       const summary = String(noteCalls[0][0]);
       expect(summary).toContain("--no-skills");
       expect(fs.executeCommand).not.toHaveBeenCalled();
@@ -1765,7 +1766,7 @@ describe("Database Generator", () => {
         makeContext({ dryRun: true }),
       );
       const noteCallsYes = (noteMock as Mock).mock.calls;
-      expect(noteCallsYes.length).toBe(1);
+      expect(noteCallsYes.length).toBe(2);
       const summaryYes = String(noteCallsYes[0][0]);
       expect(summaryYes).toContain("--datasource-provider sqlite");
       expect(summaryYes).not.toContain("--no-skills");

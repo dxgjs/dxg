@@ -689,9 +689,10 @@ describe("idempotence reconciliation (satisfied state)", () => {
     expect(initCalls).toHaveLength(0);
     expect(generateCalls).toHaveLength(1);
 
-    // The skip is surfaced in the operation summary.
+    // The skip is surfaced in the operation summary (second-to-last note,
+    // since each run produces 2 notes: Operation Summary + Next Steps).
     const summary = String(
-      (noteMock as Mock).mock.calls.at(-1)?.[0] ?? "",
+      (noteMock as Mock).mock.calls.at(-2)?.[0] ?? "",
     );
     expect(summary).toMatch(/initialization/i);
   });

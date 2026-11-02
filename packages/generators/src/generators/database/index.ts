@@ -466,7 +466,8 @@ export function planDatabase(
   //   In non-interactive mode without explicit databaseUrl, user configures later.
   const isServerProvider = provider.key !== "sqlite";
   const hasUserDatabaseUrl =
-    typeof answers.databaseUrl === "string" && answers.databaseUrl.trim() !== "";
+    typeof answers.databaseUrl === "string" &&
+    answers.databaseUrl.trim() !== "";
   const envNeedsDatabaseUrl =
     inspection?.envHasDatabaseUrl === false &&
     (!isServerProvider || hasUserDatabaseUrl);
@@ -977,7 +978,9 @@ export async function executeDatabase(
       const isServerProvider = planToUse.provider !== "sqlite";
       const hasDatabaseUrlLine = Boolean(planToUse.envDatabaseUrlLine);
       if (isServerProvider && !hasDatabaseUrlLine) {
-        result.wouldRun.push("skip .env DATABASE_URL (server provider, user configures later)");
+        result.wouldRun.push(
+          "skip .env DATABASE_URL (server provider, user configures later)",
+        );
       } else {
         result.wouldRun.push("append DATABASE_URL to .env");
       }
@@ -998,7 +1001,9 @@ export async function executeDatabase(
       // No .env at all: create minimal file with header.
       // For SQLite, include DATABASE_URL; for server providers without
       // explicit databaseUrl, create header only (user configures later).
-      const lines = ["# Environment variables — declared by the database layer"];
+      const lines = [
+        "# Environment variables — declared by the database layer",
+      ];
       if (planToUse.envDatabaseUrlLine) {
         lines.push(planToUse.envDatabaseUrlLine);
       }
@@ -1024,7 +1029,9 @@ export async function executeDatabase(
         envCreatedOrUpdated = true;
         result.updated.push(".env (appended DATABASE_URL)");
       } else {
-        result.skipped.push(".env (no DATABASE_URL added — server provider, user configures later)");
+        result.skipped.push(
+          ".env (no DATABASE_URL added — server provider, user configures later)",
+        );
       }
     } else {
       // .env already has DATABASE_URL — nothing to do.
@@ -1909,8 +1916,7 @@ export const databaseGenerator: Generator = {
     if (answers.databaseUrl === undefined && !inspection.envHasDatabaseUrl) {
       if (answers.provider === "sqlite") {
         const { providerPlaceholders } = await import("@dxgjs/database-meta");
-        answers.databaseUrl =
-          providerPlaceholders.sqlite ?? "file:./dev.db";
+        answers.databaseUrl = providerPlaceholders.sqlite ?? "file:./dev.db";
       }
       // For server providers: no default, they'll set DATABASE_URL in .env manually
     }
@@ -2094,7 +2100,7 @@ export const databaseGenerator: Generator = {
         requestedProvider: answers.provider as string,
       });
 
-      // Outro — provider-specific, package-manager-aware guided next steps
+      // Next steps — provider-specific, package-manager-aware guided next steps
       const { providerPlaceholders } = await import("@dxgjs/database-meta");
       const placeholder =
         providerPlaceholders[answers.provider as string] ?? "";
@@ -2110,7 +2116,7 @@ export const databaseGenerator: Generator = {
       };
       const cmds = pmCommands[pm] ?? pmCommands.npm;
 
-      const lines: string[] = ["", pc.bold("Next steps:"), ""];
+      const lines: string[] = ["", pc.bold("Checklist:"), ""];
 
       if (isSqlite) {
         lines.push(
@@ -2196,9 +2202,11 @@ export const databaseGenerator: Generator = {
         ),
       );
 
-      outro(
-        `Database setup completed for ${answers.provider}!${lines.join("\n")}`,
-      );
+      // Render Next steps in a separate note box
+      note(lines.join("\n"), "Next Steps");
+
+      // Outro — completion message only
+      outro(`Database setup completed for ${answers.provider}!`);
     } catch (error) {
       // Handle cancellation
       if (isCancel(error)) {

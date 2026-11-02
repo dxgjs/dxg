@@ -406,13 +406,15 @@ function notes(): string[] {
  * The single Operation Summary note rendered by summarizeDatabase — the
  * coherent result of the whole run (semantic contract: collect first,
  * render once). `runs` is the number of generator runs the test performed:
- * each run renders EXACTLY one note, and the helper returns the latest
- * run's summary.
+ * each run renders TWO notes (Operation Summary + Next Steps), and the
+ * helper returns the latest run's Operation Summary.
  */
 function operationSummary(runs = 1): string {
   const summaryNotes = notes();
-  expect(summaryNotes.length).toBe(runs);
-  return summaryNotes[runs - 1];
+  // Each run now produces 2 notes: Operation Summary + Next Steps
+  expect(summaryNotes.length).toBe(runs * 2);
+  // The Operation Summary is the first note of each pair (index 0, 2, 4...)
+  return summaryNotes[(runs - 1) * 2];
 }
 
 describe("package manifest invariant (dependencies survive script injection)", () => {
