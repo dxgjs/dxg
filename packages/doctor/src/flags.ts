@@ -149,44 +149,6 @@ function validateFlagCombinations(options: DoctorCliOptions): void {
 }
 
 /**
- * Get the help text for the doctor command.
- */
-export function getDoctorHelp(): string {
-  return `
-Usage: dxg doctor [options]
-
-Diagnose and repair DXG project configuration.
-
-Options:
-  -c, --category <categories>   Comma-separated list of categories to check
-                                 (env, project, database, scripts, dxg)
-                                 Default: all categories
-  --json                        Output results as JSON
-  --fix                         Attempt to automatically fix issues
-  -y, --yes                     Skip confirmation prompts for fixes
-  --dry-run                     Show what would be fixed without applying
-  --check-only                  Exit with code 1 if any issues found (for CI)
-
-Global options (inherited from root command):
-  --non-interactive             Disable interactive prompts
-  --dry-run                     Dry run mode (global)
-  --force                       Force operations
-
-Exit codes:
-  0  All checks passed (or only info/warnings in normal mode)
-  1  Issues found (errors, or warnings in --check-only mode)
-  2  Invalid usage (bad flags, missing arguments)
-
-Examples:
-  dxg doctor                          # Run all checks
-  dxg doctor --category env,project   # Run only env and project checks
-  dxg doctor --fix                    # Run all checks and fix issues
-  dxg doctor --check-only             # CI-friendly: exit 1 on any issue
-  dxg doctor --json                   # Machine-readable output
-`.trim();
-}
-
-/**
  * Validate that only known flags are used.
  */
 export function validateKnownFlags(

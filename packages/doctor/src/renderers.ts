@@ -30,6 +30,13 @@ const CATEGORY_LABELS: Record<DoctorCategory, string> = {
 };
 
 /**
+ * Strip ANSI escape codes from a string to get visual length.
+ */
+function stripAnsi(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/**
  * Format check result lines for display.
  * @param result - The check result to format
  * @param showCategory - Whether to prefix with category label (true for individual render, false for grouped report)
@@ -46,17 +53,26 @@ function formatCheckLines(
   const name = pc.bold(result.name);
   const message = result.message;
 
+  const prefix = `${tag}${categoryLabel}${name} — `;
+  const tagVisualLength = stripAnsi(tag).length;
+
+  // Detail and fixable lines align with the tag (e.g., [ WARN ])
+  // In flat mode (showCategory=true): tag starts at column 0, so indent = tagVisualLength
+  // In report mode (showCategory=false): note() adds box padding, tag starts at box margin + tagVisualLength,
+  // so indent = tagVisualLength to align with tag position
+  const detailIndent = tagVisualLength;
+
   const lines: string[] = [
-    `${tag}${categoryLabel}${name} — ${message}`,
+    `${prefix}${message}`,
   ];
 
   if (result.detail) {
-    const indent = " ".repeat(tag.length);
+    const indent = " ".repeat(detailIndent);
     lines.push(`${indent}${pc.gray(result.detail)}`);
   }
 
   if (result.fixable) {
-    const indent = " ".repeat(tag.length);
+    const indent = " ".repeat(detailIndent);
     lines.push(`${indent}${pc.cyan("→ Fixable with --fix")}`);
   }
 
@@ -101,10 +117,14 @@ export function showOutro(
     outro(pc.cyan(`Dry run — ${summaryLine} • ${summary.fixable} fixable`));
   } else if (options.fix && summary.fixable > 0) {
     outro(pc.green(`Fixed ${summary.fixable} issue(s) — ${summaryLine}`));
-  } else if (report.hasErrors) {
+  } else if (report.hasErrors && summary.fixable > 0) {
     outro(pc.red(`${summaryLine} • Run with --fix to attempt repairs`));
-  } else if (report.hasWarnings) {
+  } else if (report.hasWarnings && summary.fixable > 0) {
     outro(pc.yellow(`${summaryLine} • Run with --fix to attempt repairs`));
+  } else if (report.hasErrors) {
+    outro(pc.red(`${summaryLine}`));
+  } else if (report.hasWarnings) {
+    outro(pc.yellow(`${summaryLine}`));
   } else {
     outro(pc.green(`${summaryLine} • All checks passed`));
   }

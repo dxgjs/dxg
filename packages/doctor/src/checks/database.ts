@@ -7,6 +7,7 @@
 import type { DoctorContext, DoctorCheckResult, DoctorCategory } from "../types";
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
+import { toDisplayPath } from "../utils/paths";
 
 const DATABASE_CHECKS = {
   "database:prisma-schema": {
@@ -169,7 +170,7 @@ async function checkPrismaSchema(ctx: DoctorContext): Promise<DoctorCheckResult>
     name: DATABASE_CHECKS["database:prisma-schema"].name,
     category: "database",
     severity: "ok",
-    message: `Prisma schema found at ${schemaPath.replace(ctx.cwd + "/", "")}`,
+    message: `Prisma schema found at ${toDisplayPath(schemaPath, ctx.cwd)}`,
     fixable: false,
   };
 }
@@ -213,7 +214,7 @@ async function checkPrismaConfig(ctx: DoctorContext): Promise<DoctorCheckResult>
     name: DATABASE_CHECKS["database:prisma-config"].name,
     category: "database",
     severity: "ok",
-    message: `Prisma config found at ${configPath!.replace(ctx.cwd + "/", "")}`,
+    message: `Prisma config found at ${toDisplayPath(configPath!, ctx.cwd)}`,
     fixable: false,
   };
 }
@@ -441,7 +442,7 @@ async function checkHelperFile(ctx: DoctorContext): Promise<DoctorCheckResult> {
         category: "database",
         severity: "warn",
         message: "Prisma helper exists but may not import generated client correctly",
-        detail: `Check ${helperPath.replace(ctx.cwd + "/", "")} for valid client import`,
+        detail: `Check ${toDisplayPath(helperPath, ctx.cwd)} for valid client import`,
         fixable: false,
       };
     }
@@ -454,7 +455,7 @@ async function checkHelperFile(ctx: DoctorContext): Promise<DoctorCheckResult> {
     name: DATABASE_CHECKS["database:helper-file"].name,
     category: "database",
     severity: "ok",
-    message: `Prisma helper found at ${helperPath.replace(ctx.cwd + "/", "")}`,
+    message: `Prisma helper found at ${toDisplayPath(helperPath, ctx.cwd)}`,
     fixable: false,
   };
 }
@@ -462,40 +463,34 @@ async function checkHelperFile(ctx: DoctorContext): Promise<DoctorCheckResult> {
 /**
  * Check if SQLite database file exists (for SQLite provider).
  * Generator runs `prisma db push` which creates dev.db.
+ * Returns empty array for non-SQLite providers (check not applicable).
  */
-async function checkSqliteDbFile(ctx: DoctorContext): Promise<DoctorCheckResult> {
+async function checkSqliteDbFile(ctx: DoctorContext): Promise<DoctorCheckResult[]> {
   const provider = extractProvider(ctx.cwd);
   const schemaPath = findPrismaSchema(ctx.cwd);
   const configPath = findPrismaConfig(ctx.cwd);
 
   if (!schemaPath && !configPath) {
-    return {
+    return [{
       id: "database:sqlite-db-file",
       name: DATABASE_CHECKS["database:sqlite-db-file"].name,
       category: "database",
       severity: "info",
       message: "Skipped — no Prisma schema or config",
       fixable: false,
-    };
+    }];
   }
 
-  // Only relevant for SQLite provider
+  // Only relevant for SQLite provider - return empty array for others
   if (provider !== "sqlite") {
-    return {
-      id: "database:sqlite-db-file",
-      name: DATABASE_CHECKS["database:sqlite-db-file"].name,
-      category: "database",
-      severity: "info",
-      message: `Skipped — provider is ${provider}, not sqlite`,
-      fixable: false,
-    };
+    return [];
   }
 
   const baseDir = schemaPath ? dirname(schemaPath) : dirname(configPath!);
   const dbPath = join(baseDir, "dev.db");
 
   if (!existsSync(dbPath)) {
-    return {
+    return [{
       id: "database:sqlite-db-file",
       name: DATABASE_CHECKS["database:sqlite-db-file"].name,
       category: "database",
@@ -503,17 +498,17 @@ async function checkSqliteDbFile(ctx: DoctorContext): Promise<DoctorCheckResult>
       message: "SQLite database file not found",
       detail: "Run 'pnpm prisma db push' to create the database (script added by generator)",
       fixable: false, // User runs this
-    };
+    }];
   }
 
-  return {
+  return [{
     id: "database:sqlite-db-file",
     name: DATABASE_CHECKS["database:sqlite-db-file"].name,
     category: "database",
     severity: "ok",
     message: "SQLite database file exists (prisma/dev.db)",
     fixable: false,
-  };
+  }];
 }
 
 /**
@@ -664,13 +659,19 @@ async function checkConnectivity(ctx: DoctorContext): Promise<DoctorCheckResult>
     };
   }
 
-  // Try to connect using Prisma
+  // Try to connect using Prisma with strict stdio isolation and short timeout
+  const TIMEOUT_MS = 4000;
+
   try {
     const { executeCommand } = await import("@dxgjs/fs");
     const result = await executeCommand("pnpm", ["prisma", "db", "execute", "--stdin"], {
       cwd: ctx.cwd,
+      timeout: TIMEOUT_MS,
+      // Strict stdio piping prevents pnpm lockfile validation logs
+      // and other side-channel output from corrupting the CLI layout
+      stdio: ["pipe", "pipe", "pipe"],
       input: "SELECT 1;",
-      timeout: 10000,
+      killDescendants: true, // Ensure full process tree cleanup on timeout
     });
 
     if (result.exitCode === 0) {
@@ -679,7 +680,7 @@ async function checkConnectivity(ctx: DoctorContext): Promise<DoctorCheckResult>
         name: DATABASE_CHECKS["database:connectivity"].name,
         category: "database",
         severity: "ok",
-        message: "Database connection successful",
+        message: "Database connection established successfully",
         fixable: false,
       };
     }
@@ -688,19 +689,34 @@ async function checkConnectivity(ctx: DoctorContext): Promise<DoctorCheckResult>
       id: "database:connectivity",
       name: DATABASE_CHECKS["database:connectivity"].name,
       category: "database",
-      severity: "warn", // Changed from error to warn - connectivity issues may be transient
+      severity: "warn",
       message: "Database connection failed",
-      detail: String(result.stderr ?? "") || "Unknown error",
+      detail: typeof result.stderr === "string" ? result.stderr.trim() : "An unknown database connection error occurred.",
       fixable: false,
     };
   } catch (error) {
+    const execaError = error as Error & { code?: string; timedOut?: boolean; exitCode?: number; stdout?: string; stderr?: string };
+    // Handle explicit timeout
+    if (execaError.code === "ETIMEDOUT" || execaError.timedOut) {
+      return {
+        id: "database:connectivity",
+        name: DATABASE_CHECKS["database:connectivity"].name,
+        category: "database",
+        severity: "warn",
+        message: "Connection failed: timeout",
+        detail: `The database did not respond within ${TIMEOUT_MS}ms. Ensure your instance is running and reachable.`,
+        fixable: false,
+      };
+    }
+
+    // Handle other execution failures (wrong credentials, network down, etc.)
     return {
       id: "database:connectivity",
       name: DATABASE_CHECKS["database:connectivity"].name,
       category: "database",
       severity: "warn",
       message: "Database connection failed",
-      detail: error instanceof Error ? error.message : String(error),
+      detail: execaError.message || "An unknown database connection error occurred.",
       fixable: false,
     };
   }

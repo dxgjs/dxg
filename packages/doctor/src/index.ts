@@ -41,7 +41,6 @@ export {
 // Flags
 export {
   validateDoctorOptions,
-  getDoctorHelp,
   validateKnownFlags,
   mapExitCode,
 } from "./flags";
