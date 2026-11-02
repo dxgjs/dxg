@@ -974,25 +974,23 @@ describe(".env additive reconciliation", () => {
     expect(fsMockStore._files.get(".env")).toBe(originalEnv);
   });
 
-  test("server providers keep the EMPTY DATABASE_URL placeholder (postgres)", async () => {
-    // The file URL default is a SQLite-only contract: server providers
-    // have nothing DXG could guess (host, credentials are the user's),
-    // so the placeholder stays empty there. Guards against the sqlite
-    // fix leaking to every provider.
+  test("server providers in non-interactive mode do not write DATABASE_URL to .env (user configures later)", async () => {
+    // In non-interactive mode, server providers do not get a default DATABASE_URL
+    // User must configure it manually in .env or via CLI flags
     await seedProject(SATISFIED_PACKAGE_JSON);
     // Fresh project (no existing Prisma schema) — provider detection returns
     // installed: false, so no mismatch block occurs.
-    // In fresh project mode, .env is created with header and placeholder.
+    // In fresh project mode, .env is created with header but NO DATABASE_URL for server providers.
     await databaseGenerator.run(
       { provider: "postgresql", installPrismaSkills: false },
-      makeContext(),
+      makeContext({ nonInteractive: true }),
     );
 
     const env = fsMockStore._files.get(".env")!;
-    // Fresh project: .env contains header and empty DATABASE_URL placeholder
+    // Fresh project: .env contains header but NO DATABASE_URL for server providers
+    // (user configures it manually later)
     expect(env).toContain("Environment variables — declared by the database layer");
-    expect(env).toContain("DATABASE_URL=");
-    expect(env.endsWith("DATABASE_URL=\n")).toBe(true);
+    expect(env).not.toContain("DATABASE_URL");
   });
 });
 

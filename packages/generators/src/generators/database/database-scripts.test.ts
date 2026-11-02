@@ -458,13 +458,25 @@ describe("interactive database scripts phase", () => {
 
   test("asks the databaseScripts question after provider/skills, recommended first", async () => {
     await seedProject();
-    // One prompt() call collects every missing answer (provider, skills,
-    // databaseScripts) — a single queued response covers it.
-    (promptMock as unknown as Mock).mockResolvedValueOnce({
-      provider: "postgresql",
-      installPrismaSkills: false,
-      databaseScripts: "recommended",
-    });
+    // First call: provider
+    // Second call: configureDatabaseUrl (opt-in confirm)
+    // Third call: databaseUrl, installPrismaSkills, databaseScripts
+    // Fourth call: helperPath
+    (promptMock as unknown as Mock)
+      .mockResolvedValueOnce({
+        provider: "postgresql",
+      })
+      .mockResolvedValueOnce({
+        configureDatabaseUrl: true,
+      })
+      .mockResolvedValueOnce({
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
+        installPrismaSkills: false,
+        databaseScripts: "recommended",
+      })
+      .mockResolvedValueOnce({
+        helperPath: "lib/prisma.ts",
+      });
 
     await databaseGenerator.run({}, makeContext());
 
@@ -504,10 +516,16 @@ describe("interactive database scripts phase", () => {
 
   test("customize: only the scripts selected in the multiselect are added", async () => {
     await seedProject();
-    // First prompt call: databaseScripts = "customize" (provider and skills already provided)
-    // Second prompt call: helperPath
+    // Provider is provided in run() call, so NOT prompted.
+    // First call: configureDatabaseUrl (opt-in confirm)
+    // Second call: databaseUrl + databaseScripts (combined)
+    // Third call: helperPath
     (promptMock as unknown as Mock)
       .mockResolvedValueOnce({
+        configureDatabaseUrl: true,
+      })
+      .mockResolvedValueOnce({
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
         databaseScripts: "customize",
       })
       .mockResolvedValueOnce({
@@ -555,7 +573,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "skip", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "skip", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(),
     );
 
@@ -596,7 +614,7 @@ describe("interactive database scripts phase", () => {
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(manifest),
     );
 
@@ -625,7 +643,7 @@ describe("interactive database scripts phase", () => {
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(manifest),
     );
 
@@ -645,6 +663,7 @@ describe("interactive database scripts phase", () => {
       installPrismaSkills: false,
       databaseScripts: "recommended",
       helperPath: "lib/prisma.ts",
+      databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
     };
     const context = makeContext();
     await databaseGenerator.run(answers, context);
@@ -665,7 +684,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(),
     );
 
@@ -691,7 +710,7 @@ describe("interactive database scripts phase", () => {
     // propagate (the CLI turns it into a clean exit).
     await expect(
       databaseGenerator.run(
-        { provider: "postgresql", installPrismaSkills: false },
+        { provider: "postgresql", installPrismaSkills: false, databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
         makeContext(),
       ),
     ).rejects.toBe(CANCEL);
@@ -735,7 +754,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(),
     );
 

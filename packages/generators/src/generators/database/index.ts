@@ -460,6 +460,17 @@ export function planDatabase(
   const prismaDeclarationsSatisfied =
     inspection === undefined ? false : prismaSatisfied;
 
+  // Determine if we need to write DATABASE_URL to .env:
+  // - SQLite: always needs a DATABASE_URL (default file:./dev.db if not provided)
+  // - Server providers: only needs DATABASE_URL if user provided one (interactive or CLI)
+  //   In non-interactive mode without explicit databaseUrl, user configures later.
+  const isServerProvider = provider.key !== "sqlite";
+  const hasUserDatabaseUrl =
+    typeof answers.databaseUrl === "string" && answers.databaseUrl.trim() !== "";
+  const envNeedsDatabaseUrl =
+    inspection?.envHasDatabaseUrl === false &&
+    (!isServerProvider || hasUserDatabaseUrl);
+
   return {
     ...data,
     provider: provider.key, // Return just the provider key string for tests
@@ -485,7 +496,7 @@ export function planDatabase(
     prismaInitOutput: posix.join("..", generatorOutput),
     envExists: inspection?.envExists ?? false,
     envHasDatabaseUrl: inspection?.envHasDatabaseUrl ?? false,
-    envNeedsDatabaseUrl: inspection?.envHasDatabaseUrl === false,
+    envNeedsDatabaseUrl,
     // Non-Prisma provider dependencies dropped from the install batches
     // because the manifest already declares them (name-only check,
     // inspection-driven). Surfaced in the summary so a rerun reads as a
@@ -496,18 +507,14 @@ export function planDatabase(
     // `prisma db push` with `Connection url is empty` (live-proven, e2e
     // sqlite-native 2026-10-10, kept project
     // dxg-e2e-sqlite-native-npm-zYRENi: prisma7.config.ts reads
-    // process.env["DATABASE_URL"]). Server providers keep the empty
-    // placeholder: the connection value is the user's to fill.
-    // Use user-provided databaseUrl if available (from interactive prompt).
-    // Sanitize user input to prevent environment variable injection (newlines,
-    // carriage returns, shell metacharacters).
+    // process.env["DATABASE_URL"]). Server providers only get a DATABASE_URL
+    // line when the user explicitly provides one (interactive opt-in or CLI).
     envDatabaseUrlLine:
       provider.key === "sqlite"
         ? `DATABASE_URL="${sanitizeEnvValue((answers.databaseUrl as string) ?? "file:./dev.db")}"`
-        : typeof answers.databaseUrl === "string" &&
-            answers.databaseUrl.trim() !== ""
-          ? `DATABASE_URL="${sanitizeEnvValue(answers.databaseUrl)}"`
-          : "DATABASE_URL=",
+        : hasUserDatabaseUrl
+          ? `DATABASE_URL="${sanitizeEnvValue(answers.databaseUrl as string)}"`
+          : "",
     helperPath,
     generatedClientImport,
     helperImportFromSeed,
@@ -949,49 +956,64 @@ export async function executeDatabase(
   // `prisma init` preserves an existing .env byte-for-byte but NEVER adds
   // DATABASE_URL to it (verified empirically) — the historical false
   // success: green run, broken runtime. DXG owns the gap:
-  // - .env absent → create a minimal one. When init ran, it created a
-  //   .env with DATABASE_URL="" (empty) that the write below REPLACES
-  //   with the minimal file — envExists holds the PRE-RUN truth, so the
-  //   "absent" branch wins over init's empty placeholder.
-  // - .env present without DATABASE_URL → APPEND one line; every existing
-  //   byte is preserved.
+  // - .env absent → create a minimal one with header. When init ran, it
+  //   created a .env with DATABASE_URL="" (empty) that the write below
+  //   REPLACES with the minimal file — envExists holds the PRE-RUN truth,
+  //   so the "absent" branch wins over init's empty placeholder.
+  // - .env present without DATABASE_URL → SQLite: append DATABASE_URL line;
+  //   server providers: do nothing (user configures later via .env or CLI).
   // - .env already defines DATABASE_URL → untouched.
-  // The line's VALUE is provider-aware (plan.envDatabaseUrlLine): SQLite
-  // gets the conventional file URL — an empty one fails `prisma db push`
-  // with `Connection url is empty` (live-proven, e2e sqlite-native
-  // 2026-10-10) — server providers keep the empty placeholder.
-  if (planToUse.envNeedsDatabaseUrl) {
-    if (ctx.dryRun) {
-      result.wouldRun.push(
-        planToUse.envExists === false && planToUse.initRequired
-          ? "create .env with DATABASE_URL (via prisma init)"
-          : `${planToUse.envExists === false ? "create" : "append to"} .env a minimal DATABASE_URL line`,
-      );
+  // The line's VALUE (plan.envDatabaseUrlLine): SQLite gets the conventional
+  // file URL (empty fails `prisma db push`). Server providers only get a
+  // DATABASE_URL line when user explicitly provides one (interactive opt-in
+  // or CLI). In non-interactive mode without explicit databaseUrl, nothing
+  // is written — user configures later.
+  // Track whether we created/updated .env in this run (for .gitignore gating)
+  let envCreatedOrUpdated = false;
+  if (ctx.dryRun) {
+    if (!planToUse.envExists) {
+      result.wouldRun.push("create minimal .env (header only)");
+    } else if (!planToUse.envHasDatabaseUrl) {
+      const isServerProvider = planToUse.provider !== "sqlite";
+      const hasDatabaseUrlLine = Boolean(planToUse.envDatabaseUrlLine);
+      if (isServerProvider && !hasDatabaseUrlLine) {
+        result.wouldRun.push("skip .env DATABASE_URL (server provider, user configures later)");
+      } else {
+        result.wouldRun.push("append DATABASE_URL to .env");
+      }
     } else {
-      const envPath = join(ctx.awareness.projectRoot, ".env");
-      // envExists comes from the inspection (pre-run truth); when init
-      // just created .env it holds DATABASE_URL already (marker false).
-      const envText = planToUse.envExists
-        ? ((await fs.readFile(envPath, {
-            encoding: "utf8",
-          })) as string | undefined)
-        : undefined;
-      if (typeof envText !== "string") {
-        // No .env at all: minimal file (init skipped means nothing else
-        // would create it).
-        await fs.writeFile(
-          envPath,
-          [
-            "# Environment variables — declared by the database layer",
-            planToUse.envDatabaseUrlLine,
-            "",
-          ].join("\n"),
-          "utf8",
-        );
-        result.created.push(".env (minimal, DATABASE_URL placeholder)");
-      } else if (!/^\s*(?:export\s+)?DATABASE_URL\s*=/m.test(envText)) {
-        // Byte-preserving append: original content first, untouched, then
-        // the new declaration on its own line.
+      result.wouldRun.push("skip .env (already has DATABASE_URL)");
+    }
+  } else {
+    const envPath = join(ctx.awareness.projectRoot, ".env");
+    // envExists comes from the inspection (pre-run truth); when init
+    // just created .env it holds DATABASE_URL already (marker false).
+    const envText = planToUse.envExists
+      ? ((await fs.readFile(envPath, {
+          encoding: "utf8",
+        })) as string | undefined)
+      : undefined;
+
+    if (typeof envText !== "string") {
+      // No .env at all: create minimal file with header.
+      // For SQLite, include DATABASE_URL; for server providers without
+      // explicit databaseUrl, create header only (user configures later).
+      const lines = ["# Environment variables — declared by the database layer"];
+      if (planToUse.envDatabaseUrlLine) {
+        lines.push(planToUse.envDatabaseUrlLine);
+      }
+      lines.push("");
+      await fs.writeFile(envPath, lines.join("\n"), "utf8");
+      envCreatedOrUpdated = true;
+      result.created.push(
+        planToUse.envDatabaseUrlLine
+          ? ".env (minimal, DATABASE_URL placeholder)"
+          : ".env (minimal, header only — server provider, user configures later)",
+      );
+    } else if (!/^\s*(?:export\s+)?DATABASE_URL\s*=/m.test(envText)) {
+      // .env exists but no DATABASE_URL.
+      // SQLite: append DATABASE_URL. Server providers without databaseUrl: do nothing.
+      if (planToUse.envDatabaseUrlLine) {
         const needsLeadingNewline =
           envText.length > 0 && !envText.endsWith("\n");
         await fs.writeFile(
@@ -999,13 +1021,15 @@ export async function executeDatabase(
           `${envText}${needsLeadingNewline ? "\n" : ""}${planToUse.envDatabaseUrlLine}\n`,
           "utf8",
         );
+        envCreatedOrUpdated = true;
         result.updated.push(".env (appended DATABASE_URL)");
+      } else {
+        result.skipped.push(".env (no DATABASE_URL added — server provider, user configures later)");
       }
-      // envHasDatabaseUrl=true never reaches here (marker false).
+    } else {
+      // .env already has DATABASE_URL — nothing to do.
+      result.skipped.push(".env (already has DATABASE_URL)");
     }
-  } else if (planToUse.envExists && planToUse.envHasDatabaseUrl) {
-    // .env exists and already has DATABASE_URL — nothing to do, surface as skipped
-    result.skipped.push(".env (already has DATABASE_URL)");
   }
 
   // Step 3c: .gitignore coverage for the .env this run wrote. `prisma
@@ -1025,11 +1049,11 @@ export async function executeDatabase(
   //   indented "  .env" is not coverage and must not count.
   // - an explicit `!.env` negation is a deliberate user choice to track
   //   .env → respected, untouched.
-  // Scoped to envNeedsDatabaseUrl — the same marker that gates the .env
-  // write: a user-owned .env that already declared DATABASE_URL is
-  // none of DXG's business, and reruns find DATABASE_URL already
-  // declared, never re-entering this path (idempotent by construction).
-  if (planToUse.envNeedsDatabaseUrl) {
+  // Scoped to runs where DXG created or updated .env: a user-owned .env
+  // that already declared DATABASE_URL is none of DXG's business, and
+  // reruns find DATABASE_URL already declared, never re-entering this
+  // path (idempotent by construction).
+  if (envCreatedOrUpdated) {
     if (ctx.dryRun) {
       result.wouldRun.push("ensure .gitignore covers .env");
     } else {
@@ -1823,22 +1847,40 @@ export const databaseGenerator: Generator = {
     ) {
       const promptQuestions = [];
 
-      // databaseUrl prompt: for all providers when needed
-      if (needsDatabaseUrl) {
-        const databaseUrlPrompt = { ...databasePrompts[1] };
-        // Set prefilled value based on provider using providerPlaceholders
+      // For server providers, ask opt-in first: do they want to configure the URL now?
+      // Default is No — they can always set it later in .env
+      if (needsDatabaseUrl && isServerProvider) {
         const { providerPlaceholders } = await import("@dxgjs/database-meta");
         const placeholder =
           providerPlaceholders[answers.provider as string] ?? "";
-        databaseUrlPrompt.initialValue = placeholder;
-        databaseUrlPrompt.default = placeholder;
-        // Add helpful hint for server providers
-        if (isServerProvider) {
+        const configureUrlPrompt = {
+          type: "confirm" as const,
+          name: "configureDatabaseUrl",
+          message: "Configure database connection URL now?",
+          default: false,
+        };
+        const configureAnswer = await prompt([configureUrlPrompt]);
+        if (configureAnswer.configureDatabaseUrl) {
+          // Show the databaseUrl input with template
+          const databaseUrlPrompt = { ...databasePrompts[1] };
+          databaseUrlPrompt.initialValue = placeholder;
+          databaseUrlPrompt.default = placeholder;
           databaseUrlPrompt.message +=
             " (format: see template — replace USER/PASSWORD/HOST/DATABASE)";
+          promptQuestions.push(databaseUrlPrompt);
         }
+        // If user says No, skip databaseUrl prompt — they'll set it in .env later
+      } else if (needsDatabaseUrl) {
+        // SQLite: always ask (has a working default)
+        const { providerPlaceholders } = await import("@dxgjs/database-meta");
+        const placeholder =
+          providerPlaceholders[answers.provider as string] ?? "";
+        const databaseUrlPrompt = { ...databasePrompts[1] };
+        databaseUrlPrompt.initialValue = placeholder;
+        databaseUrlPrompt.default = placeholder;
         promptQuestions.push(databaseUrlPrompt);
       }
+
       if (needsSkillsAnswer) {
         promptQuestions.push(databasePrompts[2]); // skills prompt
       }
@@ -1862,12 +1904,15 @@ export const databaseGenerator: Generator = {
       }
     }
 
-    // Non-interactive / dry-run / CLI: provide default databaseUrl for all providers
-    // Only if no existing DATABASE_URL in .env (inspection.envHasDatabaseUrl)
+    // Non-interactive / dry-run / CLI: provide default databaseUrl ONLY for SQLite
+    // For server providers, leave undefined — user configures in .env later
     if (answers.databaseUrl === undefined && !inspection.envHasDatabaseUrl) {
-      const { providerPlaceholders } = await import("@dxgjs/database-meta");
-      answers.databaseUrl =
-        providerPlaceholders[answers.provider as string] ?? "";
+      if (answers.provider === "sqlite") {
+        const { providerPlaceholders } = await import("@dxgjs/database-meta");
+        answers.databaseUrl =
+          providerPlaceholders.sqlite ?? "file:./dev.db";
+      }
+      // For server providers: no default, they'll set DATABASE_URL in .env manually
     }
 
     if (answers.installPrismaSkills === undefined) {

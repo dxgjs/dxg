@@ -8,12 +8,7 @@
  *        driver adapters accept silently (live-proven 2026-10-11: the
  *        better-sqlite3 adapter constructs without error on
  *        url="undefined") and only surfaces, confusingly, at first use.
- *        The guard tests ABSENCE (undefined), not emptiness: DXG itself
- *        writes "DATABASE_URL=" (empty placeholder) for server providers
- *        and the driver adapters are lazy, so the skeleton db:seed chain
- *        must run out-of-the-box on that state (live-proven
- *        2026-10-11: a falsy guard made `pnpm run db:seed` exit 1 on
- *        DXG's own fresh output; the postgres-seed e2e row locks this).
+ *        The guard tests ABSENCE (undefined), not emptiness.
  *
  *   H-2: a .env that DXG itself created or appended must be gitignored.
  *        `prisma init` warns about it ("Don't forget to add .env in it
@@ -24,6 +19,12 @@
  *        user-owned .env that already had DATABASE_URL is left alone,
  *        and so is a .gitignore that already covers .env (including an
  *        explicit `!.env` negation — a deliberate user choice).
+ *
+ *   H-3: in non-interactive mode, server providers do not write a default
+ *        DATABASE_URL to .env (user configures manually). In interactive
+ *        mode, an opt-in confirm prompt asks if they want to configure
+ *        the connection URL now (default: No). If yes, a template is
+ *        pre-filled; if no, DATABASE_URL is left for manual .env setup.
  */
 
 import {
@@ -52,7 +53,41 @@ vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
   return {
     ...actual,
-    prompt: vi.fn(),
+    prompt: vi.fn().mockImplementation(async (questions: any[]) => {
+      // Handle the new opt-in confirm prompt for server providers
+      // Default to "No" (user doesn't want to configure URL now)
+      const configureUrlPrompt = questions.find(
+        (q) => q.name === "configureDatabaseUrl",
+      );
+      if (configureUrlPrompt) {
+        return { configureDatabaseUrl: false };
+      }
+      // Handle databaseUrl prompt (should not be reached if configureDatabaseUrl is false)
+      const databaseUrlPrompt = questions.find(
+        (q) => q.name === "databaseUrl",
+      );
+      if (databaseUrlPrompt) {
+        return { databaseUrl: databaseUrlPrompt.default ?? "" };
+      }
+      // Handle other prompts (skills, scripts)
+      const skillsPrompt = questions.find(
+        (q) => q.name === "installPrismaSkills",
+      );
+      if (skillsPrompt) {
+        return { installPrismaSkills: false };
+      }
+      const scriptsPrompt = questions.find(
+        (q) => q.name === "databaseScripts",
+      );
+      if (scriptsPrompt) {
+        return { databaseScripts: "recommended" };
+      }
+      const helperPrompt = questions.find((q) => q.name === "helperPath");
+      if (helperPrompt) {
+        return { helperPath: "lib/prisma.ts" };
+      }
+      return {};
+    }),
     intro: vi.fn(),
     outro: vi.fn(),
     isCancel: vi.fn(),
@@ -565,8 +600,13 @@ describe("security/secret leakage prevention", () => {
     });
 
     test("git status would show .env as ignored (simulated via .gitignore content)", async () => {
+      // Provide explicit databaseUrl so .env gets a DATABASE_URL line
       await databaseGenerator.run(
-        { ...ANSWERS, provider: "postgresql" },
+        {
+          ...ANSWERS,
+          provider: "postgresql",
+          databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
+        },
         makeContext(),
       );
 
@@ -577,7 +617,7 @@ describe("security/secret leakage prevention", () => {
       );
       expect(hasEnvIgnore).toBe(true);
 
-      // The .env file should exist (written by DXG)
+      // The .env file should exist (written by DXG) with DATABASE_URL
       const envContent = fsMockStore._files.get(".env");
       expect(envContent).toBeDefined();
       expect(envContent).toContain("DATABASE_URL");
@@ -585,20 +625,16 @@ describe("security/secret leakage prevention", () => {
   });
 
   describe("DATABASE_URL placeholders contain no real credentials", () => {
-    test("server providers get empty DATABASE_URL placeholder", async () => {
+    test("server providers in non-interactive mode do not write DATABASE_URL to .env (user configures later)", async () => {
       await databaseGenerator.run(
         { ...ANSWERS, provider: "postgresql" },
         makeContext(),
       );
 
       const envContent = fsMockStore._files.get(".env") ?? "";
-      // Server providers get empty placeholder: DATABASE_URL=
-      expect(envContent).toContain("DATABASE_URL=");
-      // Should NOT contain real connection strings
-      expect(envContent).not.toMatch(/DATABASE_URL=postgresql:\/\//);
-      expect(envContent).not.toMatch(/DATABASE_URL=mysql:\/\//);
-      expect(envContent).not.toMatch(/DATABASE_URL=cockroachdb:\/\//);
-      expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/); // No credentials in URL
+      // In non-interactive mode, server providers do not get a default DATABASE_URL
+      // User must configure it manually in .env or via CLI flags
+      expect(envContent).not.toContain("DATABASE_URL");
     });
 
     test("sqlite gets file: URL placeholder (not real credentials)", async () => {
@@ -615,37 +651,70 @@ describe("security/secret leakage prevention", () => {
       expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/);
     });
 
-    test("planetscale gets empty placeholder (server provider)", async () => {
+    test("server providers with explicit databaseUrl write template to .env", async () => {
       await databaseGenerator.run(
-        { ...ANSWERS, provider: "planetscale" },
+        {
+          ...ANSWERS,
+          provider: "postgresql",
+          databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
+        },
         makeContext(),
       );
 
       const envContent = fsMockStore._files.get(".env") ?? "";
-      expect(envContent).toContain("DATABASE_URL=");
-      expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/);
+      expect(envContent).toContain(
+        'DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public"',
+      );
+      // Template is a connection-string-like format (intentional — shows users the format)
+      // Real credentials would have actual values, not USER/PASSWORD/HOST/DATABASE placeholders
     });
 
-    test("prismapostgres gets empty placeholder (server provider)", async () => {
+    test("planetscale with explicit databaseUrl writes template to .env", async () => {
       await databaseGenerator.run(
-        { ...ANSWERS, provider: "prismapostgres" },
+        {
+          ...ANSWERS,
+          provider: "planetscale",
+          databaseUrl: "mysql://USER:PASSWORD@HOST:3306/DATABASE?sslaccept=strict",
+        },
         makeContext(),
       );
 
       const envContent = fsMockStore._files.get(".env") ?? "";
-      expect(envContent).toContain("DATABASE_URL=");
-      expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/);
+      expect(envContent).toContain(
+        'DATABASE_URL="mysql://USER:PASSWORD@HOST:3306/DATABASE?sslaccept=strict"',
+      );
     });
 
-    test("cockroachdb gets empty placeholder (server provider)", async () => {
+    test("prismapostgres with explicit databaseUrl writes template to .env", async () => {
       await databaseGenerator.run(
-        { ...ANSWERS, provider: "cockroachdb" },
+        {
+          ...ANSWERS,
+          provider: "prismapostgres",
+          databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require",
+        },
         makeContext(),
       );
 
       const envContent = fsMockStore._files.get(".env") ?? "";
-      expect(envContent).toContain("DATABASE_URL=");
-      expect(envContent).not.toMatch(/DATABASE_URL=.*:\/\/.*:.*@/);
+      expect(envContent).toContain(
+        'DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require"',
+      );
+    });
+
+    test("cockroachdb with explicit databaseUrl writes template to .env", async () => {
+      await databaseGenerator.run(
+        {
+          ...ANSWERS,
+          provider: "cockroachdb",
+          databaseUrl: "postgresql://USER:PASSWORD@HOST:26257/DATABASE?sslmode=require",
+        },
+        makeContext(),
+      );
+
+      const envContent = fsMockStore._files.get(".env") ?? "";
+      expect(envContent).toContain(
+        'DATABASE_URL="postgresql://USER:PASSWORD@HOST:26257/DATABASE?sslmode=require"',
+      );
     });
 
     test("user-owned .env with real DATABASE_URL is never modified", async () => {

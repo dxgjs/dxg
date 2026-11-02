@@ -1588,7 +1588,7 @@ describe("Database Generator", () => {
       };
 
       await databaseGenerator.run(
-        { provider: "postgresql", databaseScripts: ["db:generate", "db:seed"] },
+        { provider: "postgresql", databaseScripts: ["db:generate", "db:seed"], databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
         context,
       );
 
@@ -1778,7 +1778,7 @@ describe("Database Generator", () => {
       });
 
       await databaseGenerator.run(
-        { provider: "planetscale", installPrismaSkills: true },
+        { provider: "planetscale", installPrismaSkills: true, databaseUrl: "mysql://USER:PASSWORD@HOST:3306/DATABASE" },
         makeContext(),
       );
       let args = getPrismaInitArgs();
@@ -1813,11 +1813,15 @@ describe("Database Generator", () => {
         encoding: "utf8",
       });
       // First call: provider
-      // Second call: databaseUrl, skills, databaseScripts (provider is postgresql, databaseUrl prompt needed)
-      // Third call: helperPath
+      // Second call: configureDatabaseUrl (opt-in confirm for server providers)
+      // Third call: databaseUrl, skills, databaseScripts (user said yes to configure)
+      // Fourth call: helperPath
       (promptMock as unknown as Mock)
         .mockResolvedValueOnce({
           provider: "postgresql",
+        })
+        .mockResolvedValueOnce({
+          configureDatabaseUrl: true,
         })
         .mockResolvedValueOnce({
           databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
@@ -1839,38 +1843,50 @@ describe("Database Generator", () => {
       }>;
       expect(firstCallQuestions.map((q) => q.name)).toEqual(["provider"]);
 
-      // Second prompt call: databaseUrl, skills, databaseScripts
+      // Second prompt call: configureDatabaseUrl (opt-in confirm)
       const secondCallQuestions = (promptMock as unknown as Mock).mock.calls[1][0] as Array<{
         name: string;
         type: string;
         message: string;
         default?: unknown;
       }>;
-      expect(secondCallQuestions.map((q) => q.name)).toEqual([
-        "databaseUrl",
-        "installPrismaSkills",
-        "databaseScripts",
-      ]);
-      // databaseUrl is now the first question (input type)
-      expect(secondCallQuestions[0].type).toBe("input");
-      // installPrismaSkills is the second question (confirm type)
-      expect(secondCallQuestions[1].type).toBe("confirm");
-      expect(secondCallQuestions[1].message).toBe("Install Prisma agent skills?");
-      expect(secondCallQuestions[1].default).toBe(false);
-      // The database scripts phase question follows the skills question.
-      expect(secondCallQuestions[2].type).toBe("select");
-      expect(secondCallQuestions[2].default).toBe("recommended");
+      expect(secondCallQuestions.map((q) => q.name)).toEqual(["configureDatabaseUrl"]);
+      expect(secondCallQuestions[0].type).toBe("confirm");
+      expect(secondCallQuestions[0].message).toBe("Configure database connection URL now?");
+      expect(secondCallQuestions[0].default).toBe(false);
 
-      // Third prompt call: helperPath
+      // Third prompt call: databaseUrl, skills, databaseScripts
       const thirdCallQuestions = (promptMock as unknown as Mock).mock.calls[2][0] as Array<{
         name: string;
         type: string;
         message: string;
         default?: unknown;
       }>;
-      expect(thirdCallQuestions.map((q) => q.name)).toEqual(["helperPath"]);
+      expect(thirdCallQuestions.map((q) => q.name)).toEqual([
+        "databaseUrl",
+        "installPrismaSkills",
+        "databaseScripts",
+      ]);
+      // databaseUrl is now the first question (input type)
       expect(thirdCallQuestions[0].type).toBe("input");
-      expect(thirdCallQuestions[0].default).toBe("lib/prisma.ts");
+      // installPrismaSkills is the second question (confirm type)
+      expect(thirdCallQuestions[1].type).toBe("confirm");
+      expect(thirdCallQuestions[1].message).toBe("Install Prisma agent skills?");
+      expect(thirdCallQuestions[1].default).toBe(false);
+      // The database scripts phase question follows the skills question.
+      expect(thirdCallQuestions[2].type).toBe("select");
+      expect(thirdCallQuestions[2].default).toBe("recommended");
+
+      // Fourth prompt call: helperPath
+      const fourthCallQuestions = (promptMock as unknown as Mock).mock.calls[3][0] as Array<{
+        name: string;
+        type: string;
+        message: string;
+        default?: unknown;
+      }>;
+      expect(fourthCallQuestions.map((q) => q.name)).toEqual(["helperPath"]);
+      expect(fourthCallQuestions[0].type).toBe("input");
+      expect(fourthCallQuestions[0].default).toBe("lib/prisma.ts");
 
       // The "No" answer flows through to the Prisma arguments.
       expect(getPrismaInitArgs()).toContain("--no-skills");
