@@ -1840,6 +1840,15 @@ export const databaseGenerator: Generator = {
         // Provider changed, re-inspect for accurate provider-specific checks
         Object.assign(inspection, await inspectDatabase(ctx, newProvider));
       }
+      // Provider mismatch check for interactive mode: if project already has Prisma
+      // with a different provider, error out immediately (same as CLI mode)
+      if (
+        prismaState.installed &&
+        prismaState.provider &&
+        !providersMatch(prismaState.provider, newProvider)
+      ) {
+        throw new ProviderMismatchError(prismaState.provider, newProvider);
+      }
     } else if (needsProvider && !shouldPrompt) {
       // In non-interactive mode, throw error for missing required values
       throw new ValidationError(
