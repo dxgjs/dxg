@@ -1815,7 +1815,13 @@ export const databaseGenerator: Generator = {
 
     // First: prompt for provider if needed
     if (shouldPrompt && needsProvider) {
-      const promptQuestions = [databasePrompts[0]]; // provider prompt
+      // Use existing Prisma provider as default if detected, otherwise sqlite
+      const providerDefault = prismaState.provider ?? "sqlite";
+      const providerPrompt = {
+        ...databasePrompts[0],
+        default: providerDefault,
+      };
+      const promptQuestions = [providerPrompt];
       let promptAnswers: Record<string, unknown>;
       try {
         promptAnswers = await prompt(
