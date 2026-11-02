@@ -15,7 +15,7 @@ import {
 } from "@dxgjs/doctor";
 import { detectProjectAwarenessSilently, prepareContext, runInTargetDirectory, type CommanderOptions } from "../generator-run";
 import type { FSInterface } from "@dxgjs/doctor";
-import { executeCommand } from "@dxgjs/fs";
+import { executeCommand, type Options } from "@dxgjs/fs";
 
 /**
  * Registers the `doctor` command — runs diagnostic checks on the project.
@@ -83,13 +83,29 @@ Examples:
         // Build context
         const context = await prepareContext(mergedOptions, awareness);
         // Add executeCommand only for doctor context (not exposed to generators)
+        // Explicitly construct FSInterface to avoid type inference issues from spreading
         const doctorFs: FSInterface = {
-          ...context.fs,
-          executeCommand: async (command: string, args?: string[], options?: Record<string, unknown>) => {
-            const result = await executeCommand(command, args, options as any);
+          readFile: context.fs.readFile,
+          readFileSync: context.fs.readFileSync,
+          writeFile: context.fs.writeFile,
+          writeFileSync: context.fs.writeFileSync,
+          readJson: context.fs.readJson,
+          writeJson: context.fs.writeJson,
+          pathExists: context.fs.pathExists,
+          pathExistsSync: context.fs.pathExistsSync,
+          stat: context.fs.stat,
+          statSync: context.fs.statSync,
+          mkdir: context.fs.mkdir,
+          mkdirSync: context.fs.mkdirSync,
+          readdir: context.fs.readdir,
+          readdirSync: context.fs.readdirSync,
+          glob: context.fs.glob,
+          globSync: context.fs.globSync,
+          executeCommand: async (command: string, args?: string[], options?: Options) => {
+            const result = await executeCommand(command, args, options);
             return { stdout: String(result.stdout ?? ""), stderr: String(result.stderr ?? ""), exitCode: result.exitCode ?? 0 };
           },
-        } as FSInterface;
+        };
         const doctorContext: DoctorContext = {
           cwd: projectRoot,
           packageJson: awareness.packageJson,

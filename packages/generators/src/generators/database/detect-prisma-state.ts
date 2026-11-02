@@ -10,10 +10,8 @@ import type { GeneratorContext } from "../../types";
 
 // Shared database meta (provider detection pure functions)
 import {
-  normalizePrismaProvider,
   extractProviderFromSchema,
   extractProviderFromConfig,
-  providersMatch,
   type PrismaState,
 } from "@dxgjs/database-meta";
 

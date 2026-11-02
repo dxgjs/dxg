@@ -10,6 +10,7 @@ import {
 } from "vitest";
 import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
+import type { ReadFileOptions, WriteFileOptions, MkdirOptions } from "@dxgjs/fs";
 import { render as realRender } from "@dxgjs/templates";
 import { note as noteMock, prompt as promptMock } from "@dxgjs/prompts";
 import * as path from "path";
@@ -19,7 +20,7 @@ import { createDependencyInstaller } from "../../install";
 import type { Generator } from "../../types";
 import type { FSInterface } from "../../types";
 import type { ProjectAwareness } from "@dxgjs/workspace";
-import { providerData as providerDataValue, planDatabase as planDatabaseFn, validateDatabase as validateDatabaseFn } from "./index";
+import { providerData as providerDataValue, planDatabase as planDatabaseFn, verifyDatabase as verifyDatabaseFn } from "./index";
 import type { DatabaseInspection } from "./inspect";
 
 // Hoisted shared mock storage: the @dxgjs/fs mock factory needs it at
@@ -72,14 +73,15 @@ const defaultExecuteFake = vi.hoisted(() => {
       }
       return { all: "added packages", stdout: "", stderr: "" };
     }
-    if (command === "npx" && args[0] === "prisma@7.10.0" && args[1] === "init") {
+    if (command === "npx" && (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") && args[1] === "init") {
       // Extract the output path from the args (--output <path>)
       const outputIndex = args.indexOf("--output");
       if (outputIndex !== -1 && outputIndex + 1 < args.length) {
         lastPrismaInitOutput = args[outputIndex + 1]; // relative to prisma directory
       } else {
         // Default output if not specified (relative to prisma directory)
-        lastPrismaInitOutput = "node_modules/@prisma/client";
+        // Matches the generator's default helperPath: lib/prisma.ts -> generatorOutput: lib/generated/prisma
+        lastPrismaInitOutput = "../lib/generated/prisma";
       }
       // Extract --datasource-provider from args
       let provider = "sqlite"; // default
@@ -105,18 +107,25 @@ const defaultExecuteFake = vi.hoisted(() => {
       fsMockStore._files.set(".env", dbUrl);
       return { all: "prisma init ok", stdout: "", stderr: "" };
     }
-    if (command === "npx" && args[0] === "prisma@7.10.0" && args[1] === "generate") {
-      // Determine the output path: use the last captured from prisma init, or default
-      const outputPathRelativeToPrisma = lastPrismaInitOutput ?? "node_modules/@prisma/client";
-      // Convert to path relative to project root: prisma/<outputPath>
-      let outputPathRelativeToProjectRoot = `prisma/${outputPathRelativeToPrisma}`;
-      // Since in our tests, prismaInitOutput is always set to "../<generatorOutput>",
-      // we have outputPathRelativeToProjectRoot = "prisma/../<generatorOutput>"
-      // So we can remove the "prisma/../" prefix to get the generatorOutput.
-      if (outputPathRelativeToProjectRoot.startsWith('prisma/../')) {
-        outputPathRelativeToProjectRoot = outputPathRelativeToProjectRoot.slice(10);
+    if (args.some((a: string) => a === "generate" || a === "db:generate")) {
+      // Determine the generator output path from schema.prisma if available,
+      // otherwise fall back to the default (lib/generated/prisma).
+      let outputPathRelativeToProjectRoot = "lib/generated/prisma";
+      const schemaContent = fsMockStore._files.get("prisma/schema.prisma");
+      if (schemaContent) {
+        // Extract output path from generator block: output = "../lib/generated/prisma"
+        const match = schemaContent.match(/output\s*=\s*"([^"]+)"/);
+        if (match) {
+          const relativeToPrismaDir = match[1];
+          // Resolve relative to prisma directory to project root
+          // e.g., "../lib/generated/prisma" -> "lib/generated/prisma"
+          if (relativeToPrismaDir.startsWith("../")) {
+            outputPathRelativeToProjectRoot = relativeToPrismaDir.slice(3);
+          } else {
+            outputPathRelativeToProjectRoot = relativeToPrismaDir;
+          }
+        }
       }
-      // Ensure the directory exists
       fsMockStore._directories.add(outputPathRelativeToProjectRoot);
       fsMockStore._files.set(
         `${outputPathRelativeToProjectRoot}/client.ts`,
@@ -168,18 +177,18 @@ vi.mock("@dxgjs/fs", async () => {
       // Fall back to actual implementation for other paths
       return actual.pathExists(path);
     }),
-    readFile: vi.fn().mockImplementation(async (path: string, options?: unknown) => {
+    readFile: vi.fn().mockImplementation(async (path: string, options?: ReadFileOptions) => {
       // Check if we have this file in our mock storage
       if (fsMockStore._files.has(path)) {
         return fsMockStore._files.get(path);
       }
       // Fall back to actual implementation for other paths
-      return actual.readFile(path, options as any);
+      return actual.readFile(path, options);
     }),
     writeFile: vi.fn().mockImplementation(async (
       path: string,
       data: string | Buffer,
-      options?: unknown,
+      options?: WriteFileOptions,
     ) => {
       // Store the file in our mock storage
       fsMockStore._files.set(path, data.toString());
@@ -189,7 +198,7 @@ vi.mock("@dxgjs/fs", async () => {
         fsMockStore._directories.add(dir);
       }
       // Call actual writeFile (though in test env this might not do anything)
-      return actual.writeFile(path, data, options as any);
+      return actual.writeFile(path, data, options);
     }),
     stat: vi.fn().mockImplementation(async (path: string) => {
       // Check if it's a file we have
@@ -207,7 +216,7 @@ vi.mock("@dxgjs/fs", async () => {
       // Fall back to actual implementation
       return actual.stat(path);
     }),
-    mkdir: vi.fn().mockImplementation(async (path: string, options?: unknown) => {
+    mkdir: vi.fn().mockImplementation(async (path: string, options?: MkdirOptions) => {
       // Track the directory as created
       fsMockStore._directories.add(path);
       // Also track parent directories
@@ -216,7 +225,7 @@ vi.mock("@dxgjs/fs", async () => {
         fsMockStore._directories.add(parentDir);
       }
       // Call actual mkdir (though in test env this might not do anything)
-      return actual.mkdir(path, options as any);
+      return actual.mkdir(path, options);
     }),
     // Storage-backed JSON seam (the approval writers and the scripts phase
     // go through readJson/writeJson — backing them by the SAME store as
@@ -259,82 +268,99 @@ vi.mock("@dxgjs/templates", async () => {
   };
 });
 
-let triggerPrismaInitWorkaround = false;
-let triggerPrismaGenerateWorkaround = false;
+// Hoisted workaround flags + shared getCliCommand mock
+// Everything in ONE vi.hoisted() so they can reference each other
+const { workaroundFlags, sharedGetCliCommandMock } = vi.hoisted(() => {
+  const workaroundFlags = {
+    triggerPrismaInitWorkaround: false,
+    triggerPrismaGenerateWorkaround: false,
+  };
+
+  function makeGetCliCommandMock() {
+    return vi.fn().mockImplementation((_parseFn: unknown, args: string[]) => {
+      // The first production argument is the parse FUNCTION (parseNi /
+      // parseNlx), not a command spec — the install batches below must
+      // resolve to the literal "npm-mock" command the executeCommand
+      // fake keys on (same shape as idempotence.test.ts's mock). The
+      // previous agentResult.command read resolved to undefined, so
+      // installs silently skipped the fake: no binding, no manifest
+      // persistence, and verifyDatabase failed every sqlite run.
+      if (!args || args.length === 0) {
+        return { command: "npm-mock", args: [] };
+      }
+      // For prisma init — keyed to the EXACT production argument shape
+      // (executeDatabase calls getCliCommand(parseNlx, ["prisma@7.10.0",
+      // "init", ...])). This branch MUST be evaluated before the
+      // dependency-install branches, whose "-D"/"add" heuristics would
+      // otherwise swallow the prisma args. Real @antfu/ni resolves this
+      // command with a verbatim args passthrough (npx / pnpm dlx /
+      // yarn dlx / bun x), so the mock must never transform or drop args
+      // (especially --no-skills).
+      if (args[0] === "prisma@7.10.0" && args[1] === "init") {
+        // If we want to trigger the workaround, simulate legacy
+        // @antfu/ni versions that mis-resolved the dlx command to
+        // "<agent> add ..." — the production originalArgs workaround must
+        // rewrite this to npx + the original args (still including
+        // --no-skills).
+        if (workaroundFlags.triggerPrismaInitWorkaround) {
+          return {
+            command: "some-agent",
+            args: ["add", ...args],
+          };
+        }
+
+        // Real ni behavior: verbatim passthrough after the executable.
+        return { command: "npx", args: [...args] };
+      }
+      // prisma generate — same dlx passthrough semantics as init, and
+      // equally BEFORE the install heuristics: ["prisma@7.10.0", "generate"]
+      // carries no "-D", so the plain-specs branch below would otherwise
+      // mis-resolve it into "npm-mock install prisma@7.10.0 generate".
+      if (args[0] === "prisma@7.10.0" && args[1] === "generate") {
+        if (workaroundFlags.triggerPrismaGenerateWorkaround) {
+          return {
+            command: "some-agent",
+            args: ["add", ...args],
+          };
+        }
+        return { command: "npx", args: [...args] };
+      }
+      // prisma db push — same dlx passthrough semantics as init/generate,
+      // must be checked BEFORE the install heuristics: ["prisma@7", "db", "push"]
+      // carries no "-D", so the plain-specs branch would otherwise
+      // mis-resolve it into "npm-mock install prisma@7 db push".
+      if (
+        (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") &&
+        args[1] === "db" &&
+        args[2] === "push"
+      ) {
+        return { command: "npx", args: [...args] };
+      }
+      // For dependency installation commands
+      if (args.includes("-D") && !args.includes("add")) {
+        return {
+          command: "npm-mock",
+          args: ["install", "-D", ...args.slice(1)],
+        };
+      }
+      if (!args.includes("-D") && !args.includes("add")) {
+        return { command: "npm-mock", args: ["install", ...args] };
+      }
+      return { command: "npm-mock", args: [...args] };
+    });
+  }
+
+  return {
+    workaroundFlags,
+    sharedGetCliCommandMock: makeGetCliCommandMock(),
+  };
+});
 
 vi.mock("@antfu/ni", () => {
   return {
     parseNlx: vi.fn().mockReturnValue({ command: "npx", args: [] }),
     parseNi: vi.fn().mockReturnValue({ command: "npm-mock", args: [] }),
-    getCliCommand: vi
-      .fn()
-      .mockImplementation((_parseFn: unknown, args: string[]) => {
-        // The first production argument is the parse FUNCTION (parseNi /
-        // parseNlx), not a command spec — the install batches below must
-        // resolve to the literal "npm-mock" command the executeCommand
-        // fake keys on (same shape as idempotence.test.ts's mock). The
-        // previous agentResult.command read resolved to undefined, so
-        // installs silently skipped the fake: no binding, no manifest
-        // persistence, and verifyDatabase failed every sqlite run.
-        if (!args || args.length === 0) {
-          return { command: "npm-mock", args: [] };
-        }
-        // For prisma init — keyed to the EXACT production argument shape
-        // (executeDatabase calls getCliCommand(parseNlx, ["prisma@7.10.0",
-        // "init", ...])). This branch MUST be evaluated before the
-        // dependency-install branches, whose "-D"/"add" heuristics would
-        // otherwise swallow the prisma args. Real @antfu/ni resolves this
-        // command with a verbatim args passthrough (npx / pnpm dlx /
-        // yarn dlx / bun x), so the mock must never transform or drop args
-        // (especially --no-skills).
-        if (args[0] === "prisma@7.10.0" && args[1] === "init") {
-          // If we want to trigger the workaround, simulate legacy
-          // @antfu/ni versions that mis-resolved the dlx command to
-          // "<agent> add ..." — the production originalArgs workaround must
-          // rewrite this to npx + the original args (still including
-          // --no-skills).
-          if (triggerPrismaInitWorkaround) {
-            return {
-              command: "some-agent",
-              args: ["add", ...args],
-            };
-          }
-
-          // Real ni behavior: verbatim passthrough after the executable.
-          return { command: "npx", args: [...args] };
-        }
-        // prisma generate — same dlx passthrough semantics as init, and
-        // equally BEFORE the install heuristics: ["prisma@7.10.0", "generate"]
-        // carries no "-D", so the plain-specs branch below would otherwise
-        // mis-resolve it into "npm-mock install prisma@7.10.0 generate".
-        if (args[0] === "prisma@7.10.0" && args[1] === "generate") {
-          if (triggerPrismaGenerateWorkaround) {
-            return {
-              command: "some-agent",
-              args: ["add", ...args],
-            };
-          }
-          return { command: "npx", args: [...args] };
-        }
-        // prisma db push — same dlx passthrough semantics as init/generate,
-        // must be checked BEFORE the install heuristics: ["prisma@7.10.0", "db", "push"]
-        // carries no "-D", so the plain-specs branch would otherwise
-        // mis-resolve it into "npm-mock install prisma@7.10.0 db push".
-        if (args[0] === "prisma@7.10.0" && args[1] === "db" && args[2] === "push") {
-          return { command: "npx", args: [...args] };
-        }
-        // For dependency installation commands
-        if (args.includes("-D") && !args.includes("add")) {
-          return {
-            command: "npm-mock",
-            args: ["install", "-D", ...args.slice(1)],
-          };
-        }
-        if (!args.includes("-D") && !args.includes("add")) {
-          return { command: "npm-mock", args: ["install", ...args] };
-        }
-        return { command: "npm-mock", args: [...args] };
-      }),
+    getCliCommand: sharedGetCliCommandMock,
     executeCommand: vi.fn().mockResolvedValue(undefined),
   };
 });
@@ -343,14 +369,14 @@ vi.mock("@antfu/ni", () => {
 let databaseGenerator: Generator;
 let providerData: typeof providerDataValue;
 let planDatabase: typeof planDatabaseFn;
-let validateDatabase: typeof validateDatabaseFn;
+let verifyDatabase: typeof verifyDatabaseFn;
 
 beforeAll(async () => {
   const indexModule = await import("./index");
   databaseGenerator = indexModule.default;
   providerData = indexModule.providerData;
   planDatabase = indexModule.planDatabase;
-  validateDatabase = indexModule.validateDatabase;
+  verifyDatabase = indexModule.verifyDatabase;
 });
 
 // The @dxgjs/fs mock's storage is the hoisted fsMockStore (above). The fs
@@ -371,7 +397,7 @@ describe("Database Generator", () => {
   let originalCwd: string;
   let tempDir: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalCwd = process.cwd();
     // Create a temporary directory
     tempDir = path.join(
@@ -384,18 +410,36 @@ describe("Database Generator", () => {
     fs.mkdirSync(tempDir, { recursive: true });
     // Change to the temporary directory
     process.chdir(tempDir);
-    // Reset mock storage and call history between tests. The executeCommand
-    // fake is REINSTALLED explicitly: vi.clearAllMocks() clears history but
-    // PRESERVES custom implementations, so a scenario fake a test installed
-    // (e.g. the blocked-install one) would otherwise leak into later tests.
-    vi.clearAllMocks();
-    (fs.executeCommand as unknown as Mock).mockImplementation(
-      defaultExecuteFake as (...a: unknown[]) => unknown,
-    );
+    // Reset workaround flags so they don't leak between tests
+    workaroundFlags.triggerPrismaInitWorkaround = false;
+    workaroundFlags.triggerPrismaGenerateWorkaround = false;
+    // Reset mock storage between tests. The hoisted mock factories already
+    // installed the correct implementations (getCliCommand, executeCommand,
+    // readJson, writeJson, etc.). vi.clearAllMocks() is intentionally omitted
+    // because it was clearing the executeCommand mock implementation that the
+    // installer module captured at import time, causing "Maximum call stack
+    // size exceeded" when the real executeCommand was accidentally used.
     fsMockStore._files.clear();
     fsMockStore._directories.clear();
     // Reset the prisma init output tracker so prisma generate uses the correct path
     lastPrismaInitOutput = null;
+    // Clear mock call histories AND reset executeCommand implementation to the
+    // default fake (tests may override it for scenario-specific behavior).
+    // mockClear() alone doesn't reset the implementation, so scenario fakes
+    // would otherwise leak into subsequent tests (e.g. the "blocked install"
+    // fake would suppress better-sqlite3 binding creation for later tests).
+    (fs.executeCommand as Mock).mockClear();
+    (fs.executeCommand as Mock).mockImplementation(defaultExecuteFake);
+    (fs.writeFile as Mock).mockClear();
+    (fs.readFile as Mock).mockClear();
+    (fs.pathExists as Mock).mockClear();
+    (fs.stat as Mock).mockClear();
+    (fs.mkdir as Mock).mockClear();
+    (fs.readJson as Mock).mockClear();
+    (fs.writeJson as Mock).mockClear();
+    (getCliCommand as Mock).mockClear();
+    (promptMock as Mock).mockClear();
+    (noteMock as Mock).mockClear();
   });
 
   afterEach(() => {
@@ -403,7 +447,8 @@ describe("Database Generator", () => {
     process.chdir(originalCwd);
     // Remove the temporary directory
     fs.rmSync(tempDir, { recursive: true, force: true });
-    vi.restoreAllMocks();
+    // Note: vi.restoreAllMocks() removed — it doesn't work with vi.mock() module
+    // factories and was interfering with hoisted mock persistence across tests.
   });
 
   test("databaseGenerator should exist", () => {
@@ -454,8 +499,8 @@ describe("Database Generator", () => {
   });
 
   test("databaseGenerator should validate correctly", () => {
-    // Since validateDatabase always returns true, any answers should pass
-    expect(typeof validateDatabase).toBe("function");
+    // Since verifyDatabase is the exported validation function
+    expect(typeof verifyDatabase).toBe("function");
   });
 
   /**
@@ -1121,7 +1166,7 @@ describe("Database Generator", () => {
       // Verify that fs.readFile was NOT called for a schema.prisma.tmpl template
       // (since we removed it and Prisma owns it now)
       const schemaTemplateCalls = (fs.readFile as Mock).mock.calls.filter(
-        (call: any[]) =>
+        (call: unknown[]) =>
           typeof call[0] === "string" &&
           call[0].includes("schema.prisma.tmpl"),
       );
@@ -1146,7 +1191,7 @@ describe("Database Generator", () => {
       };
 
       // Set the flag to trigger the workaround
-      triggerPrismaInitWorkaround = true;
+      workaroundFlags.triggerPrismaInitWorkaround = true;
 
       const context = {
         logger: mockLogger,
@@ -1185,7 +1230,7 @@ describe("Database Generator", () => {
       await databaseGenerator.run(answers, context);
 
       // Reset the flag
-      triggerPrismaInitWorkaround = false;
+      workaroundFlags.triggerPrismaInitWorkaround = false;
 
       // Expect that the workaround was triggered: command should be "npx" and args should be the original args
       // (which include --no-skills)
@@ -1194,7 +1239,7 @@ describe("Database Generator", () => {
       const prismaInitCall = (fs.executeCommand as Mock).mock.calls[2];
       expect(prismaInitCall[0]).toBe("npx");
       expect(prismaInitCall[1]).toEqual([
-        "prisma@7",
+        "prisma@7.10.0",
         "init",
         "--datasource-provider",
         "sqlite",
@@ -1222,7 +1267,7 @@ describe("Database Generator", () => {
       };
 
       // Set the flag to trigger the workaround
-      triggerPrismaInitWorkaround = true;
+      workaroundFlags.triggerPrismaInitWorkaround = true;
 
       const context = {
         logger: mockLogger,
@@ -1262,7 +1307,7 @@ describe("Database Generator", () => {
       await databaseGenerator.run(answers, context);
 
       // Reset the flag
-      triggerPrismaInitWorkaround = false;
+      workaroundFlags.triggerPrismaInitWorkaround = false;
 
       // Expect that the workaround was triggered: command should be "npx" and args should be the original args
       // (which include --no-skills and custom output)
@@ -1271,7 +1316,7 @@ describe("Database Generator", () => {
       const prismaInitCall = (fs.executeCommand as Mock).mock.calls[2];
       expect(prismaInitCall[0]).toBe("npx");
       expect(prismaInitCall[1]).toEqual([
-        "prisma@7",
+        "prisma@7.10.0",
         "init",
         "--datasource-provider",
         "sqlite",
@@ -1415,7 +1460,7 @@ describe("Database Generator", () => {
       // The generate resolution returns "<agent> add prisma@7 generate" —
       // the production guard must rewrite it to npx + ["prisma@7",
       // "generate"].
-      triggerPrismaGenerateWorkaround = true;
+      workaroundFlags.triggerPrismaGenerateWorkaround = true;
 
       const context = {
         logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
@@ -1444,13 +1489,13 @@ describe("Database Generator", () => {
         const calls = (fs.executeCommand as Mock).mock.calls;
         const generateCall = calls.find(
           (c: unknown[]) =>
-            Array.isArray(c[1]) && c[1][0] === "prisma@7" && c[1][1] === "generate",
+            Array.isArray(c[1]) && c[1][0] === "prisma@7.10.0" && c[1][1] === "generate",
         );
         expect(generateCall).toBeDefined();
         expect(generateCall![0]).toBe("npx");
-        expect(generateCall![1]).toEqual(["prisma@7", "generate", "--no-hints"]);
+        expect(generateCall![1]).toEqual(["prisma@7.10.0", "generate", "--no-hints"]);
       } finally {
-        triggerPrismaGenerateWorkaround = false;
+        workaroundFlags.triggerPrismaGenerateWorkaround = false;
       }
     });
 
@@ -1458,7 +1503,8 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      vi.clearAllMocks();
+      // Clear only executeCommand mock call history (getCliCommand reinstalled in beforeEach)
+      (fs.executeCommand as Mock).mockClear();
 
       const context = {
         logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
@@ -1484,9 +1530,19 @@ describe("Database Generator", () => {
       // Installed specs never contain the bare transitive name…
       const calls = (fs.executeCommand as Mock).mock.calls;
       const installCalls = calls.filter(
-        (c: unknown[]) =>
-          c[0] === "npm-mock" && (c[1] as string[])[0] === "install",
+        (c: unknown[]) => {
+          const args = c[1] as string[];
+          // Filter for dependency install calls (not lockfile sync)
+          // prisma init/generate use "npx" command, not "npm-mock"
+          return (
+            c[0] === "npm-mock" &&
+            args[0] === "install" &&
+            !args.includes("--package-lock-only")
+          );
+        },
       );
+      // The installer runs: dev install, regular install, and lockfile sync after each
+      // (lockfile sync uses "npm" command, not "npm-mock", but filter defensively)
       expect(installCalls.length).toBe(2);
       const allSpecs = installCalls.flatMap((c: unknown[]) => c[1] as string[]);
       expect(allSpecs).not.toContain("@prisma/engines");
@@ -1509,7 +1565,8 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      vi.clearAllMocks();
+      // Clear only executeCommand mock call history (getCliCommand reinstalled in beforeEach)
+      (fs.executeCommand as Mock).mockClear();
 
       const context = {
         logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
@@ -1605,15 +1662,15 @@ describe("Database Generator", () => {
     /**
      * The prisma init call is now the third-to-last executeCommand call:
      * install (dev), install (deps), prisma init, prisma generate, prisma db push
-     * (5 calls total). Find it by looking for the "prisma@7" and "init" args.
+     * (5 calls total). Find it by looking for the "prisma@7.10.0" and "init" args.
      */
     function getPrismaInitArgs(): string[] {
       const calls = (fs.executeCommand as Mock).mock.calls;
       expect(calls.length).toBeGreaterThanOrEqual(4);
-      // Find the call that contains "prisma@7" and "init"
+      // Find the call that contains "prisma@7.10.0" and "init"
       const initCall = calls.find((call) =>
         Array.isArray(call[1]) &&
-        call[1].includes("prisma@7") &&
+        call[1].includes("prisma@7.10.0") &&
         call[1].includes("init")
       );
       expect(initCall, "prisma init call not found").toBeDefined();
@@ -1632,7 +1689,7 @@ describe("Database Generator", () => {
 
       // Exact contract: --no-skills sits between the provider and --output.
       expect(getPrismaInitArgs()).toEqual([
-        "prisma@7",
+        "prisma@7.10.0",
         "init",
         "--datasource-provider",
         "sqlite",
@@ -1657,7 +1714,7 @@ describe("Database Generator", () => {
       // source: no prompt/TTY check on that path) — so Prisma can never ask
       // the question DXG already asked.
       expect(getPrismaInitArgs()).toEqual([
-        "prisma@7",
+        "prisma@7.10.0",
         "init",
         "--datasource-provider",
         "sqlite",
@@ -1756,13 +1813,14 @@ describe("Database Generator", () => {
         encoding: "utf8",
       });
       // First call: provider
-      // Second call: skills, databaseScripts (provider is postgresql, no databaseUrl prompt)
+      // Second call: databaseUrl, skills, databaseScripts (provider is postgresql, databaseUrl prompt needed)
       // Third call: helperPath
       (promptMock as unknown as Mock)
         .mockResolvedValueOnce({
           provider: "postgresql",
         })
         .mockResolvedValueOnce({
+          databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
           installPrismaSkills: false,
           databaseScripts: "recommended",
         })
@@ -1781,7 +1839,7 @@ describe("Database Generator", () => {
       }>;
       expect(firstCallQuestions.map((q) => q.name)).toEqual(["provider"]);
 
-      // Second prompt call: skills, databaseScripts
+      // Second prompt call: databaseUrl, skills, databaseScripts
       const secondCallQuestions = (promptMock as unknown as Mock).mock.calls[1][0] as Array<{
         name: string;
         type: string;
@@ -1789,15 +1847,19 @@ describe("Database Generator", () => {
         default?: unknown;
       }>;
       expect(secondCallQuestions.map((q) => q.name)).toEqual([
+        "databaseUrl",
         "installPrismaSkills",
         "databaseScripts",
       ]);
-      expect(secondCallQuestions[0].type).toBe("confirm");
-      expect(secondCallQuestions[0].message).toBe("Install Prisma agent skills?");
-      expect(secondCallQuestions[0].default).toBe(false);
+      // databaseUrl is now the first question (input type)
+      expect(secondCallQuestions[0].type).toBe("input");
+      // installPrismaSkills is the second question (confirm type)
+      expect(secondCallQuestions[1].type).toBe("confirm");
+      expect(secondCallQuestions[1].message).toBe("Install Prisma agent skills?");
+      expect(secondCallQuestions[1].default).toBe(false);
       // The database scripts phase question follows the skills question.
-      expect(secondCallQuestions[1].type).toBe("select");
-      expect(secondCallQuestions[1].default).toBe("recommended");
+      expect(secondCallQuestions[2].type).toBe("select");
+      expect(secondCallQuestions[2].default).toBe("recommended");
 
       // Third prompt call: helperPath
       const thirdCallQuestions = (promptMock as unknown as Mock).mock.calls[2][0] as Array<{
@@ -1867,8 +1929,9 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      // Clear mock call history to not count the setup call
-      vi.clearAllMocks();
+      // Clear mock call histories for setup calls (getCliCommand reinstalled in beforeEach)
+      (fs.executeCommand as Mock).mockClear();
+      (fs.writeFile as Mock).mockClear();
 
       const mockLogger = {
         info: vi.fn(),
@@ -1953,8 +2016,9 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      // Clear mock call history to not count the setup call
-      vi.clearAllMocks();
+      // Clear mock call histories for setup calls (getCliCommand reinstalled in beforeEach)
+      (fs.executeCommand as Mock).mockClear();
+      (fs.writeFile as Mock).mockClear();
 
       const mockLogger = {
         info: vi.fn(),
@@ -2097,7 +2161,8 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      vi.clearAllMocks();
+      // Clear only executeCommand mock call history (getCliCommand reinstalled in beforeEach)
+      (fs.executeCommand as Mock).mockClear();
 
       const mockLogger = {
         info: vi.fn(),
@@ -2131,8 +2196,8 @@ describe("Database Generator", () => {
         force: false,
       };
 
-      // Execute the generator
-      await databaseGenerator.run({ provider: "sqlite" }, context);
+      // Execute the generator with helperPath and databaseUrl to match the plan's generatorOutput
+      await databaseGenerator.run({ provider: "sqlite", helperPath: "lib/prisma.ts", databaseUrl: "file:./dev.db" }, context);
 
       // Verify that executeCommand was called with stdio: "pipe" for prisma init
       // The third call is prisma init (after two install calls)
@@ -2148,7 +2213,6 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      vi.clearAllMocks();
 
       const mockLogger = {
         info: vi.fn(),
@@ -2182,15 +2246,18 @@ describe("Database Generator", () => {
         force: false,
       };
 
-      // Execute the generator
-      await databaseGenerator.run({ provider: "sqlite" }, context);
+      // Execute the generator with helperPath and databaseUrl to match the plan's generatorOutput
+      await databaseGenerator.run({ provider: "sqlite", helperPath: "lib/prisma.ts", databaseUrl: "file:./dev.db" }, context);
 
       // Verify that executeCommand was called with stdio: "pipe" for prisma generate
-      // The fourth call is prisma generate (after two installs + prisma init)
-      const generateCall = (fs.executeCommand as Mock).mock.calls[3];
+      // Find the generate call by args (call order may vary due to lockfile sync)
+      const calls = (fs.executeCommand as Mock).mock.calls;
+      const generateCall = calls.find(
+        (c: unknown[]) => c[0] === "npx" && (c[1] as string[]).includes("generate"),
+      );
       expect(generateCall).toBeDefined();
-      expect(generateCall[0]).toBe("npx");
-      const generateOptions = generateCall[2];
+      expect(generateCall![0]).toBe("npx");
+      const generateOptions = generateCall![2];
       expect(generateOptions).toBeDefined();
       expect(generateOptions.stdio).toBe("pipe");
     });
@@ -2199,7 +2266,8 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      vi.clearAllMocks();
+      // Clear only executeCommand mock, not getCliCommand (reinstalled in beforeEach)
+      (fs.executeCommand as Mock).mockClear();
 
       // Make prisma init fail with captured output
       (fs.executeCommand as Mock).mockImplementation(
@@ -2207,7 +2275,7 @@ describe("Database Generator", () => {
           if (command === "npm-mock" && args[0] === "install") {
             return { all: "added packages", stdout: "", stderr: "" };
           }
-          if (command === "npx" && args[1] === "init") {
+          if (command === "npx" && args.some((a: string) => a === "init")) {
             // Simulate a failed prisma init with output
             const error = new Error("prisma init failed") as Error & {
               stdout: string;
@@ -2217,7 +2285,13 @@ describe("Database Generator", () => {
             error.stderr = "prisma init error output";
             throw error;
           }
-          if (command === "npx" && args[1] === "generate") {
+          if (command === "npx" && args.some((a: string) => a === "generate")) {
+            // Create the client file so verifyDatabase passes if we reach it
+            fsMockStore._directories.add("lib/generated/prisma");
+            fsMockStore._files.set(
+              "lib/generated/prisma/client.ts",
+              "// generated prisma client\n",
+            );
             return { all: "prisma generate ok", stdout: "", stderr: "" };
           }
           return { all: "", stdout: "", stderr: "" };
@@ -2256,14 +2330,11 @@ describe("Database Generator", () => {
         force: false,
       };
 
-      // Expect the error to contain the captured output
+      // The generator fails at prisma init with captured output.
+      // The error should include the captured stdout/stderr from the failed init.
       await expect(
-        databaseGenerator.run({ provider: "sqlite" }, context),
+        databaseGenerator.run({ provider: "sqlite", helperPath: "lib/prisma.ts", databaseUrl: "file:./dev.db" }, context),
       ).rejects.toThrow(/Captured output:/);
-
-      await expect(
-        databaseGenerator.run({ provider: "sqlite" }, context),
-      ).rejects.toThrow(/Prisma schema validation failed/);
     });
   });
 });

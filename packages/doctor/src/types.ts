@@ -5,6 +5,7 @@
 
 import type { ProjectAwareness } from "@dxgjs/workspace";
 import type { Logger } from "@dxgjs/logger";
+import type { Stats } from "fs";
 
 /** Category of diagnostic check. */
 export type DoctorCategory =
@@ -36,22 +37,22 @@ export interface DoctorCheckResult {
   fix?: () => Promise<void>;
 }
 
-/** FS interface for file operations. */
+/** FS interface for file operations - matches @dxgjs/fs exports. */
 export interface FSInterface {
-  readFile(filePath: string, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): Promise<string | Buffer>;
-  readFileSync(filePath: string, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): string | Buffer;
-  writeFile(filePath: string, data: string | Buffer, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): Promise<void>;
-  writeFileSync(filePath: string, data: string | Buffer, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): void;
+  readFile(filePath: string, options?: { encoding?: BufferEncoding | null } | BufferEncoding | null): Promise<string | Buffer>;
+  readFileSync(filePath: string, options?: { encoding?: BufferEncoding | null } | BufferEncoding | null): string | Buffer;
+  writeFile(filePath: string, data: string | Buffer, options?: { encoding?: BufferEncoding | null; flag?: string } | BufferEncoding | null): Promise<void>;
+  writeFileSync(filePath: string, data: string | Buffer, options?: { encoding?: BufferEncoding | null; flag?: string } | BufferEncoding | null): void;
   readJson<T = unknown>(filePath: string): Promise<T>;
   writeJson<T = unknown>(filePath: string, data: T, options?: { spaces?: number }): Promise<void>;
   pathExists(filePath: string): Promise<boolean>;
   pathExistsSync(filePath: string): boolean;
-  stat(filePath: string): Promise<import("fs").Stats>;
-  statSync(filePath: string): import("fs").Stats;
-  mkdir(filePath: string, options?: { recursive?: boolean }): Promise<void>;
+  stat(filePath: string): Promise<Stats>;
+  statSync(filePath: string): Stats;
+  mkdir(filePath: string, options?: { recursive?: boolean }): Promise<string | undefined>;
   mkdirSync(filePath: string, options?: { recursive?: boolean }): void;
-  readdir(filePath: string, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): Promise<string[]>;
-  readdirSync(filePath: string, options?: { encoding?: BufferEncoding | string } | BufferEncoding | string | null): string[];
+  readdir(filePath: string, options?: { encoding?: BufferEncoding | null }): Promise<string[]>;
+  readdirSync(filePath: string, options?: { encoding?: BufferEncoding | null }): string[];
   glob(pattern: string, options?: { cwd?: string }): Promise<string[]>;
   globSync(pattern: string, options?: { cwd?: string }): string[];
   executeCommand(command: string, args?: string[], options?: Record<string, unknown>): Promise<{

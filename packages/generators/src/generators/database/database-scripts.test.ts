@@ -12,7 +12,7 @@
  * Contract under test:
  * - A `databaseScripts` select (recommended | customize | skip) is asked
  *   only in interactive mode, after the provider/skills answers.
- * - "recommended" adds the recommended set (db:generate, db:push, db:studio).
+ * - "recommended" adds the recommended set (db:generate, db:push, db:pull, db:studio).
  * - "customize" shows a multiselect of provider-appropriate scripts; only
  *   the selected ones are added.
  * - "skip" leaves package.json untouched and reports the skip.
@@ -23,8 +23,8 @@
  * - Re-running is idempotent.
  * - Unrelated package.json fields survive.
  * - Cancellation propagates the Clack cancel symbol (existing convention).
- * - PlanetScale never offers db:migrate (prisma migrate dev unsupported on
- *   Vitess); the knowledge lives in providerData.
+ * - Migration scripts (db:migrate, db:migrate:deploy) are NOT managed by
+ *   DXG; users who need migrations run the Prisma CLI directly.
  */
 
 import {
@@ -252,9 +252,10 @@ vi.mock("@dxgjs/fs", async () => {
         }
         // Simulate `prisma generate`: emits the generated client at the
         // generator's output path (lib/generated/prisma — see schema).
+        // Generator uses "prisma@7" with "--no-hints" flag.
         if (
           command === "npx" &&
-          args[0] === "prisma@7.10.0" &&
+          (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") &&
           args[1] === "generate"
         ) {
           _files.set(
@@ -285,7 +286,8 @@ vi.mock("@antfu/ni", () => {
         }
         // prisma init / prisma generate: verbatim dlx passthrough (never an
         // install) — matches ni's real npm resolution (npx prisma@7.10.0 …).
-        if (args[0] === "prisma@7.10.0") {
+        // Generator uses "prisma@7" (not pinned to patch) for both init and generate.
+        if (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") {
           return { command: "npx", args: [...args] };
         }
         if (args[0] === "-D") {
@@ -483,7 +485,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(),
     );
 
@@ -513,7 +515,7 @@ describe("interactive database scripts phase", () => {
       });
     (multiselectMock as unknown as Mock).mockResolvedValue([
       "db:generate",
-      "db:migrate",
+      "db:push",
     ]);
 
     await databaseGenerator.run(
@@ -533,8 +535,9 @@ describe("interactive database scripts phase", () => {
     expect(optionValues).toContain("db:generate");
     expect(optionValues).toContain("db:push");
     expect(optionValues).toContain("db:studio");
-    expect(optionValues).toContain("db:migrate");
     expect(optionValues).toContain("db:pull");
+    // Migration scripts are NOT offered (not managed by DXG).
+    expect(optionValues).not.toContain("db:migrate");
     // Each option communicates what the script does.
     const generate = options.options.find(
       (o: { value: string }) => o.value === "db:generate",
@@ -543,9 +546,9 @@ describe("interactive database scripts phase", () => {
 
     const final = readManifestFromDisk();
     expect(final.scripts!["db:generate"]).toBe("prisma generate");
-    expect(final.scripts!["db:migrate"]).toBe("prisma migrate dev");
-    expect(final.scripts!["db:push"]).toBeUndefined();
+    expect(final.scripts!["db:push"]).toBe("prisma db push");
     expect(final.scripts!["db:studio"]).toBeUndefined();
+    expect(final.scripts!["db:pull"]).toBeUndefined();
   });
 
   test("skip: package.json is untouched by the scripts phase and the skip is reported", async () => {
@@ -696,26 +699,6 @@ describe("interactive database scripts phase", () => {
     expect(cancelMock).toHaveBeenCalledWith("Operation cancelled");
   });
 
-  test("PlanetScale never offers db:migrate (prisma migrate dev unsupported on Vitess)", async () => {
-    await seedProject();
-    (promptMock as unknown as Mock).mockResolvedValue({
-      databaseScripts: "customize",
-    });
-    (multiselectMock as unknown as Mock).mockResolvedValue([]);
-
-    await databaseGenerator.run(
-      { provider: "planetscale", installPrismaSkills: false },
-      makeContext(),
-    );
-
-    const psOptions = (multiselectMock as Mock).mock.calls[0][0];
-    const values = psOptions.options.map((o: { value: string }) => o.value);
-    expect(values).not.toContain("db:migrate");
-    // The rest of the catalogue is still offered.
-    expect(values).toContain("db:generate");
-    expect(values).toContain("db:push");
-  });
-
   test("non-interactive mode defaults to the recommended set without prompting", async () => {
     await seedProject();
 
@@ -797,6 +780,7 @@ describe("interactive database scripts phase", () => {
         installPrismaSkills: false,
         databaseScripts: ["db:generate", "db:seed"],
         helperPath: "lib/prisma.ts",
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
       },
       makeContext(),
     );
@@ -830,6 +814,7 @@ describe("interactive database scripts phase", () => {
       installPrismaSkills: false,
       databaseScripts: ["db:generate", "db:seed"],
       helperPath: "lib/prisma.ts",
+      databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
     };
     const context = makeContext();
     await databaseGenerator.run(answers, context);
@@ -873,6 +858,7 @@ describe("interactive database scripts phase", () => {
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
         helperPath: "lib/prisma.ts",
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
       },
       makeContext(),
     );
@@ -904,6 +890,7 @@ describe("interactive database scripts phase", () => {
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
         helperPath: "lib/prisma.ts",
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
       },
       makeContext({ force: true }),
     );
@@ -928,6 +915,7 @@ describe("interactive database scripts phase", () => {
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
         helperPath: "lib/prisma.ts",
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
       },
       makeContext(),
     );
@@ -965,6 +953,7 @@ describe("interactive database scripts phase", () => {
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
         helperPath: "lib/prisma.ts",
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
       },
       makeContext(),
     );
@@ -984,7 +973,7 @@ describe("interactive database scripts phase", () => {
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(),
     );
 
@@ -1008,6 +997,7 @@ describe("interactive database scripts phase", () => {
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
         helperPath: "lib/prisma.ts",
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
       },
       makeContext({ dryRun: true }),
     );
@@ -1044,6 +1034,7 @@ describe("interactive database scripts phase", () => {
         installPrismaSkills: false,
         databaseScripts: ["db:generate", "db:seed"],
         helperPath: "lib/prisma.ts",
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
       },
       makeContext(),
     );
@@ -1095,6 +1086,7 @@ describe("interactive database scripts phase", () => {
         installPrismaSkills: false,
         databaseScripts: ["db:seed"],
         helperPath: "lib/prisma.ts",
+        databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
       },
       makeContext(),
     );

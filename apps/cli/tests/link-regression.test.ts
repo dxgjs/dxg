@@ -2,7 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from "vitest";
 import { execSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import { mkdirSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
 /**
  * Regression test for npm link scenario.
@@ -33,9 +33,6 @@ describe("npm link regression", () => {
     mkdirSync(testDir, { recursive: true });
     // Create minimal package.json for commands that require it (e.g., add database)
     const packageJson = { name: "dxg-link-test", private: true, version: "0.0.0" };
-    import("node:fs").then((fs) => fs.writeFileSync(join(testDir, "package.json"), JSON.stringify(packageJson, null, 2)));
-    // Use synchronous write to ensure it's ready
-    const { writeFileSync } = require("node:fs");
     writeFileSync(join(testDir, "package.json"), JSON.stringify(packageJson, null, 2));
   });
 
@@ -83,7 +80,7 @@ describe("npm link regression", () => {
   });
 
   test("built CLI runs --non-interactive from temp directory (shows help/error - no default action)", () => {
-    let output = "";
+    let output;
     let exitCode = 0;
     try {
       output = execSync(`node "${cliDistIndex}" --non-interactive`, {

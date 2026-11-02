@@ -2,6 +2,7 @@ import type { Command } from "commander";
 import { isCancel } from "@dxgjs/prompts";
 import { databaseGenerator, type Generator } from "@dxgjs/generators";
 import { formatError, ValidationError } from "@dxgjs/errors";
+import type { GeneratorContext } from "@dxgjs/generators";
 import {
   type CommanderOptions,
   detectProjectAwarenessSilently,
@@ -65,7 +66,7 @@ export function registerAddCommand(program: Command): void {
           const context = await prepareContext(options, awareness);
           // Cast context to match GeneratorContext expected by generators
           // The context has all required properties (fs, logger, templates, awareness, etc.)
-          await generator.run(cliAnswers, context as any);
+          await generator.run(cliAnswers, context as GeneratorContext);
         });
 
         // Natural exit (code 0)

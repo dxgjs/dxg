@@ -236,8 +236,34 @@ vi.mock("@dxgjs/fs", async () => {
           args[0] === "prisma@7.10.0" &&
           args[1] === "generate"
         ) {
-          // Determine the output path: use the last captured from prisma init, or default
-          const outputPathRelativeToPrisma = lastPrismaInitOutput ?? "node_modules/@prisma/client";
+          // Determine the output path: try to read from schema.prisma first,
+          // fall back to last captured from prisma init, then compute from
+          // the default helper path (since helper file is created AFTER generate
+          // in the execution order), then default.
+          let outputPathRelativeToPrisma = lastPrismaInitOutput;
+          if (!outputPathRelativeToPrisma) {
+            const schemaContent = _files.get("prisma/schema.prisma");
+            if (schemaContent) {
+              const match = schemaContent.match(/output\s*=\s*"([^"]+)"/);
+              if (match) {
+                outputPathRelativeToPrisma = match[1];
+              }
+            }
+          }
+          // If still not found, compute from default helper path (lib/prisma.ts)
+          // using the same logic as computeDefaultGeneratorOutput:
+          // posix.join(posix.dirname(helperPath), "generated", "prisma") -> project-relative
+          // Then convert to prisma-relative: ../<projectRelativeOutput>
+          if (!outputPathRelativeToPrisma) {
+            const defaultHelperPath = "lib/prisma.ts";
+            const helperDir = defaultHelperPath.split("/").slice(0, -1).join("/");
+            const projectRelativeOutput = `${helperDir}/generated/prisma`;
+            // Convert to prisma-relative (prisma/ is the schema directory)
+            outputPathRelativeToPrisma = `../${projectRelativeOutput}`;
+          }
+          if (!outputPathRelativeToPrisma) {
+            outputPathRelativeToPrisma = "node_modules/@prisma/client";
+          }
           // Convert to path relative to project root: prisma/<outputPath>
           let outputPathRelativeToProjectRoot = `prisma/${outputPathRelativeToPrisma}`;
           // Since in our tests, prismaInitOutput is always set to "../<generatorOutput>",
@@ -276,11 +302,13 @@ vi.mock("@antfu/ni", () => {
     parseNi: vi.fn().mockReturnValue("npm-mock"),
     getCliCommand: vi
       .fn()
-      .mockImplementation((parseNiFn: unknown, args: string[]) => {
-        parseNiFn;
+      .mockImplementation((_parseNiFn: unknown, args: string[]) => {
         // dlx passthrough (real ni behavior): prisma init/generate/db push resolve
-        // to npx with verbatim args.
-        if (args[0] === "prisma@7.10.0" && (args[1] === "init" || args[1] === "generate" || (args[1] === "db" && args[2] === "push"))) {
+        // to npx with verbatim args. Match both "prisma@7" and "prisma@7.10.0".
+        const isPrismaCmd =
+          (args[0] === "prisma@7" || args[0] === "prisma@7.10.0") &&
+          (args[1] === "init" || args[1] === "generate" || (args[1] === "db" && args[2] === "push"));
+        if (isPrismaCmd) {
           return { command: "npx", args: [...args], cwd: undefined };
         }
         // Dependency install batches resolve as npm install (-D → dev).

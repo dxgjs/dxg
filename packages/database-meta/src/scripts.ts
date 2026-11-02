@@ -7,6 +7,8 @@ export type { DatabaseScriptCatalog, DatabaseScriptCatalogEntry } from "./types"
 // `dxg add database`. Deliberately NOT exposed as scripts:
 // - db:reset — destructive (prisma migrate reset); developers who adopt
 //   the migrations workflow already know the prisma CLI.
+// - db:migrate / db:migrate:deploy — Prisma migrations are NOT managed
+//   by DXG; users who need migrations run the Prisma CLI directly.
 //
 // db:seed is opt-in (customize only): selecting it generates a
 // prisma/seed.ts skeleton, adds `tsx` (the seed runner) and configures
@@ -47,30 +49,18 @@ export const databaseScriptCatalog: DatabaseScriptCatalog = {
     hint: "Seed the database",
     recommended: false,
   },
-  "db:migrate": {
-    command: "prisma migrate dev",
-    hint: "Create and apply Prisma migrations",
-    recommended: false,
-  },
 };
 
-/** Scripts offered for a given provider key (provider-aware filtering). */
-export function providerScripts(providerKey: string, providerData: Record<string, any>): string[] {
-  const provider = providerData[providerKey];
-  // Providers without Prisma-migrations support (e.g. PlanetScale on
-  // Vitess) never see the migrate entry — the knowledge stays in the
-  // provider table, not in a generic capability framework. The flag is
-  // optional: every provider that does not opt out keeps the full catalogue.
-  const excludeMigrations =
-    (provider as { supportsMigrations?: boolean } | undefined)?.supportsMigrations === false;
-  return Object.keys(databaseScriptCatalog).filter(
-    (name) => !(excludeMigrations && name === "db:migrate"),
-  );
+/** Scripts offered for a given provider key. */
+export function providerScripts(_: string): string[] { // eslint-disable-line @typescript-eslint/no-unused-vars
+  // All providers now get the same script catalogue since migrations
+  // are not managed by DXG.
+  return Object.keys(databaseScriptCatalog);
 }
 
 /** The recommended script names for a given provider key. */
-export function recommendedScripts(providerKey: string, providerData: Record<string, any>): string[] {
-  return providerScripts(providerKey, providerData).filter(
+export function recommendedScripts(providerKey: string): string[] {
+  return providerScripts(providerKey).filter(
     (name) => databaseScriptCatalog[name].recommended,
   );
 }
@@ -93,20 +83,19 @@ export function recommendedScripts(providerKey: string, providerData: Record<str
 export function resolveDatabaseScripts(
   decision: unknown,
   providerKey: string,
-  providerData: Record<string, any>,
 ): string[] {
   if (decision === "skip") {
     return [];
   }
   if (decision === "recommended") {
-    return recommendedScripts(providerKey, providerData);
+    return recommendedScripts(providerKey);
   }
   if (Array.isArray(decision)) {
     // Pre-resolved selection (tests / programmatic answers).
-    const offered = new Set(providerScripts(providerKey, providerData));
+    const offered = new Set(providerScripts(providerKey));
     return decision.filter(
       (name): name is string => typeof name === "string" && offered.has(name),
     );
   }
-  return recommendedScripts(providerKey, providerData);
+  return recommendedScripts(providerKey);
 }

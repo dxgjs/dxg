@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 
-type WriteFileOptions = Parameters<typeof fs.writeFile>[2];
+export type WriteFileOptions = Parameters<typeof fs.writeFile>[2];
 
 export function writeFile(
   filePath: Parameters<typeof fs.writeFile>[0],

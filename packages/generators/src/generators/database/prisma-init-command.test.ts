@@ -198,11 +198,13 @@ function expectPrismaInitContract(
 }
 
 describe("prisma init argument contract (real @antfu/ni resolution)", () => {
-  test("every supported provider keeps <provider> + --no-skills through real resolution", async () => {
-    // This test uses real @antfu/ni resolution against fixture projects which can be slow
-    // on CI/machines without warm npm cache. 30s timeout accommodates cold starts.
-    // Provider mapping is preserved (PlanetScale keeps its MySQL mapping).
-    expect(providerData.planetscale.prismaProvider).toBe("mysql");
+  test(
+    "every supported provider keeps <provider> + --no-skills through real resolution",
+    async () => {
+      // This test uses real @antfu/ni resolution against fixture projects which can be slow
+      // on CI/machines without warm npm cache. 30s timeout accommodates cold starts.
+      // Provider mapping is preserved (PlanetScale keeps its MySQL mapping).
+      expect(providerData.planetscale.prismaProvider).toBe("mysql");
 
     const npmScenario = agentScenarios[0];
     for (const provider of Object.values(providerData)) {
@@ -235,7 +237,7 @@ describe("prisma init argument contract (real @antfu/ni resolution)", () => {
       expect(resolved.args.slice(0, 1)).toEqual(npmScenario.expectedArgsPrefix);
       expectPrismaInitContract(resolved, provider.prismaProvider);
     }
-  });
+  }, 30000);
 
   test("PlanetScale resolves with its mysql mapping + --no-skills", async () => {
     const resolved = await resolvePrismaInitCommand(

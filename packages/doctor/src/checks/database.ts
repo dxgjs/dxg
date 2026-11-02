@@ -5,7 +5,7 @@
  */
 
 import type { DoctorContext, DoctorCheckResult, DoctorCategory } from "../types";
-import { readFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 
 const DATABASE_CHECKS = {
@@ -27,10 +27,6 @@ const DATABASE_CHECKS = {
   },
   "database:helper-file": {
     name: "Prisma helper file exists",
-    category: "database" as DoctorCategory,
-  },
-  "database:migrations": {
-    name: "Migrations directory exists",
     category: "database" as DoctorCategory,
   },
   "database:sqlite-db-file": {
@@ -114,15 +110,6 @@ function extractProvider(cwd: string): string | null {
   }
 
   return null;
-}
-
-/**
- * Check if provider supports migrations.
- */
-function providerSupportsMigrations(provider: string): boolean {
-  // PlanetScale doesn't support migrations
-  if (provider === "planetscale") return false;
-  return true;
 }
 
 /**
@@ -473,82 +460,6 @@ async function checkHelperFile(ctx: DoctorContext): Promise<DoctorCheckResult> {
 }
 
 /**
- * Check if migrations directory exists.
- * Only relevant for providers that support migrations (NOT planetscale).
- * Generator does NOT run migrations; adds script for user to run.
- */
-async function checkMigrations(ctx: DoctorContext): Promise<DoctorCheckResult> {
-  const provider = extractProvider(ctx.cwd);
-  const schemaPath = findPrismaSchema(ctx.cwd);
-  const configPath = findPrismaConfig(ctx.cwd);
-
-  if (!schemaPath && !configPath) {
-    return {
-      id: "database:migrations",
-      name: DATABASE_CHECKS["database:migrations"].name,
-      category: "database",
-      severity: "info",
-      message: "Skipped — no Prisma schema or config",
-      fixable: false,
-    };
-  }
-
-  // Skip for providers that don't support migrations
-  if (provider && !providerSupportsMigrations(provider)) {
-    return {
-      id: "database:migrations",
-      name: DATABASE_CHECKS["database:migrations"].name,
-      category: "database",
-      severity: "info",
-      message: `Skipped — provider "${provider}" does not use migrations`,
-      detail: "PlanetScale uses its own schema change workflow",
-      fixable: false,
-    };
-  }
-
-  const baseDir = schemaPath ? dirname(schemaPath) : dirname(configPath!);
-  const migrationsDir = join(baseDir, "migrations");
-
-  if (!existsSync(migrationsDir)) {
-    return {
-      id: "database:migrations",
-      name: DATABASE_CHECKS["database:migrations"].name,
-      category: "database",
-      severity: "warn",
-      message: "No migrations directory found",
-      detail: "Run 'pnpm prisma migrate dev' to create initial migration (script added by generator)",
-      fixable: false, // User runs this, not doctor
-    };
-  }
-
-  // Check if there are migration files
-  const migrations = readdirSync(migrationsDir).filter((f) =>
-    f.endsWith(".sql") || f.match(/^\d{14}_/)
-  );
-
-  if (migrations.length === 0) {
-    return {
-      id: "database:migrations",
-      name: DATABASE_CHECKS["database:migrations"].name,
-      category: "database",
-      severity: "warn",
-      message: "Migrations directory exists but is empty",
-      detail: "Run 'pnpm prisma migrate dev' to create migrations",
-      fixable: false,
-    };
-  }
-
-  return {
-    id: "database:migrations",
-    name: DATABASE_CHECKS["database:migrations"].name,
-    category: "database",
-    severity: "ok",
-    message: `Migrations found: ${migrations.length} migration(s)`,
-    fixable: false,
-  };
-}
-
-/**
  * Check if SQLite database file exists (for SQLite provider).
  * Generator runs `prisma db push` which creates dev.db.
  */
@@ -806,7 +717,6 @@ export async function registerDatabaseChecks(): Promise<void> {
   registerCheck("database:provider", checkProvider, "database");
   registerCheck("database:prisma-client", checkPrismaClient, "database");
   registerCheck("database:helper-file", checkHelperFile, "database");
-  registerCheck("database:migrations", checkMigrations, "database");
   registerCheck("database:sqlite-db-file", checkSqliteDbFile, "database");
   registerCheck("database:seed-config", checkSeedConfig, "database");
   registerCheck("database:connectivity", checkConnectivity, "database");

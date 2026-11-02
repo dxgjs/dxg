@@ -6,7 +6,7 @@
  *
  * Used for scenarios the CLI cannot drive non-interactively: it exposes
  * no --helper-path / --database-scripts flags, and Clack prompts cannot
- * run without a TTY. This is the "équivalent direct" the E2E plan
+ * run without a TTY. This is the "direct equivalent" the E2E plan
  * allows (§5.4): it mirrors what apps/cli's prepareContext + add action
  * do, including the Phase 1 package-manager unification.
  *

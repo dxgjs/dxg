@@ -485,14 +485,19 @@ export function scriptSection(pkg: Json): Record<string, string> {
  * Spinner/step glyphs (◒ ✔ ◇) are outside U+2500–U+257F and survive.
  */
 export function unwrapped(output: string): string {
+  // eslint-disable-next-line no-control-regex
+  const ANSI_CSI = new RegExp("\x1b\\[[0-9;:?]*[@-~]", "g"); // ANSI CSI (SGR colors…)
+  const UNICODE_BORDERS = /[─-╿]/g; // unicode-mode borders (│ ─ ╮ ╯…)
+  const ASCII_LEFT_BORDER = /^\s*(?:\|\s?)+/; // ASCII-mode left border pipe(s)
+  const ASCII_RIGHT_BORDER = /(?:\s?\|)+\s*$/; // ASCII-mode right border pipe(s)
   return output
     .split(/\r?\n/)
     .map((line) =>
       line
-        .replace(/\u001b\[[0-9;:?]*[@-~]/g, " ") // ANSI CSI (SGR colors…)
-        .replace(/[─-╿]/g, " ") // unicode-mode borders (│ ─ ╮ ╯…)
-        .replace(/^\s*(?:\|\s?)+/, "") // ASCII-mode left border pipe(s)
-        .replace(/(?:\s?\|)+\s*$/, ""), // ASCII-mode right border pipe(s)
+        .replace(ANSI_CSI, " ")
+        .replace(UNICODE_BORDERS, " ")
+        .replace(ASCII_LEFT_BORDER, "")
+        .replace(ASCII_RIGHT_BORDER, ""),
     )
     .join(" ")
     .replace(/\s+/g, " ")

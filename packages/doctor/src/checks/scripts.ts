@@ -1,7 +1,15 @@
 /**
  * Scripts checks for dxg doctor.
  * Validates package.json scripts added by the database generator.
- * Generator adds exactly 6 Prisma scripts (provider-dependent).
+ * Generator adds exactly 5 Prisma scripts (provider-independent):
+ * - db:generate: "prisma generate"
+ * - db:push: "prisma db push"
+ * - db:studio: "prisma studio"
+ * - db:pull: "prisma db pull"
+ * - db:seed: "prisma db seed" (optional, only if selected during generator run)
+ *
+ * Migration scripts (db:migrate, db:migrate:deploy) are NOT managed by DXG.
+ * Users who need migrations run the Prisma CLI directly.
  */
 
 import type { DoctorContext, DoctorCheckResult, DoctorCategory } from "../types";
@@ -74,15 +82,15 @@ async function checkPackageJsonScripts(ctx: DoctorContext): Promise<DoctorCheckR
 }
 
 /**
- * Check if the 6 Prisma scripts added by the generator are configured.
- * Generator adds these exact 6 scripts:
+ * Check if the 5 Prisma scripts added by the generator are configured.
+ * Generator adds these exact 5 scripts:
  * - db:generate: "prisma generate"
  * - db:push: "prisma db push"
- * - db:migrate: "prisma migrate dev"
- * - db:migrate:deploy: "prisma migrate deploy"
  * - db:studio: "prisma studio"
- * - db:seed: "tsx prisma/seed.ts"
+ * - db:pull: "prisma db pull"
+ * - db:seed: "prisma db seed" (optional)
  *
+ * Migration scripts (db:migrate, db:migrate:deploy) are NOT managed by DXG.
  * For SQLite: db:push runs automatically; for server providers: user runs manually.
  * db:seed is optional (only if selected during generator run).
  */
@@ -103,14 +111,13 @@ async function checkPrismaScripts(ctx: DoctorContext): Promise<DoctorCheckResult
   const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
   const scripts = pkg.scripts || {};
 
-  // The 6 exact scripts the generator adds
+  // The 5 exact scripts the generator adds
   const requiredPrismaScripts = {
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
-    "db:migrate": "prisma migrate dev",
-    "db:migrate:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
-    "db:seed": "tsx prisma/seed.ts",
+    "db:pull": "prisma db pull",
+    "db:seed": "prisma db seed",
   };
 
   const missing: string[] = [];
@@ -122,7 +129,7 @@ async function checkPrismaScripts(ctx: DoctorContext): Promise<DoctorCheckResult
       configured.push(name);
       // Check if command matches expected (allow minor variations like extra flags)
       const actualCmd = scripts[name] as string;
-      if (!actualCmd.includes(expectedCmd.replace("prisma ", "").replace("tsx prisma/seed.ts", "seed"))) {
+      if (!actualCmd.includes(expectedCmd.replace("prisma ", "").replace("prisma db seed", "seed"))) {
         mismatched.push(name);
       }
     } else {
@@ -135,15 +142,15 @@ async function checkPrismaScripts(ctx: DoctorContext): Promise<DoctorCheckResult
   const otherMissing = missing.filter((m) => m !== "db:seed");
   const hasAnyPrismaScripts = configured.length > 0;
 
-  if (otherMissing.length === 6) {
-    // None of the 6 scripts present
+  if (otherMissing.length === 5) {
+    // None of the 5 scripts present
     return {
       id: "scripts:prisma-scripts",
       name: SCRIPTS_CHECKS["scripts:prisma-scripts"].name,
       category: "scripts",
       severity: "warn",
       message: "No Prisma scripts configured",
-      detail: "Run 'dxg add database' to add all 6 Prisma scripts",
+      detail: "Run 'dxg add database' to add all 5 Prisma scripts",
       fixable: true,
       fix: async () => {
         pkg.scripts = { ...scripts, ...requiredPrismaScripts };
@@ -159,7 +166,7 @@ async function checkPrismaScripts(ctx: DoctorContext): Promise<DoctorCheckResult
       category: "scripts",
       severity: "warn",
       message: `Missing Prisma scripts: ${otherMissing.join(", ")}`,
-      detail: `Generator adds 6 scripts. Run 'dxg add database' to add missing ones${isSeedMissing ? " (db:seed is optional)" : ""}`,
+      detail: `Generator adds 5 scripts. Run 'dxg add database' to add missing ones${isSeedMissing ? " (db:seed is optional)" : ""}`,
       fixable: true,
       fix: async () => {
         const toAdd: Record<string, string> = {};
@@ -200,14 +207,14 @@ async function checkPrismaScripts(ctx: DoctorContext): Promise<DoctorCheckResult
     name: SCRIPTS_CHECKS["scripts:prisma-scripts"].name,
     category: "scripts",
     severity: "ok",
-    message: `All 6 Prisma scripts configured${isSeedMissing ? " (db:seed optional)" : ""}`,
+    message: `All 5 Prisma scripts configured${isSeedMissing ? " (db:seed optional)" : ""}`,
     fixable: false,
   };
 }
 
 /**
  * Register all scripts checks.
- * Only 2 checks remain: package-json-scripts (structure) and prisma-scripts (generator's 6 scripts)
+ * Only 2 checks remain: package-json-scripts (structure) and prisma-scripts (generator's 5 scripts)
  */
 export async function registerScriptsChecks(): Promise<void> {
   const { registerCheck } = await import("../registry");

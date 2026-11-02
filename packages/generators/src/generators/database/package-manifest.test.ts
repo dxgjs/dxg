@@ -51,6 +51,7 @@ import * as path from "path";
 import * as os from "os";
 import type { FSInterface, Generator } from "../../types";
 import type { ProjectAwareness } from "@dxgjs/workspace";
+import type { ProviderData } from "@dxgjs/database-meta";
 
 /**
  * PackageJson via the public awareness surface: @dxgjs/workspace does not
@@ -221,9 +222,10 @@ vi.mock("@dxgjs/fs", async () => {
         }
         // Simulate `prisma generate`: emits the generated client at the
         // generator's output path (see schema.prisma above).
+        // Generator uses "prisma@7" (via getCliCommand), mock accepts both.
         if (
           command === "npx" &&
-          args[0] === "prisma@7.10.0" &&
+          (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") &&
           args[1] === "generate"
         ) {
           _files.set(
@@ -255,7 +257,8 @@ vi.mock("@antfu/ni", () => {
         }
         // prisma init / prisma generate: verbatim dlx passthrough (never an
         // install) — matches ni's real npm resolution (npx prisma@7.10.0 …).
-        if (args[0] === "prisma@7.10.0") {
+        // Generator uses "prisma@7", mock accepts both.
+        if (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") {
           return { command: "npx", args: [...args] };
         }
         // Dependency installation: `ni add -D <pkgs>` / `ni add <pkgs>`.
@@ -277,7 +280,7 @@ vi.mock("@dxgjs/templates", async () => {
 });
 
 let databaseGenerator: Generator;
-let providerData: Record<string, unknown>;
+let providerData: Record<string, ProviderData>;
 
 beforeAll(async () => {
   const indexModule = await import("./index");
@@ -328,8 +331,18 @@ async function seedProject(manifest: unknown = MY_APP_PACKAGE_JSON) {
   await fs.writeFile("package.json", JSON.stringify(manifest, null, 2), "utf8");
 }
 
+/** Package.json manifest shape as read from disk. */
+interface PackageJsonManifest {
+  name: string;
+  version: string;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  scripts: Record<string, string>;
+  [key: string]: unknown;
+}
+
 /** The manifest exactly as pnpm/the outside world would read it from disk. */
-function readManifestFromDisk(): Record<string, any> {
+function readManifestFromDisk(): PackageJsonManifest {
   const raw = fsMockStore._files.get("package.json");
   expect(raw).toBeDefined();
   return JSON.parse(raw!);
@@ -431,7 +444,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(),
     );
 
@@ -488,7 +501,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(),
     );
 
@@ -501,14 +514,17 @@ describe("package manifest invariant (dependencies survive script injection)", (
   });
 
   test("every provider installs and persists exactly its declared dependency set", async () => {
-    for (const provider of Object.values(providerData) as any[]) {
+    // Import placeholders for databaseUrl per provider
+    const { providerPlaceholders } = await import("@dxgjs/database-meta");
+
+    for (const provider of Object.values(providerData)) {
       fsMockStore._files.clear();
       fsMockStore._directories.clear();
       vi.clearAllMocks();
       await seedProject();
 
       await databaseGenerator.run(
-        { provider: provider.key, installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+        { provider: provider.key, installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: providerPlaceholders[provider.key] },
         makeContext(),
       );
 
@@ -555,14 +571,14 @@ describe("package manifest invariant (dependencies survive script injection)", (
     const context = makeContext();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       context,
     );
     const writeCallsAfterFirstRun = (fs.writeJson as Mock).mock.calls.length;
     expect(writeCallsAfterFirstRun).toBeGreaterThan(0);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       context,
     );
 
@@ -593,7 +609,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(manifest),
     );
 
@@ -628,7 +644,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(manifest, { force: true }),
     );
 
@@ -653,7 +669,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     const before = fsMockStore._files.get("package.json");
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(MY_APP_PACKAGE_JSON, { dryRun: true }),
     );
 
@@ -674,7 +690,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject(manifest);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(manifest),
     );
 
@@ -691,7 +707,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     const context = makeContext();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       context,
     );
 
@@ -710,7 +726,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     await seedProject();
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts" },
+      { provider: "postgresql", installPrismaSkills: false, databaseScripts: "recommended", helperPath: "lib/prisma.ts", databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
       makeContext(),
     );
 
@@ -720,7 +736,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     expect(prismaInitCall).toBeDefined();
     expect(prismaInitCall![0]).toBe("npx");
     expect(prismaInitCall![1]).toEqual([
-      "prisma@7",
+      "prisma@7.10.0",
       "init",
       "--datasource-provider",
       "postgresql",

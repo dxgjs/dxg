@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 
-type ReadFileOptions = Parameters<typeof fs.readFile>[1];
+export type ReadFileOptions = Parameters<typeof fs.readFile>[1];
 
 export function readFile(
   filePath: Parameters<typeof fs.readFile>[0],

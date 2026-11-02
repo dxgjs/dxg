@@ -19,6 +19,7 @@ import { dirname, join, sep, posix } from "path";
 import { executeCommand } from "@dxgjs/fs";
 import { parseNlx, getCliCommand } from "@antfu/ni";
 import pc from "picocolors";
+import type { ExecaError } from "execa";
 import type {
   DependencyPlan,
   DependencyInstallResult,
@@ -88,8 +89,18 @@ if (isBundled) {
 // Provider data and script catalog are now imported from @dxgjs/database-meta
 // Re-export for backward compatibility with tests
 export { providerData } from "@dxgjs/database-meta";
-export { databaseScriptCatalog, SEED_SCRIPT_NAME, SEED_FILE_PATH, SEED_CONFIG_COMMAND, PRISMA_CONFIG_PATH } from "@dxgjs/database-meta";
-export { providerScripts, recommendedScripts, resolveDatabaseScripts } from "@dxgjs/database-meta";
+export {
+  databaseScriptCatalog,
+  SEED_SCRIPT_NAME,
+  SEED_FILE_PATH,
+  SEED_CONFIG_COMMAND,
+  PRISMA_CONFIG_PATH,
+} from "@dxgjs/database-meta";
+export {
+  providerScripts,
+  recommendedScripts,
+  resolveDatabaseScripts,
+} from "@dxgjs/database-meta";
 export { buildPrismaInitArgs } from "@dxgjs/database-meta";
 
 // Patch providerData with correct template paths for this package
@@ -99,7 +110,8 @@ const patchedProviderData = { ...providerData };
 for (const key of Object.keys(patchedProviderData)) {
   const provider = patchedProviderData[key];
   if (provider.templatePath) {
-    const templateName = provider.templatePath.split(sep).pop() || provider.templatePath;
+    const templateName =
+      provider.templatePath.split(sep).pop() || provider.templatePath;
     patchedProviderData[key] = {
       ...provider,
       templatePath: join(templateBasePath, templateName),
@@ -123,11 +135,11 @@ export const databasePrompts = [
     })),
   },
   {
-    // DATABASE_URL prompt: shown conditionally after provider selection.
-    // For SQLite, prefilled with the conventional file URL so the recommended
-    // chain works out-of-the-box. For server providers, empty placeholder
-    // (user fills in their connection string). This prompt runs BEFORE the
-    // skills/scripts/helper prompts so the value is available for planDatabase.
+    // DATABASE_URL prompt: shown for all providers after provider selection.
+    // For SQLite, prefilled with the conventional file URL.
+    // For server providers, shows a template placeholder the user can edit.
+    // This prompt runs BEFORE the skills/scripts/helper prompts so the value
+    // is available for planDatabase.
     type: "input" as const,
     name: "databaseUrl",
     message: "Database connection URL (DATABASE_URL):",
@@ -223,7 +235,8 @@ export function planDatabase(
   inspection?: import("./inspect").DatabaseInspection,
 ) {
   const providerKey = answers.provider as string;
-  const provider = providerDataLocal[providerKey as keyof typeof providerDataLocal];
+  const provider =
+    providerDataLocal[providerKey as keyof typeof providerDataLocal];
 
   if (!provider) {
     const supportedProviders = Object.keys(providerDataLocal);
@@ -244,7 +257,9 @@ export function planDatabase(
         : DEFAULT_HELPER_PATH;
   const helperError = validateHelperPath(helperPath);
   if (helperError !== undefined) {
-    throw new ValidationError(`Invalid helper path "${helperPath}": ${helperError}`);
+    throw new ValidationError(
+      `Invalid helper path "${helperPath}": ${helperError}`,
+    );
   }
 
   // Generator-output resolution — the single source of truth for the plan
@@ -353,7 +368,6 @@ export function planDatabase(
   const seedSelected = resolveDatabaseScripts(
     answers.databaseScripts,
     provider.key,
-    providerDataLocal,
   ).includes(SEED_SCRIPT_NAME);
   if (
     seedSelected &&
@@ -489,9 +503,10 @@ export function planDatabase(
     // carriage returns, shell metacharacters).
     envDatabaseUrlLine:
       provider.key === "sqlite"
-        ? `DATABASE_URL="${sanitizeEnvValue(answers.databaseUrl as string ?? "file:./dev.db")}"`
-        : answers.databaseUrl !== undefined
-          ? `DATABASE_URL="${sanitizeEnvValue(answers.databaseUrl as string)}"`
+        ? `DATABASE_URL="${sanitizeEnvValue((answers.databaseUrl as string) ?? "file:./dev.db")}"`
+        : typeof answers.databaseUrl === "string" &&
+            answers.databaseUrl.trim() !== ""
+          ? `DATABASE_URL="${sanitizeEnvValue(answers.databaseUrl)}"`
           : "DATABASE_URL=",
     helperPath,
     generatedClientImport,
@@ -501,7 +516,7 @@ export function planDatabase(
 
 /** Runs the interactive part of the customize branch (the multiselect). */
 async function promptCustomScripts(providerKey: string): Promise<string[]> {
-  const offered = providerScripts(providerKey, providerDataLocal);
+  const offered = providerScripts(providerKey);
   const selected = await multiselect({
     message: "Select database scripts to add",
     options: offered.map((name) => ({
@@ -509,7 +524,7 @@ async function promptCustomScripts(providerKey: string): Promise<string[]> {
       label: name,
       hint: databaseScriptCatalog[name].hint,
     })),
-    initialValues: recommendedScripts(providerKey, providerDataLocal),
+    initialValues: recommendedScripts(providerKey),
     required: false,
   });
   if (isCancel(selected)) {
@@ -738,11 +753,15 @@ export async function executeDatabase(
         const hint = installerFailureHint(installResult);
         if (installResult.reason === "build-script-blocked") {
           // Extract blocked package names from the hint/output
-          const blockedMatch = installResult.output.match(/build scripts for ([\w@\/,-]+) \(blocked/);
+          const blockedMatch = installResult.output.match(
+            /build scripts for ([\w@/,-]+) \(blocked/,
+          );
           const blockedPackages = blockedMatch
             ? blockedMatch[1].split(", ")
             : ["unknown"];
-          throw new BuildBlockedError(blockedPackages, { cause: new Error(hint) });
+          throw new BuildBlockedError(blockedPackages, {
+            cause: new Error(hint),
+          });
         }
         throw new InstallerFailureError(
           installResult.reason,
@@ -852,12 +871,13 @@ export async function executeDatabase(
       let prismaArgs = prismaArgsInitial;
 
       // Workaround for @antfu/ni issue with dlx commands
-      // When args starts with ["prisma@7", "init"], some versions incorrectly resolve to "<agent> add ..."
+      // When args starts with ["prisma@7.10.0", "init"], some versions incorrectly resolve to "<agent> add ..."
       // Built from the same contract as the primary path (see prismaInitArguments).
       const originalArgs = [...prismaInitArguments];
+      const pinnedPrismaSpec = `prisma@${PRISMA_PINNED_VERSION}`;
       if (
         originalArgs.length >= 2 &&
-        originalArgs[0] === "prisma@7" &&
+        originalArgs[0] === pinnedPrismaSpec &&
         originalArgs[1] === "init" &&
         prismaArgs.includes("add")
       ) {
@@ -897,23 +917,23 @@ export async function executeDatabase(
       } catch (executeError) {
         s.stop(`Failed to initialize Prisma`);
         // Capture stdout/stderr from the error for diagnostics.
-        const errorOutput = executeError instanceof Error
-          ? (executeError as any).stdout ?? (executeError as any).stderr ?? ""
-          : "";
+        const errorOutput =
+          executeError instanceof Error && "stdout" in executeError
+            ? ((executeError as ExecaError).stdout ??
+              (executeError as ExecaError).stderr ??
+              "")
+            : "";
         const errorMessage =
-          executeError instanceof Error ? executeError.message : String(executeError);
+          executeError instanceof Error
+            ? executeError.message
+            : String(executeError);
         // Include captured output in the error message for actionable diagnostics.
         const fullMessage = errorOutput
           ? `${errorMessage}\n\nCaptured output:\n${errorOutput}`
           : errorMessage;
-        throw new SpawnError(
-          prismaCmd,
-          prismaArgs,
-          fullMessage,
-          {
-            cause: executeError instanceof Error ? executeError : undefined,
-          },
-        );
+        throw new SpawnError(prismaCmd, prismaArgs, fullMessage, {
+          cause: executeError instanceof Error ? executeError : undefined,
+        });
       }
     } catch (error) {
       throw new SpawnError(
@@ -1023,9 +1043,7 @@ export async function executeDatabase(
           })) as string)
         : undefined;
       const lines =
-        typeof gitignoreText === "string"
-          ? gitignoreText.split(/\r?\n/)
-          : [];
+        typeof gitignoreText === "string" ? gitignoreText.split(/\r?\n/) : [];
       const coversEnv = lines.some((line) =>
         [".env", ".env*", "*.env"].includes(line.trimEnd()),
       );
@@ -1058,9 +1076,7 @@ export async function executeDatabase(
         })) as string)
       : undefined;
     const lines =
-      typeof gitignoreText === "string"
-        ? gitignoreText.split(/\r?\n/)
-        : [];
+      typeof gitignoreText === "string" ? gitignoreText.split(/\r?\n/) : [];
     const coversEnv = lines.some((line) =>
       [".env", ".env*", "*.env"].includes(line.trimEnd()),
     );
@@ -1072,11 +1088,12 @@ export async function executeDatabase(
   // Step 3d: Run prisma db push to initialize the database with the schema.
   // This MUST run after .env reconciliation (Step 3b) so that DATABASE_URL
   // is correctly configured. For SQLite, this creates the dev.db file and
-  // applies the schema. For server providers, prisma db push is NOT run -
-  // they use migrations (prisma migrate dev) or external workflows instead.
-  // This step is required on every run (fresh or reconcile) for SQLite
-  // because schema changes between runs would leave the database stale.
-  // `prisma db push` is idempotent on an unchanged schema (verified empirically).
+  // applies the schema. For server providers, prisma db push is NOT run by
+  // DXG — users who need migrations run the Prisma CLI directly (prisma
+  // migrate dev) or use external workflows. This step is required on every
+  // run (fresh or reconcile) for SQLite because schema changes between runs
+  // would leave the database stale. `prisma db push` is idempotent on an
+  // unchanged schema (verified empirically).
   if (!ctx.dryRun && planToUse.provider === "sqlite") {
     try {
       const s = spinner();
@@ -1110,7 +1127,7 @@ export async function executeDatabase(
       // Same @antfu/ni "dlx resolved as add" mis-resolution guard as init/generate.
       if (pushArgs.includes("add")) {
         pushCmd = "npx";
-        pushArgs = ["prisma@7", "db", "push"];
+        pushArgs = [`prisma@${PRISMA_PINNED_VERSION}`, "db", "push"];
       }
 
       // Same pnpm dlx build approval as init/generate.
@@ -1133,23 +1150,23 @@ export async function executeDatabase(
       } catch (executeError) {
         s.stop(`Failed to push schema to database`);
         // Capture stdout/stderr from the error for diagnostics.
-        const errorOutput = executeError instanceof Error
-          ? (executeError as any).stdout ?? (executeError as any).stderr ?? ""
-          : "";
+        const errorOutput =
+          executeError instanceof Error && "stdout" in executeError
+            ? ((executeError as ExecaError).stdout ??
+              (executeError as ExecaError).stderr ??
+              "")
+            : "";
         const errorMessage =
-          executeError instanceof Error ? executeError.message : String(executeError);
+          executeError instanceof Error
+            ? executeError.message
+            : String(executeError);
         // Include captured output in the error message for actionable diagnostics.
         const fullMessage = errorOutput
           ? `${errorMessage}\n\nCaptured output:\n${errorOutput}`
           : errorMessage;
-        throw new SpawnError(
-          pushCmd,
-          pushArgs,
-          fullMessage,
-          {
-            cause: executeError instanceof Error ? executeError : undefined,
-          },
-        );
+        throw new SpawnError(pushCmd, pushArgs, fullMessage, {
+          cause: executeError instanceof Error ? executeError : undefined,
+        });
       }
     } catch (error) {
       throw new SpawnError(
@@ -1193,7 +1210,7 @@ export async function executeDatabase(
 
       const generateResolved = await getCliCommand(
         parseNlx,
-        ["prisma@7", "generate", "--no-hints"],
+        ["prisma@7.10.0", "generate", "--no-hints"],
         {
           cwd: process.cwd(),
           programmatic: true,
@@ -1224,7 +1241,11 @@ export async function executeDatabase(
       // fire: a mis-resolved command starts with "add".
       if (generateArgs.includes("add")) {
         generateCmd = "npx";
-        generateArgs = ["prisma@7", "generate", "--no-hints"];
+        generateArgs = [
+          `prisma@${PRISMA_PINNED_VERSION}`,
+          "generate",
+          "--no-hints",
+        ];
       }
 
       // Same pnpm dlx build approval as init (install-layer adapter): the
@@ -1251,23 +1272,23 @@ export async function executeDatabase(
       } catch (executeError) {
         s.stop(`Failed to generate Prisma Client`);
         // Capture stdout/stderr from the error for diagnostics.
-        const errorOutput = executeError instanceof Error
-          ? (executeError as any).stdout ?? (executeError as any).stderr ?? ""
-          : "";
+        const errorOutput =
+          executeError instanceof Error && "stdout" in executeError
+            ? ((executeError as ExecaError).stdout ??
+              (executeError as ExecaError).stderr ??
+              "")
+            : "";
         const errorMessage =
-          executeError instanceof Error ? executeError.message : String(executeError);
+          executeError instanceof Error
+            ? executeError.message
+            : String(executeError);
         // Include captured output in the error message for actionable diagnostics.
         const fullMessage = errorOutput
           ? `${errorMessage}\n\nCaptured output:\n${errorOutput}`
           : errorMessage;
-        throw new SpawnError(
-          generateCmd,
-          generateArgs,
-          fullMessage,
-          {
-            cause: executeError instanceof Error ? executeError : undefined,
-          },
-        );
+        throw new SpawnError(generateCmd, generateArgs, fullMessage, {
+          cause: executeError instanceof Error ? executeError : undefined,
+        });
       }
     } catch (error) {
       throw new SpawnError(
@@ -1313,7 +1334,6 @@ export async function executeDatabase(
   const selectedScripts = resolveDatabaseScripts(
     answers.databaseScripts,
     planToUse.provider,
-    providerDataLocal,
   );
   if (selectedScripts.length === 0) {
     // "Skip" (or an empty customize selection): package.json is left
@@ -1437,7 +1457,9 @@ export async function executeDatabase(
         encoding: "utf8",
       })) as string;
     } catch (error) {
-      throw new TemplateMissingError(templatePath, { cause: error instanceof Error ? error : undefined });
+      throw new TemplateMissingError(templatePath, {
+        cause: error instanceof Error ? error : undefined,
+      });
     }
 
     const rendered = ctx.templates.render(template, data);
@@ -1521,7 +1543,9 @@ export async function verifyDatabase(
   for (const { path } of planToUse.filesToCreate) {
     const exists = await fs.pathExists(path);
     if (!exists) {
-      throw new ValidationError(`Expected file missing after generation: ${path}`);
+      throw new ValidationError(
+        `Expected file missing after generation: ${path}`,
+      );
     }
   }
 
@@ -1564,10 +1588,9 @@ export async function verifyDatabase(
       }
     }
     if (!bindingFound) {
-      throw new BuildBlockedError(
-        ["better-sqlite3"],
-        { cause: new Error("Native binding not found after install") },
-      );
+      throw new BuildBlockedError(["better-sqlite3"], {
+        cause: new Error("Native binding not found after install"),
+      });
     }
   }
 
@@ -1614,7 +1637,7 @@ export function summarizeDatabase(options: SummarizeDatabaseOptions): void {
   if (detectedProvider !== undefined) {
     const detectedLine = detectedProvider
       ? `Prisma provider: ${detectedProvider}`
-      : "Prisma provider: (non déterminé)";
+      : "Prisma provider: (not determined)";
     const requestedLine = requestedProvider
       ? `Requested: ${requestedProvider}`
       : "Requested: (inconnu)";
@@ -1627,9 +1650,11 @@ export function summarizeDatabase(options: SummarizeDatabaseOptions): void {
     }
 
     sections.push(
-      ["Detected:", `  • ${detectedLine}`, `  • ${requestedLine}${matchStatus}`].join(
-        "\n",
-      ),
+      [
+        "Detected:",
+        `  • ${detectedLine}`,
+        `  • ${requestedLine}${matchStatus}`,
+      ].join("\n"),
     );
   }
 
@@ -1658,7 +1683,7 @@ export function summarizeDatabase(options: SummarizeDatabaseOptions): void {
   // coherently instead of note-by-note narration.
   if (wouldRun && wouldRun.length > 0) {
     sections.push(
-      ["Would run:", ...wouldRun.map((op) => `  • ${op}`)].join("\n")
+      ["Would run:", ...wouldRun.map((op) => `  • ${op}`)].join("\n"),
     );
   }
 
@@ -1695,8 +1720,14 @@ export const databaseGenerator: Generator = {
 
     // Check if provider is supported (fail fast with dedicated error code)
     const supportedProviders = Object.keys(providerDataLocal);
-    if (normalizedProvider !== undefined && !providerDataLocal[normalizedProvider as keyof typeof providerDataLocal]) {
-      throw new ProviderUnsupportedError(normalizedProvider, supportedProviders);
+    if (
+      normalizedProvider !== undefined &&
+      !providerDataLocal[normalizedProvider as keyof typeof providerDataLocal]
+    ) {
+      throw new ProviderUnsupportedError(
+        normalizedProvider,
+        supportedProviders,
+      );
     }
 
     // ============================================================
@@ -1720,7 +1751,7 @@ export const databaseGenerator: Generator = {
     // STEP 3: Inspect project state BEFORE prompts (for idempotence)
     // ============================================================
     // We need the provider to inspect correctly (provider-specific deps, env handling)
-    const providerForInspection = ((answers.provider as string) ?? "sqlite");
+    const providerForInspection = (answers.provider as string) ?? "sqlite";
     const inspection = await inspectDatabase(ctx, providerForInspection);
 
     // ============================================================
@@ -1730,15 +1761,18 @@ export const databaseGenerator: Generator = {
     const needsProvider = answers.provider === undefined;
     const needsSkillsAnswer = answers.installPrismaSkills === undefined;
     // Check if scripts are already configured in package.json
-    const packageJsonForScripts = await ctx.fs.readJson<
-      Record<string, unknown> & { scripts?: Record<string, string> }
-    >("package.json").catch(() => undefined);
+    const packageJsonForScripts = await ctx.fs
+      .readJson<
+        Record<string, unknown> & { scripts?: Record<string, string> }
+      >("package.json")
+      .catch(() => undefined);
     const existingScripts = packageJsonForScripts?.scripts ?? {};
-    const recommendedScriptNames = recommendedScripts(providerForInspection, providerDataLocal);
+    const recommendedScriptNames = recommendedScripts(providerForInspection);
     const hasAllRecommendedScripts = recommendedScriptNames.every(
       (name) => existingScripts[name] === databaseScriptCatalog[name].command,
     );
-    const needsScriptsAnswer = answers.databaseScripts === undefined && !hasAllRecommendedScripts;
+    const needsScriptsAnswer =
+      answers.databaseScripts === undefined && !hasAllRecommendedScripts;
 
     // Only prompt in interactive mode (not dry-run and not CI)
     const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
@@ -1777,25 +1811,32 @@ export const databaseGenerator: Generator = {
     }
 
     // After provider is known (either from CLI or prompt), check if databaseUrl is needed
-    // databaseUrl prompt is needed when provider is sqlite, not provided, AND no existing DATABASE_URL in .env
+    // databaseUrl prompt is needed for ALL providers when not provided AND no existing DATABASE_URL in .env
+    const isServerProvider = answers.provider !== "sqlite";
     const needsDatabaseUrl =
-      answers.provider === "sqlite" &&
-      answers.databaseUrl === undefined &&
-      !inspection.envHasDatabaseUrl;
+      answers.databaseUrl === undefined && !inspection.envHasDatabaseUrl;
 
-    // Second: prompt for remaining fields (databaseUrl if sqlite, skills, databaseScripts)
+    // Second: prompt for remaining fields (databaseUrl for all providers, skills, databaseScripts)
     if (
       shouldPrompt &&
       (needsDatabaseUrl || needsSkillsAnswer || needsScriptsAnswer)
     ) {
       const promptQuestions = [];
 
-      // databaseUrl prompt: conditional on provider being sqlite
+      // databaseUrl prompt: for all providers when needed
       if (needsDatabaseUrl) {
         const databaseUrlPrompt = { ...databasePrompts[1] };
-        // Set prefilled value based on provider
-        databaseUrlPrompt.initialValue = "file:./dev.db";
-        databaseUrlPrompt.default = "file:./dev.db";
+        // Set prefilled value based on provider using providerPlaceholders
+        const { providerPlaceholders } = await import("@dxgjs/database-meta");
+        const placeholder =
+          providerPlaceholders[answers.provider as string] ?? "";
+        databaseUrlPrompt.initialValue = placeholder;
+        databaseUrlPrompt.default = placeholder;
+        // Add helpful hint for server providers
+        if (isServerProvider) {
+          databaseUrlPrompt.message +=
+            " (format: see template — replace USER/PASSWORD/HOST/DATABASE)";
+        }
         promptQuestions.push(databaseUrlPrompt);
       }
       if (needsSkillsAnswer) {
@@ -1821,14 +1862,12 @@ export const databaseGenerator: Generator = {
       }
     }
 
-    // Non-interactive / dry-run / CLI: provide default databaseUrl for sqlite
+    // Non-interactive / dry-run / CLI: provide default databaseUrl for all providers
     // Only if no existing DATABASE_URL in .env (inspection.envHasDatabaseUrl)
-    if (
-      answers.provider === "sqlite" &&
-      answers.databaseUrl === undefined &&
-      !inspection.envHasDatabaseUrl
-    ) {
-      answers.databaseUrl = "file:./dev.db";
+    if (answers.databaseUrl === undefined && !inspection.envHasDatabaseUrl) {
+      const { providerPlaceholders } = await import("@dxgjs/database-meta");
+      answers.databaseUrl =
+        providerPlaceholders[answers.provider as string] ?? "";
     }
 
     if (answers.installPrismaSkills === undefined) {
@@ -1922,7 +1961,6 @@ export const databaseGenerator: Generator = {
         );
       }
 
-
       // GATE 3b: Provider installed but undetermined (unreadable schema).
       // Warn but continue — don't block, just inform.
       if (prismaState.installed && prismaState.provider === null) {
@@ -1955,7 +1993,9 @@ export const databaseGenerator: Generator = {
         // Show all valid helpers as hint
         helperPrompt.message += ` (found ${validHelperCount} existing: ${validHelpers.join(", ")})`;
         try {
-          const helperAnswer = await prompt([helperPrompt] as Parameters<typeof prompt>[0]);
+          const helperAnswer = await prompt([helperPrompt] as Parameters<
+            typeof prompt
+          >[0]);
           answers = { ...answers, ...helperAnswer };
         } catch (error) {
           if (isCancel(error)) {
@@ -1971,7 +2011,9 @@ export const databaseGenerator: Generator = {
       if (shouldPrompt && needsHelperPathNow && validHelperCount === 0) {
         const helperPrompt = databasePrompts[4]; // helper path prompt (index 4)
         try {
-          const helperAnswer = await prompt([helperPrompt] as Parameters<typeof prompt>[0]);
+          const helperAnswer = await prompt([helperPrompt] as Parameters<
+            typeof prompt
+          >[0]);
           answers = { ...answers, ...helperAnswer };
         } catch (error) {
           if (isCancel(error)) {
@@ -1979,7 +2021,11 @@ export const databaseGenerator: Generator = {
           }
           throw error;
         }
-      } else if (needsHelperPathNow && !shouldPrompt && validHelperCount === 0) {
+      } else if (
+        needsHelperPathNow &&
+        !shouldPrompt &&
+        validHelperCount === 0
+      ) {
         // Non-interactive mode with no valid helpers: use default
         answers.helperPath = DEFAULT_HELPER_PATH;
       }
@@ -2003,8 +2049,111 @@ export const databaseGenerator: Generator = {
         requestedProvider: answers.provider as string,
       });
 
-      // Outro
-      outro(`Database setup completed for ${answers.provider}!`);
+      // Outro — provider-specific, package-manager-aware guided next steps
+      const { providerPlaceholders } = await import("@dxgjs/database-meta");
+      const placeholder =
+        providerPlaceholders[answers.provider as string] ?? "";
+      const isSqlite = answers.provider === "sqlite";
+      const pm = ctx.awareness.packageManager;
+
+      // Package-manager-specific command prefixes
+      const pmCommands: Record<string, { run: string; exec: string }> = {
+        npm: { run: "npm run", exec: "npx" },
+        pnpm: { run: "pnpm", exec: "pnpm dlx" },
+        yarn: { run: "yarn", exec: "yarn dlx" },
+        bun: { run: "bun run", exec: "bunx" },
+      };
+      const cmds = pmCommands[pm] ?? pmCommands.npm;
+
+      const lines: string[] = ["", pc.bold("Next steps:"), ""];
+
+      if (isSqlite) {
+        lines.push(
+          "SQLite is ready — the dev.db file will be created on first migration.",
+          "",
+          `1. Push schema to database:`,
+          `   ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
+          "",
+          `2. Generate Prisma Client:`,
+          `   ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
+          "",
+          `3. Open Prisma Studio:`,
+          `   ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
+        );
+      } else {
+        lines.push(
+          "1. Configure your connection string",
+          `   Edit ${pc.cyan(".env")} and replace the placeholder:`,
+          `   ${pc.cyan(`DATABASE_URL="${placeholder}"`)}`,
+          "",
+          "2. Push schema to database:",
+          `   ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
+          "",
+          "3. Generate Prisma Client:",
+          `   ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
+          "",
+          "4. Open Prisma Studio:",
+          `   ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
+        );
+
+        // Provider-specific tips
+        if (answers.provider === "postgresql") {
+          lines.push(
+            "",
+            pc.dim(
+              "Tip: For Neon/Supabase: use pooled URL (port 6543) for CLI, direct URL (port 5432) for runtime via DIRECT_URL.",
+            ),
+          );
+        } else if (answers.provider === "planetscale") {
+          lines.push(
+            "",
+            pc.dim(
+              'Warning: PlanetScale requires `relationMode = "prisma"` in schema.prisma (MySQL protocol).',
+            ),
+            pc.dim(
+              "   Schema changes use PlanetScale's deploy request workflow, not prisma migrate.",
+            ),
+          );
+        } else if (answers.provider === "prismapostgres") {
+          lines.push(
+            "",
+            pc.dim(
+              "Tip: Prisma Postgres uses pooled connection: pooled.db.prisma.io (PgBouncer).",
+            ),
+            pc.dim("   Migrations use direct host: db.prisma.io."),
+          );
+        } else if (answers.provider === "cockroachdb") {
+          lines.push(
+            "",
+            pc.dim("Tip: CockroachDB uses port 26257 with sslmode=require."),
+          );
+        } else if (answers.provider === "mysql") {
+          lines.push(
+            "",
+            pc.dim(
+              "Tip: For SSL: add ?sslcert=./cert.pem&sslaccept=strict to the URL.",
+            ),
+          );
+        } else if (answers.provider === "sqlserver") {
+          lines.push(
+            "",
+            pc.dim(
+              "Tip: SQL Server uses semicolon syntax: sqlserver://user:pass@host:1433;database=db",
+            ),
+          );
+        }
+      }
+
+      lines.push(
+        "",
+        pc.dim(
+          `Docs: https://www.prisma.io/docs/orm/v7/core-concepts/supported-databases/${answers.provider}`,
+        ),
+      );
+
+      outro(
+        `Database setup completed for ${answers.provider}!${lines.join("\n")}`,
+      );
     } catch (error) {
       // Handle cancellation
       if (isCancel(error)) {

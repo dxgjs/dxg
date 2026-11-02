@@ -6,6 +6,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { Buffer } from "node:buffer";
 
 const gen = await import(
   pathToFileURL(

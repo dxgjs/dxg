@@ -1,13 +1,13 @@
 import { promises as fs } from 'fs';
 import * as fsSync from 'fs';
 
-type MkdirOptions = Parameters<typeof fs.mkdir>[1];
+export type MkdirOptions = Parameters<typeof fs.mkdir>[1];
 
-export async function mkdir(
+export function mkdir(
   filePath: Parameters<typeof fs.mkdir>[0],
   options?: MkdirOptions
-): Promise<ReturnType<typeof fs.mkdir>> {
-  return await fs.mkdir(filePath, options);
+): ReturnType<typeof fs.mkdir> {
+  return fs.mkdir(filePath, options);
 }
 
 export function mkdirSync(

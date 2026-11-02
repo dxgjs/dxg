@@ -277,7 +277,6 @@ describe("E2E: dxg add database — user-owned .env with real credentials is pre
         // 5. Verify .gitignore was NOT created/modified (user owns the hygiene decision)
         // Note: prisma init may create .gitignore, but DXG should not append .env
         // since DXG didn't write the .env file
-        const { existsSync } = await import("node:fs");
         // If .gitignore exists from prisma init, it may or may not have .env
         // The key assertion: DXG did not add .env to .gitignore
       });

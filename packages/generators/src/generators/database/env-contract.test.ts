@@ -170,7 +170,7 @@ vi.mock("@dxgjs/fs", async () => {
         }
         if (
           command === "npx" &&
-          args[0] === "prisma@7.10.0" &&
+          args[0]?.startsWith("prisma") &&
           args[1] === "init" &&
           !_files.has("prisma/schema.prisma")
         ) {
@@ -182,7 +182,7 @@ vi.mock("@dxgjs/fs", async () => {
         }
         if (
           command === "npx" &&
-          args[0] === "prisma@7.10.0" &&
+          args[0]?.startsWith("prisma") &&
           args[1] === "generate"
         ) {
           _files.set(
