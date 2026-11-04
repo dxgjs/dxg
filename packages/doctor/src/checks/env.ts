@@ -7,6 +7,7 @@
 import type { DoctorContext, DoctorCheckResult, DoctorCategory } from "../types";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { ensureGitignoreEntry } from "@dxgjs/ast";
 
 const ENV_CHECKS = {
   "env:dotenv-exists": {
@@ -262,7 +263,8 @@ async function checkDatabaseUrlFormat(ctx: DoctorContext): Promise<DoctorCheckRe
  */
 async function checkNoSecretsInGit(ctx: DoctorContext): Promise<DoctorCheckResult> {
   const envPath = join(ctx.cwd, ".env");
-  const gitignorePath = join(ctx.cwd, ".gitignore");
+  const _gitignorePath = join(ctx.cwd, ".gitignore");
+void _gitignorePath;
 
   // Check if .env is tracked by git
   try {
@@ -288,15 +290,7 @@ async function checkNoSecretsInGit(ctx: DoctorContext): Promise<DoctorCheckResul
             detail: "Add .env to .gitignore and rotate any exposed credentials",
             fixable: true,
             fix: async () => {
-              // Add .env to .gitignore
-              let gitignoreContent = "";
-              if (existsSync(gitignorePath)) {
-                gitignoreContent = readFileSync(gitignorePath, "utf-8");
-              }
-              if (!gitignoreContent.includes(".env")) {
-                gitignoreContent = gitignoreContent.trimEnd() + "\n.env\n";
-                await ctx.fs.writeFile(gitignorePath, gitignoreContent);
-              }
+              await ensureGitignoreEntry(ctx.fs, ".env");
               // Note: Cannot automatically rotate secrets - user must do this manually
             },
           };
@@ -312,14 +306,7 @@ async function checkNoSecretsInGit(ctx: DoctorContext): Promise<DoctorCheckResul
         detail: "Add .env to .gitignore to prevent committing secrets",
         fixable: true,
         fix: async () => {
-          let gitignoreContent = "";
-          if (existsSync(gitignorePath)) {
-            gitignoreContent = readFileSync(gitignorePath, "utf-8");
-          }
-          if (!gitignoreContent.includes(".env")) {
-            gitignoreContent = gitignoreContent.trimEnd() + "\n.env\n";
-            await ctx.fs.writeFile(gitignorePath, gitignoreContent);
-          }
+          await ensureGitignoreEntry(ctx.fs, ".env");
         },
       };
     }

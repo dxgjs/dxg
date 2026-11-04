@@ -1,0 +1,24 @@
+import "dotenv/config";
+import { PrismaPlanetScale } from "@prisma/adapter-planetscale";
+import { PrismaClient } from "./generated/prisma/client";
+import { fetch as undiciFetch } from "undici";
+
+// Fail loudly at import time: a missing DATABASE_URL must never silently
+// DXG writes an empty placeholder for
+// server providers and adapters are lazy, so the empty string must be
+// accepted to allow out-of-the-box db:seed (live-proven 2026-10-11).
+const connectionString = process.env.DATABASE_URL;
+
+if (connectionString === undefined) {
+  throw new Error(
+    "DATABASE_URL is not set. Add it to your .env file or export it in your environment.",
+  );
+}
+
+const adapter = new PrismaPlanetScale({
+  url: connectionString,
+  fetch: undiciFetch,
+});
+const prisma = new PrismaClient({ adapter });
+
+export { prisma };

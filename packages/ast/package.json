@@ -1,0 +1,47 @@
+{
+  "name": "@dxgjs/ast",
+  "version": "0.1.0",
+  "description": "AST manipulation utilities powered by Magicast for preserving formatting, comments, and structure when modifying config files",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./ts-injection": {
+      "types": "./dist/ts-injection.d.ts",
+      "import": "./dist/ts-injection.js"
+    },
+    "./json": {
+      "types": "./dist/json.d.ts",
+      "import": "./dist/json.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsup",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "json5": "^2.2.3",
+    "magicast": "^0.5.5"
+  },
+  "devDependencies": {
+    "@dxgjs/errors": "workspace:*",
+    "@dxgjs/eslint-config": "workspace:*",
+    "@dxgjs/fs": "workspace:*",
+    "@dxgjs/typescript-config": "workspace:*",
+    "@types/node": "^26.2.0",
+    "eslint": "^10.8.1",
+    "execa": "^10.0.1",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.10"
+  }
+}

@@ -15,6 +15,7 @@
 import type { DoctorContext, DoctorCheckResult, DoctorCategory } from "../types";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { addNpmScripts } from "@dxgjs/ast";
 
 const SCRIPTS_CHECKS = {
   "scripts:package-json-scripts": {
@@ -153,8 +154,7 @@ async function checkPrismaScripts(ctx: DoctorContext): Promise<DoctorCheckResult
       detail: "Run 'dxg add database' to add all 5 Prisma scripts",
       fixable: true,
       fix: async () => {
-        pkg.scripts = { ...scripts, ...requiredPrismaScripts };
-        await ctx.fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2));
+        await addNpmScripts(ctx.fs, requiredPrismaScripts);
       },
     };
   }
@@ -173,8 +173,7 @@ async function checkPrismaScripts(ctx: DoctorContext): Promise<DoctorCheckResult
         for (const name of otherMissing) {
           toAdd[name] = requiredPrismaScripts[name as keyof typeof requiredPrismaScripts];
         }
-        pkg.scripts = { ...scripts, ...toAdd };
-        await ctx.fs.writeFile(pkgPath, JSON.stringify(pkg, null, 2));
+        await addNpmScripts(ctx.fs, toAdd);
       },
     };
   }
