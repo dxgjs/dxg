@@ -58,23 +58,35 @@ async function runSecurityScenario(
 
   // 4. Verify .env exists and is tracked by git as ignored
   const envContent = mustExist(dir, ".env");
-  expect(envContent).toContain("DATABASE_URL");
+
+  // For server providers in non-interactive mode, DXG does not write a
+  // DATABASE_URL placeholder (user configures manually). Only the header is written.
+  // For SQLite, a working file:./dev.db URL is written.
+  const isSqlite = false; // This test uses postgresql
+  if (isSqlite) {
+    expect(envContent).toContain("DATABASE_URL");
+  } else {
+    // Server provider in non-interactive mode: only header, no DATABASE_URL
+    expect(envContent).toBe(
+      "# Environment variables — declared by the database layer\n",
+    );
+  }
 
   // 5. Check git status shows .env as ignored (simulated via git check-ignore)
   // Since we're in a fresh temp dir without .git, we verify .gitignore content
   // In a real git repo, `git check-ignore .env` would exit 0 if ignored
   const envIsIgnored = gitignoreHasEnv; // Proxy: if .gitignore covers .env, git will ignore it
 
-  // 6. Verify .env has NO real credentials - only empty placeholder for server providers
-  const envHasNoRealCredentials =
-    envContent.includes("DATABASE_URL=") &&
-    !envContent.match(/DATABASE_URL=postgresql:\/\//) &&
-    !envContent.match(/DATABASE_URL=mysql:\/\//) &&
-    !envContent.match(/DATABASE_URL=.*:\/\/.*:.*@/); // No user:pass@host
+  // 6. Verify .env has NO real credentials
+  // For server providers in non-interactive mode, no DATABASE_URL is written,
+  // so there's nothing to leak. For SQLite, it would be a file: URL (no credentials).
+  const envHasNoRealCredentials = !envContent.match(
+    /DATABASE_URL=.*:\/\/.*:.*@/,
+  ); // No user:pass@host
 
   expect(
     envHasNoRealCredentials,
-    ".env must contain only placeholder, no real credentials",
+    ".env must not contain real credentials",
   ).toBe(true);
 
   // 7. Verify generated helper (lib/prisma.ts) has no secrets

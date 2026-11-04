@@ -1,7 +1,6 @@
 import "dotenv/config";
-import { PrismaPlanetScale } from "@prisma/adapter-planetscale";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/prisma/client";
-import { fetch as undiciFetch } from "undici";
 
 // Fail loudly at import time: a missing DATABASE_URL must never silently
 // DXG writes an empty placeholder for
@@ -15,10 +14,7 @@ if (connectionString === undefined) {
   );
 }
 
-const adapter = new PrismaPlanetScale({
-  url: connectionString,
-  fetch: undiciFetch,
-});
+const adapter = new PrismaPg({ connectionString });
 const prisma = new PrismaClient({ adapter });
 
 export { prisma };

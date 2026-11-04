@@ -453,10 +453,14 @@ export function planDatabase(
   // State-aware decision markers (idempotence). Derived from the inspection
   // when present; a missing inspection (legacy callers, unit tests) keeps the
   // historical fresh-run behavior so nothing changes for existing callers.
+  // initRequired=true when schema.prisma is missing. If schema exists, prisma/
+  // folder exists and `prisma init` would fail (exits 1). If schema doesn't
+  // exist but config does, init runs to create the schema (clobbers config -
+  // known limitation), otherwise `prisma generate` fails loading the config.
   const initRequired =
     inspection === undefined
       ? true // fresh-run default: run init unconditionally (historical behavior)
-      : !(inspection.schemaExists || inspection.configExists);
+      : !inspection.schemaExists;
   const prismaDeclarationsSatisfied =
     inspection === undefined ? false : prismaSatisfied;
 
@@ -486,9 +490,10 @@ export function planDatabase(
     buildApprovalNames,
     filesToCreate,
     // Idempotence markers consumed by executeDatabase's gates and the
-    // operation summary. initRequired=false means schema.prisma OR
-    // prisma7.config.ts already exists: init would clobber user-owned
-    // config (verified empirically), so it is skipped instead.
+    // operation summary. initRequired=false means schema.prisma already exists:
+    // `prisma init` would fail (prisma/ folder exists). If schema is missing,
+    // init runs to create it (clobbers config if present - known limitation),
+    // otherwise `prisma generate` fails loading the config.
     initRequired,
     prismaDeclarationsSatisfied,
     generatorOutput,
@@ -824,15 +829,16 @@ export async function executeDatabase(
   }
 
   // Step 3: Execute Prisma initialization — GATED (idempotence). init runs
-  // ONLY when both prisma/schema.prisma AND prisma7.config.ts are absent:
+  // ONLY when prisma/schema.prisma is missing:
   // `prisma init` exits 1 when any prisma/ folder exists (even empty) and
   // CLOBBERS an existing prisma7.config.ts (both verified empirically).
-  // A second run therefore never re-inits; the skip is surfaced below.
+  // If schema is missing but config exists, init runs to create the schema
+  // (clobbers config - known limitation), otherwise `prisma generate` fails.
   const providerObj =
     providerDataLocal[planToUse.provider as keyof typeof providerDataLocal];
   if (!ctx.dryRun && !planToUse.initRequired) {
     result.skipped.push(
-      "Prisma initialization (schema.prisma or prisma7.config.ts already exists)",
+      "Prisma initialization (schema.prisma already exists)",
     );
   } else if (!ctx.dryRun) {
     try {
@@ -1335,7 +1341,7 @@ export async function executeDatabase(
     // wouldRun entries below reflect only what would actually execute.
     if (!planToUse.initRequired) {
       result.skipped.push(
-        "Prisma initialization (schema.prisma or prisma7.config.ts already exists)",
+        "Prisma initialization (schema.prisma already exists)",
       );
     }
     // Reflect the DXG-owned skills decision in the planned command:

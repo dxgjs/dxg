@@ -5,5 +5,5 @@ export default {
   clean: true,
   dts: true,
   format: ["esm"],
-  external: ["magicast"],
+  external: ["magicast", "@dxgjs/fs"],
 };

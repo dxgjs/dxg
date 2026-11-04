@@ -9,11 +9,5 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
-}
-
-model User {
-  id    Int     @id @default(autoincrement()) // Ou String @id @default(cuid()) / @default(uuid())
-  email String  @unique
-  name  String?
+  provider = "postgresql"
 }
