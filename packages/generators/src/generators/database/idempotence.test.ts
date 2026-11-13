@@ -211,7 +211,7 @@ vi.mock("@dxgjs/fs", async () => {
           }
           lastPrismaInitOutput = outputPathRelativeToPrisma;
           // Extract --datasource-provider from args
-          let provider = "sqlite"; // default
+          let provider = "postgresql"; // default
           const providerIndex = args.indexOf("--datasource-provider");
           if (providerIndex !== -1 && args[providerIndex + 1]) {
             provider = args[providerIndex + 1];

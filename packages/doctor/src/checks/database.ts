@@ -8,6 +8,23 @@ import type { DoctorContext, DoctorCheckResult, DoctorCategory } from "../types"
 import { readFileSync, existsSync } from "fs";
 import { join, dirname } from "path";
 import { toDisplayPath } from "../utils/paths";
+import {
+  SCHEMA_PATH,
+  PRISMA_CONFIG_PATH,
+  DEFAULT_HELPER_PATH,
+  DEFAULT_GENERATOR_OUTPUT,
+  SUPPORTED_PROVIDERS,
+  getProviderData,
+  isSupportedProvider,
+  extractProviderFromSchema,
+  extractProviderFromConfig,
+  normalizePrismaProvider,
+  parseGeneratorOutput,
+  resolveGeneratorOutput,
+  isValidPrismaClientHelper,
+  SEED_SCRIPT_NAME,
+  SEED_CONFIG_COMMAND,
+} from "@dxgjs/database-meta";
 
 const DATABASE_CHECKS = {
   "database:prisma-schema": {
@@ -49,9 +66,9 @@ const DATABASE_CHECKS = {
  */
 function findPrismaSchema(cwd: string): string | null {
   const possiblePaths = [
-    join(cwd, "prisma", "schema.prisma"),
-    join(cwd, "packages", "database", "prisma", "schema.prisma"),
-    join(cwd, "apps", "api", "prisma", "schema.prisma"),
+    join(cwd, SCHEMA_PATH),
+    join(cwd, "packages", "database", SCHEMA_PATH),
+    join(cwd, "apps", "api", SCHEMA_PATH),
   ];
 
   for (const path of possiblePaths) {
@@ -65,8 +82,8 @@ function findPrismaSchema(cwd: string): string | null {
  */
 function findPrismaConfig(cwd: string): string | null {
   const possiblePaths = [
-    join(cwd, "prisma7.config.ts"),
-    join(cwd, "prisma", "prisma7.config.ts"),
+    join(cwd, PRISMA_CONFIG_PATH),
+    join(cwd, "prisma", PRISMA_CONFIG_PATH),
   ];
 
   for (const path of possiblePaths) {
@@ -76,7 +93,7 @@ function findPrismaConfig(cwd: string): string | null {
 }
 
 /**
- * Extract provider from schema or config.
+ * Extract provider from schema or config using database-meta utilities.
  */
 function extractProvider(cwd: string): string | null {
   // Try schema first
@@ -84,8 +101,8 @@ function extractProvider(cwd: string): string | null {
   if (schemaPath) {
     try {
       const content = readFileSync(schemaPath, "utf-8");
-      const match = content.match(/provider\s*=\s*["'](\w+)["']/);
-      if (match) return match[1].toLowerCase();
+      const provider = extractProviderFromSchema(content);
+      if (provider) return normalizePrismaProvider(provider);
     } catch {
       // fall through
     }
@@ -96,15 +113,8 @@ function extractProvider(cwd: string): string | null {
   if (configPath) {
     try {
       const content = readFileSync(configPath, "utf-8");
-      // Prisma 7 config: datasourceProvider or datasource.provider
-      let match = content.match(/datasourceProvider\s*:\s*["']([^"']+)["']/);
-      if (match) return match[1].toLowerCase();
-      match = content.match(/datasource\s*:\s*\{([\s\S]*?)\}/);
-      if (match) {
-        const block = match[1];
-        const providerMatch = block.match(/provider\s*:\s*["']([^"']+)["']/);
-        if (providerMatch) return providerMatch[1].toLowerCase();
-      }
+      const provider = extractProviderFromConfig(content);
+      if (provider) return normalizePrismaProvider(provider);
     } catch {
       // fall through
     }
@@ -119,8 +129,8 @@ function extractProvider(cwd: string): string | null {
  */
 function findHelperFile(cwd: string): string | null {
   const possiblePaths = [
-    join(cwd, "lib", "prisma.ts"),
-    join(cwd, "src", "lib", "prisma.ts"),
+    join(cwd, DEFAULT_HELPER_PATH),
+    join(cwd, "src", DEFAULT_HELPER_PATH),
   ];
 
   for (const path of possiblePaths) {
@@ -243,6 +253,10 @@ async function checkProvider(ctx: DoctorContext): Promise<DoctorCheckResult> {
 
   if (!provider) {
     // Schema/config exists but no provider
+    // Try to determine provider from context (e.g., from DATABASE_URL or defaults)
+    // For now, we can only fix schema.prisma (not config)
+    const canFix = !!schemaPath && !configPath;
+
     return {
       id: "database:provider",
       name: DATABASE_CHECKS["database:provider"].name,
@@ -250,35 +264,78 @@ async function checkProvider(ctx: DoctorContext): Promise<DoctorCheckResult> {
       severity: "error",
       message: "No provider specified in Prisma schema or config",
       detail: "Run 'dxg add database' to configure a provider",
-      fixable: false,
+      fixable: canFix,
+      fix: canFix
+        ? async () => {
+            // Use AST to add provider to datasource block in schema.prisma
+            await fixProviderInSchema(ctx.cwd, schemaPath!);
+          }
+        : undefined,
     };
   }
 
-  const validProviders = [
-    "postgresql", "postgres", "mysql", "sqlite",
-    "sqlserver", "cockroachdb", "planetscale", "prismapostgres"
-  ];
-
-  if (!validProviders.includes(provider)) {
+  if (!isSupportedProvider(provider)) {
     return {
       id: "database:provider",
       name: DATABASE_CHECKS["database:provider"].name,
       category: "database",
       severity: "warn",
       message: `Unknown provider: ${provider}`,
-      detail: `Valid providers: ${validProviders.join(", ")}`,
+      detail: `Valid providers: ${SUPPORTED_PROVIDERS.join(", ")}`,
       fixable: false,
     };
   }
 
+  const providerData = getProviderData(provider);
   return {
     id: "database:provider",
     name: DATABASE_CHECKS["database:provider"].name,
     category: "database",
     severity: "ok",
-    message: `Provider configured: ${provider}`,
+    message: `Provider configured: ${providerData?.displayName ?? provider}`,
     fixable: false,
   };
+}
+
+/**
+ * AST-based fix: Add provider to datasource block in schema.prisma.
+ * Uses targeted string replacement since Prisma schema has its own syntax.
+ */
+async function fixProviderInSchema(_cwd: string, schemaPath: string): Promise<void> {
+  const { readFile, writeFile } = await import("@dxgjs/fs");
+
+  // Read the schema file
+  const contentResult = await readFile(schemaPath, "utf-8");
+  const content = typeof contentResult === "string" ? contentResult : new TextDecoder().decode(contentResult);
+
+  // Check if there's already a provider in the datasource block
+  const hasProvider = /datasource\s+\w+\s*\{[\s\S]*?provider\s*=/.test(content);
+
+  if (!hasProvider) {
+    // Determine provider from context (for now default to postgresql)
+    // In the future, we could infer from DATABASE_URL or other hints
+    const provider = "postgresql";
+
+    // Add provider to the datasource block
+    const updated = content.replace(
+      /(datasource\s+\w+\s*\{)([\s\S]*?)(\})/,
+      (_match: string, before: string, middle: string, after: string) => {
+        // Check if there's already a url line
+        const hasUrl = /url\s*=/.test(middle);
+        const indent = middle.match(/^\s*/)?.[0] || "  ";
+        const providerLine = `${indent}provider = "${provider}"`;
+        if (hasUrl) {
+          // Insert before url line
+          return before + "\n" + providerLine + "\n" + middle + after;
+        } else {
+          // Just add it
+          return before + "\n" + providerLine + "\n" + middle + after;
+        }
+      }
+    );
+
+    await writeFile(schemaPath, updated, "utf-8");
+  }
 }
 
 /**
@@ -301,16 +358,25 @@ async function checkPrismaClient(ctx: DoctorContext): Promise<DoctorCheckResult>
     };
   }
 
-  // Determine generator output path
-  // Priority: schema's generator.output > helper-derived default
-  let generatorOutput = "lib/prisma"; // default fallback
+  // Determine generator output path using database-meta utilities
+  // Priority: schema's generator.output > DEFAULT_GENERATOR_OUTPUT
+  let generatorOutput = DEFAULT_GENERATOR_OUTPUT;
+  let generatorBlockMissing = false;
+  let generatorOutputMissing = false;
 
   if (schemaPath) {
     try {
       const content = readFileSync(schemaPath, "utf-8");
-      const genMatch = content.match(/generator\s+\w+\s*\{[\s\S]*?output\s*=\s*["']([^"']+)["']/);
-      if (genMatch) {
-        generatorOutput = genMatch[1];
+      const { present, output } = parseGeneratorOutput(content);
+      if (!present) {
+        generatorBlockMissing = true;
+      } else if (!output) {
+        generatorOutputMissing = true;
+      } else {
+        const resolved = resolveGeneratorOutput(output);
+        if (resolved) {
+          generatorOutput = resolved;
+        }
       }
     } catch {
       // use default
@@ -352,6 +418,38 @@ async function checkPrismaClient(ctx: DoctorContext): Promise<DoctorCheckResult>
       pkg.dependencies?.["@prisma/client"] ||
       pkg.devDependencies?.["@prisma/client"]
     );
+  }
+
+  // Case 1: Generator block missing entirely - can fix by adding generator block
+  if (!found && !hasDependency && schemaPath && generatorBlockMissing) {
+    return {
+      id: "database:prisma-client",
+      name: DATABASE_CHECKS["database:prisma-client"].name,
+      category: "database",
+      severity: "warn",
+      message: "Prisma Client not generated and generator block missing in schema.prisma",
+      detail: "Run 'dxg add database' to add generator block with output path, then run 'pnpm prisma generate'",
+      fixable: true,
+      fix: async () => {
+        await fixGeneratorBlockInSchema(ctx.cwd, schemaPath!);
+      },
+    };
+  }
+
+  // Case 2: Generator block exists but output missing - can fix by adding output
+  if (!found && !hasDependency && schemaPath && generatorOutputMissing) {
+    return {
+      id: "database:prisma-client",
+      name: DATABASE_CHECKS["database:prisma-client"].name,
+      category: "database",
+      severity: "warn",
+      message: "Prisma Client not generated and generator output missing in schema.prisma",
+      detail: "Add output path to generator block, then run 'pnpm prisma generate'",
+      fixable: true,
+      fix: async () => {
+        await fixGeneratorOutputInSchema(ctx.cwd, schemaPath!);
+      },
+    };
   }
 
   if (!found && !hasDependency) {
@@ -397,6 +495,60 @@ async function checkPrismaClient(ctx: DoctorContext): Promise<DoctorCheckResult>
 }
 
 /**
+ * AST-based fix: Add generator block with output to schema.prisma.
+ * Uses targeted string replacement since Prisma schema has its own syntax.
+ */
+async function fixGeneratorBlockInSchema(_cwd: string, schemaPath: string): Promise<void> {
+  const { readFile, writeFile } = await import("@dxgjs/fs");
+
+  const contentResult = await readFile(schemaPath, "utf-8");
+  const content = typeof contentResult === "string" ? contentResult : new TextDecoder().decode(contentResult);
+
+  // Check if generator block already exists
+  const hasGeneratorBlock = /generator\s+client\s*\{/.test(content);
+  if (hasGeneratorBlock) return;
+
+  // Add generator block after datasource block
+  const updated = content.replace(
+    /(datasource\s+\w+\s*\{[\s\S]*?\})/,
+    (match) => match + "\n\ngenerator client {\n  provider = \"prisma-client-js\"\n  output   = \"" + DEFAULT_GENERATOR_OUTPUT + "\"\n}"
+  );
+
+  await writeFile(schemaPath, updated, "utf-8");
+}
+
+/**
+ * AST-based fix: Add output to existing generator block in schema.prisma.
+ * Uses targeted string replacement since Prisma schema has its own syntax.
+ */
+async function fixGeneratorOutputInSchema(_cwd: string, schemaPath: string): Promise<void> {
+  const { readFile, writeFile } = await import("@dxgjs/fs");
+
+  const contentResult = await readFile(schemaPath, "utf-8");
+  const content = typeof contentResult === "string" ? contentResult : new TextDecoder().decode(contentResult);
+
+  // Check if generator block exists but has no output
+  const generatorMatch = /generator\s+client\s*\{([\s\S]*?)\}/.exec(content);
+  if (!generatorMatch) return;
+
+  const block = generatorMatch[1];
+  const hasOutput = /output\s*=/.test(block);
+  if (hasOutput) return;
+
+  // Add output to the generator block
+  const updated = content.replace(
+    /(generator\s+client\s*\{)([\s\S]*?)(\})/,
+    (_match: string, before: string, middle: string, after: string) => {
+      const indent = middle.match(/^\s*/)?.[0] || "  ";
+      const outputLine = `${indent}output   = "${DEFAULT_GENERATOR_OUTPUT}"`;
+      return before + "\n" + middle + "\n" + outputLine + "\n" + after;
+    }
+  );
+
+  await writeFile(schemaPath, updated, "utf-8");
+}
+
+/**
  * Check if Prisma helper file exists (DXG-owned artifact).
  * Generator creates helper at resolved path with import to generated client.
  */
@@ -418,6 +570,10 @@ async function checkHelperFile(ctx: DoctorContext): Promise<DoctorCheckResult> {
   const helperPath = findHelperFile(ctx.cwd);
 
   if (!helperPath) {
+    // Try to determine provider for template selection
+    const provider = extractProvider(ctx.cwd) || "postgresql";
+    const providerData = getProviderData(provider);
+
     return {
       id: "database:helper-file",
       name: DATABASE_CHECKS["database:helper-file"].name,
@@ -425,25 +581,30 @@ async function checkHelperFile(ctx: DoctorContext): Promise<DoctorCheckResult> {
       severity: "warn",
       message: "Prisma helper file not found",
       detail: "Run 'dxg add database' to create the Prisma client helper (lib/prisma.ts)",
-      fixable: false, // Generator handles this
+      fixable: true,
+      fix: async () => {
+        await fixHelperFile(ctx.cwd, provider, providerData?.templateOutputPath || DEFAULT_HELPER_PATH);
+      },
     };
   }
 
   // Verify helper content imports generated client correctly
   try {
     const content = readFileSync(helperPath, "utf-8");
-    const hasClientImport = /from\s+["']\.\/generated\/prisma\/client["']/.test(content) ||
-      /from\s+["']@prisma\/client["']/.test(content);
-
-    if (!hasClientImport) {
+    if (!isValidPrismaClientHelper(content)) {
       return {
         id: "database:helper-file",
         name: DATABASE_CHECKS["database:helper-file"].name,
         category: "database",
         severity: "warn",
-        message: "Prisma helper exists but may not import generated client correctly",
-        detail: `Check ${toDisplayPath(helperPath, ctx.cwd)} for valid client import`,
-        fixable: false,
+        message: "Prisma helper exists but does not match expected pattern",
+        detail: `Check ${toDisplayPath(helperPath, ctx.cwd)} for valid PrismaClient helper structure`,
+        fixable: true,
+        fix: async () => {
+          const provider = extractProvider(ctx.cwd) || "postgresql";
+          const providerData = getProviderData(provider);
+          await fixHelperFile(ctx.cwd, provider, providerData?.templateOutputPath || DEFAULT_HELPER_PATH);
+        },
       };
     }
   } catch {
@@ -458,6 +619,207 @@ async function checkHelperFile(ctx: DoctorContext): Promise<DoctorCheckResult> {
     message: `Prisma helper found at ${toDisplayPath(helperPath, ctx.cwd)}`,
     fixable: false,
   };
+}
+
+/**
+ * AST-based fix: Create Prisma helper file from template.
+ * Uses targeted file creation with proper import path calculation.
+ */
+async function fixHelperFile(
+  cwd: string,
+  provider: string,
+  helperPath: string
+): Promise<void> {
+  const { writeFile, mkdir } = await import("@dxgjs/fs");
+
+  // Template selection based on provider
+  const isSqlite = provider === "sqlite";
+  const isMySQL = provider === "mysql";
+  const isSqlServer = provider === "sqlserver";
+  const isPlanetScale = provider === "planetscale";
+
+  // Build the helper template based on provider
+  // This mirrors the templates in generators/database/templates/
+  let template = "";
+
+  if (isSqlite) {
+    // SQLite template uses BetterSqlite3 adapter
+    template = generateSqliteHelper();
+  } else if (isMySQL) {
+    // MySQL template uses MariaDB adapter with individual params
+    template = generateMySQLHelper();
+  } else if (isSqlServer) {
+    // SQL Server template uses MSSQL adapter
+    template = generateSQLServerHelper();
+  } else if (isPlanetScale) {
+    // PlanetScale template uses PlanetScale adapter
+    template = generatePlanetScaleHelper();
+  } else {
+    // Default (PostgreSQL, CockroachDB, Prisma Postgres) - connection string
+    template = generateDefaultHelper();
+  }
+
+  // Ensure directory exists
+  const fullHelperPath = join(cwd, helperPath);
+  const helperDirPath = dirname(fullHelperPath);
+  await mkdir(helperDirPath, { recursive: true });
+
+  await writeFile(fullHelperPath, template, "utf-8");
+}
+
+/**
+ * Generate default helper template (PostgreSQL, CockroachDB, Prisma Postgres).
+ */
+function generateDefaultHelper(): string {
+  return `import { PrismaClient } from "@prisma/client";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const adapter = new PrismaPg(pool);
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+  });
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+`;
+}
+
+/**
+ * Generate SQLite helper template.
+ */
+function generateSqliteHelper(): string {
+  return `import { PrismaClient } from "@prisma/client";
+import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import Database from "better-sqlite3";
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+const sqlite = new Database(process.env.DATABASE_URL?.replace("file:", "") ?? "./dev.db");
+const adapter = new PrismaBetterSqlite3(sqlite);
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+  });
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+`;
+}
+
+/**
+ * Generate MySQL helper template.
+ */
+function generateMySQLHelper(): string {
+  return `import { PrismaClient } from "@prisma/client";
+import { PrismaMariaDb } from "@prisma/adapter-mariadb";
+import { createPool } from "mariadb";
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+const pool = createPool({
+  host: process.env.DATABASE_HOST,
+  port: Number(process.env.DATABASE_PORT ?? "3306"),
+  user: process.env.DATABASE_USER,
+  password: process.env.DATABASE_PASSWORD,
+  database: process.env.DATABASE_NAME,
+  ssl: process.env.DATABASE_SSL === "true" ? { rejectUnauthorized: true } : undefined,
+});
+
+const adapter = new PrismaMariaDb(pool);
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+  });
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+`;
+}
+
+/**
+ * Generate SQL Server helper template.
+ */
+function generateSQLServerHelper(): string {
+  return `import { PrismaClient } from "@prisma/client";
+import { PrismaMssql } from "@prisma/adapter-mssql";
+import sql from "mssql";
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+const pool = new sql.ConnectionPool({
+  server: process.env.DATABASE_HOST,
+  port: Number(process.env.DATABASE_PORT ?? "1433"),
+  user: process.env.DATABASE_USER,
+  password: process.env.DATABASE_PASSWORD,
+  database: process.env.DATABASE_NAME,
+  options: {
+    encrypt: process.env.DATABASE_SSL === "true",
+    trustServerCertificate: true,
+  },
+});
+
+const adapter = new PrismaMssql(pool);
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+  });
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+`;
+}
+
+/**
+ * Generate PlanetScale helper template.
+ */
+function generatePlanetScaleHelper(): string {
+  return `import { PrismaClient } from "@prisma/client";
+import { PrismaPlanetScale } from "@prisma/adapter-planetscale";
+import { createPool } from "@planetscale/database";
+
+const globalForPrisma = globalThis as unknown as {
+  prisma: PrismaClient | undefined;
+};
+
+const pool = createPool({
+  host: process.env.DATABASE_HOST,
+  username: process.env.DATABASE_USER,
+  password: process.env.DATABASE_PASSWORD,
+  // PlanetScale uses fetch under the hood
+});
+
+const adapter = new PrismaPlanetScale(pool);
+
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    adapter,
+    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+  });
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+`;
 }
 
 /**
@@ -482,7 +844,8 @@ async function checkSqliteDbFile(ctx: DoctorContext): Promise<DoctorCheckResult[
   }
 
   // Only relevant for SQLite provider - return empty array for others
-  if (provider !== "sqlite") {
+  const sqliteProviderData = getProviderData("sqlite");
+  if (!sqliteProviderData || provider !== sqliteProviderData.key) {
     return [];
   }
 
@@ -530,12 +893,12 @@ async function checkSeedConfig(ctx: DoctorContext): Promise<DoctorCheckResult> {
     };
   }
 
-  // Check package.json for db:seed script
+  // Check package.json for db:seed script using constant from database-meta
   const pkgPath = join(ctx.cwd, "package.json");
   let hasSeedScript = false;
   if (existsSync(pkgPath)) {
     const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
-    hasSeedScript = !!pkg.scripts?.["db:seed"];
+    hasSeedScript = !!pkg.scripts?.[SEED_SCRIPT_NAME];
   }
 
   if (!hasSeedScript) {
@@ -564,7 +927,7 @@ async function checkSeedConfig(ctx: DoctorContext): Promise<DoctorCheckResult> {
 
   try {
     const content = readFileSync(configPath, "utf-8");
-    const hasSeed = /seed\s*:\s*["']([^"']+)["']/.test(content);
+    const hasSeed = new RegExp(`seed\\s*:\\s*["']${SEED_CONFIG_COMMAND.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(content);
 
     if (!hasSeed) {
       return {

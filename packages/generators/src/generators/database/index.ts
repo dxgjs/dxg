@@ -128,7 +128,7 @@ export const databasePrompts = [
     type: "select" as const,
     name: "provider",
     message: "Choose your database provider:",
-    default: "sqlite",
+    default: "postgresql",
     choices: Object.values(providerDataLocal).map((p) => ({
       name: p.displayName,
       value: p.key,
@@ -1788,7 +1788,7 @@ export const databaseGenerator: Generator = {
     // STEP 3: Inspect project state BEFORE prompts (for idempotence)
     // ============================================================
     // We need the provider to inspect correctly (provider-specific deps, env handling)
-    const providerForInspection = (answers.provider as string) ?? "sqlite";
+    const providerForInspection = (answers.provider as string) ?? "postgresql";
     const inspection = await inspectDatabase(ctx, providerForInspection);
 
     // ============================================================
@@ -1821,8 +1821,8 @@ export const databaseGenerator: Generator = {
 
     // First: prompt for provider if needed
     if (shouldPrompt && needsProvider) {
-      // Use existing Prisma provider as default if detected, otherwise sqlite
-      const providerDefault = prismaState.provider ?? "sqlite";
+      // Use existing Prisma provider as default if detected, otherwise postgresql
+      const providerDefault = prismaState.provider ?? "postgresql";
       const providerPrompt = {
         ...databasePrompts[0],
         default: providerDefault,

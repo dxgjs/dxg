@@ -8,6 +8,15 @@ import type { DoctorContext, DoctorCheckResult, DoctorCategory } from "../types"
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { ensureGitignoreEntry } from "@dxgjs/ast";
+import {
+  providerPlaceholders,
+  getProviderData,
+  isSupportedProvider,
+  extractProviderFromSchema,
+  extractProviderFromConfig,
+  normalizePrismaProvider,
+} from "@dxgjs/database-meta";
+import { SCHEMA_PATH, PRISMA_CONFIG_PATH } from "@dxgjs/database-meta";
 
 const ENV_CHECKS = {
   "env:dotenv-exists": {
@@ -27,6 +36,68 @@ const ENV_CHECKS = {
     category: "env" as DoctorCategory,
   },
 } as const;
+
+/**
+ * Find Prisma schema file.
+ */
+function findPrismaSchema(cwd: string): string | null {
+  const possiblePaths = [
+    join(cwd, SCHEMA_PATH),
+    join(cwd, "packages", "database", SCHEMA_PATH),
+    join(cwd, "apps", "api", SCHEMA_PATH),
+  ];
+
+  for (const path of possiblePaths) {
+    if (existsSync(path)) return path;
+  }
+  return null;
+}
+
+/**
+ * Find Prisma config file (prisma7.config.ts).
+ */
+function findPrismaConfig(cwd: string): string | null {
+  const possiblePaths = [
+    join(cwd, PRISMA_CONFIG_PATH),
+    join(cwd, "prisma", PRISMA_CONFIG_PATH),
+  ];
+
+  for (const path of possiblePaths) {
+    if (existsSync(path)) return path;
+  }
+  return null;
+}
+
+/**
+ * Extract provider from schema or config using database-meta utilities.
+ */
+function extractProvider(cwd: string): string | null {
+  // Try schema first
+  const schemaPath = findPrismaSchema(cwd);
+  if (schemaPath) {
+    try {
+      const content = readFileSync(schemaPath, "utf-8");
+      const provider = extractProviderFromSchema(content);
+      if (provider) return normalizePrismaProvider(provider);
+    } catch {
+      // fall through
+    }
+  }
+
+  // Try config
+  const configPath = findPrismaConfig(cwd);
+  if (configPath) {
+    try {
+      const content = readFileSync(configPath, "utf-8");
+      const provider = extractProviderFromConfig(content);
+      if (provider) return normalizePrismaProvider(provider);
+    } catch {
+      // fall through
+    }
+  }
+
+  return null;
+}
 
 /**
  * Check if .env file exists when needed (Prisma schema exists or DATABASE_URL referenced).
@@ -159,7 +230,7 @@ async function checkDatabaseUrl(ctx: DoctorContext): Promise<DoctorCheckResult> 
 }
 
 /**
- * Check DATABASE_URL format validity.
+ * Check DATABASE_URL format validity using provider-specific validation.
  */
 async function checkDatabaseUrlFormat(ctx: DoctorContext): Promise<DoctorCheckResult> {
   const envPath = join(ctx.cwd, ".env");
@@ -205,35 +276,84 @@ async function checkDatabaseUrlFormat(ctx: DoctorContext): Promise<DoctorCheckRe
     };
   }
 
+  // Detect provider from Prisma schema/config for provider-specific validation
+  const provider = extractProvider(ctx.cwd);
+  const providerData = provider && isSupportedProvider(provider) ? getProviderData(provider) : null;
+
   // Validate URL format
   try {
     const url = new URL(value);
-    const validProtocols = ["postgresql:", "postgres:", "mysql:", "sqlite:", "file:"];
-    if (!validProtocols.includes(url.protocol)) {
-      return {
-        id: "env:database-url-format",
-        name: ENV_CHECKS["env:database-url-format"].name,
-        category: "env",
-        severity: "warn",
-        message: `DATABASE_URL protocol "${url.protocol}" may not be supported`,
-        detail: "Supported: postgresql://, postgres://, mysql://, sqlite://, file://",
-        fixable: false,
-      };
-    }
 
-    if (url.protocol === "sqlite:" || url.protocol === "file:") {
-      // SQLite file path validation
-      const dbPath = url.pathname;
-      if (!dbPath || dbPath === "/") {
+    // Provider-specific protocol validation
+    if (providerData) {
+      const expectedProtocol = providerData.instantiationPattern === "connectionString"
+        ? (providerData.prismaProvider === "postgresql" ? "postgresql:" :
+           providerData.prismaProvider === "mysql" ? "mysql:" :
+           providerData.prismaProvider === "sqlite" ? "file:" : "postgresql:")
+        : null;
+
+      // For SQLite, both file: and sqlite: are valid
+      if (providerData.key === "sqlite") {
+        if (url.protocol !== "file:" && url.protocol !== "sqlite:") {
+          return {
+            id: "env:database-url-format",
+            name: ENV_CHECKS["env:database-url-format"].name,
+            category: "env",
+            severity: "warn",
+            message: `DATABASE_URL protocol "${url.protocol}" does not match SQLite provider`,
+            detail: `Expected file: or sqlite: for SQLite provider. Placeholder: ${providerPlaceholders.sqlite}`,
+            fixable: false,
+          };
+        }
+      } else if (expectedProtocol && url.protocol !== expectedProtocol) {
+        // For server providers, check protocol matches
+        // Allow both postgresql: and postgres: for PostgreSQL
+        const isPostgres = providerData.prismaProvider === "postgresql";
+        const protocolMatches = isPostgres
+          ? (url.protocol === "postgresql:" || url.protocol === "postgres:")
+          : url.protocol === expectedProtocol;
+
+        if (!protocolMatches) {
+          return {
+            id: "env:database-url-format",
+            name: ENV_CHECKS["env:database-url-format"].name,
+            category: "env",
+            severity: "warn",
+            message: `DATABASE_URL protocol "${url.protocol}" may not match ${providerData.displayName} provider`,
+            detail: `Expected ${expectedProtocol} for ${providerData.displayName}. Placeholder: ${providerPlaceholders[providerData.key]}`,
+            fixable: false,
+          };
+        }
+      }
+    } else {
+      // Fallback to generic validation when provider unknown
+      const validProtocols = ["postgresql:", "postgres:", "mysql:", "sqlite:", "file:"];
+      if (!validProtocols.includes(url.protocol)) {
         return {
           id: "env:database-url-format",
           name: ENV_CHECKS["env:database-url-format"].name,
           category: "env",
-          severity: "error",
-          message: "SQLite DATABASE_URL missing file path",
-          detail: "Use file:./dev.db or sqlite:./dev.db",
+          severity: "warn",
+          message: `DATABASE_URL protocol "${url.protocol}" may not be supported`,
+          detail: "Supported: postgresql://, postgres://, mysql://, sqlite://, file://",
           fixable: false,
         };
+      }
+
+      if (url.protocol === "sqlite:" || url.protocol === "file:") {
+        // SQLite file path validation
+        const dbPath = url.pathname;
+        if (!dbPath || dbPath === "/") {
+          return {
+            id: "env:database-url-format",
+            name: ENV_CHECKS["env:database-url-format"].name,
+            category: "env",
+            severity: "error",
+            message: "SQLite DATABASE_URL missing file path",
+            detail: "Use file:./dev.db or sqlite:./dev.db",
+            fixable: false,
+          };
+        }
       }
     }
 

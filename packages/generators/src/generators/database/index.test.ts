@@ -84,7 +84,7 @@ const defaultExecuteFake = vi.hoisted(() => {
         lastPrismaInitOutput = "../lib/generated/prisma";
       }
       // Extract --datasource-provider from args
-      let provider = "sqlite"; // default
+      let provider = "postgresql"; // default
       const providerIndex = args.indexOf("--datasource-provider");
       if (providerIndex !== -1 && args[providerIndex + 1]) {
         provider = args[providerIndex + 1];
@@ -467,7 +467,7 @@ describe("Database Generator", () => {
     expect(prompts[0].name).toBe("provider");
     expect(prompts[0].type).toBe("select");
     expect(prompts[0].message).toBe("Choose your database provider:");
-    expect(prompts[0].default).toBe("sqlite");
+    expect(prompts[0].default).toBe("postgresql");
     const choices = prompts[0].choices;
     expect(Array.isArray(choices)).toBe(true);
     expect(choices!.length).toBe(Object.values(providerDataValue).length); // 7 providers
