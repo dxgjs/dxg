@@ -19,8 +19,12 @@
     "dist",
     "bin"
   ],
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "build": "tsup",
+    "prepack": "pnpm build",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "lint": "eslint .",
     "test": "vitest run",

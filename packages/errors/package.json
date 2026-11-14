@@ -12,8 +12,15 @@
       "import": "./dist/index.js"
     }
   },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
   "scripts": {
     "build": "tsup",
+    "prepack": "pnpm build",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
