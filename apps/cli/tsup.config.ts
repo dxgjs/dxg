@@ -10,7 +10,6 @@ export default {
     "@dxgjs/errors",
     "@dxgjs/fs",
     "@dxgjs/generators",
-    "@dxgjs/logger",
     "@dxgjs/prompts",
     "@dxgjs/templates",
     "@dxgjs/workspace",
