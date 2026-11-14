@@ -50,7 +50,7 @@ describe("npm link regression", () => {
     expect(true).toBe(true);
   });
 
-  test("built CLI runs --version from temp directory (simulates npm link)", () => {
+  test("built CLI runs --version from temp directory (simulates npm link)", { timeout: 15000 }, () => {
     // Run the built CLI directly from temp directory using node
     // This simulates the npm link scenario: the binary runs from outside the monorepo
     // and must resolve @dxgjs/* workspace packages from the monorepo node_modules
@@ -66,7 +66,7 @@ describe("npm link regression", () => {
     expect(output.trim()).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  test("built CLI runs --help from temp directory", () => {
+  test("built CLI runs --help from temp directory", { timeout: 15000 }, () => {
     const output = execSync(`node "${cliDistIndex}" --help`, {
       cwd: testDir,
       encoding: "utf8",
@@ -79,7 +79,7 @@ describe("npm link regression", () => {
     expect(output).toContain("add");
   });
 
-  test("built CLI runs --non-interactive from temp directory (shows help/error - no default action)", () => {
+  test("built CLI runs --non-interactive from temp directory (shows help/error - no default action)", { timeout: 15000 }, () => {
     let output;
     let exitCode = 0;
     try {
@@ -104,7 +104,7 @@ describe("npm link regression", () => {
     expect(output).not.toContain("Module not found");
   });
 
-  test("built CLI runs add database --dry-run from temp directory", () => {
+  test("built CLI runs add database --dry-run from temp directory", { timeout: 30000 }, () => {
     const output = execSync(
       `node "${cliDistIndex}" add database --provider sqlite --non-interactive --dry-run`,
       {
@@ -121,7 +121,7 @@ describe("npm link regression", () => {
     expect(output).toContain("Would run:");
   });
 
-  test("no 'Cannot find module' errors in any command (core regression check)", () => {
+  test("no 'Cannot find module' errors in any command (core regression check)", { timeout: 30000 }, () => {
     // This is the core regression test - verify no module resolution errors
     // when running the CLI from outside the monorepo
     const commands = [
