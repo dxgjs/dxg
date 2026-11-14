@@ -8,6 +8,7 @@
     "build": "turbo run build",
     "changeset": "changeset",
     "check": "turbo run check",
+    "check:ci": "cross-env CI=true pnpm build && cross-env CI=true pnpm check",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
@@ -16,6 +17,7 @@
     "@changesets/changelog-github": "^1.0.0",
     "@changesets/cli": "^3.0.0",
     "@types/node": "^26.2.0",
+    "cross-env": "^10.1.0",
     "turbo": "^2.10.9",
     "typescript": "^7.0.2"
   },
