@@ -113,13 +113,4 @@ describe("prepareContext — package-manager single source of truth", () => {
     expect(mocks.createDependencyInstaller).not.toHaveBeenCalled();
     expect(context.installer).toBeUndefined();
   });
-
-  test("default log level is info (no verbose/quiet flags)", async () => {
-    mocks.detectPackageManagerAgent.mockResolvedValue("npm");
-    const context = await prepareContext({ ...baseOptions }, makeAwareness("npm"));
-
-    // minLevel is private on Logger; probe it through a structural cast
-    const logger = context.logger as unknown as { minLevel: unknown };
-    expect(logger.minLevel).toBe("info");
-  });
 });

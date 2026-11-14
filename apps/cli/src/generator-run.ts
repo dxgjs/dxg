@@ -1,5 +1,4 @@
 import { detectProjectAwareness, type ProjectAwareness } from "@dxgjs/workspace";
-import { Logger, type LogLevel } from "@dxgjs/logger";
 import { join, dirname } from "path";
 import {
   readFile,
@@ -80,13 +79,9 @@ function agentDisplayName(agent: PackageManagerAgent): string {
 }
 
 /**
- * Prepares the generator context with logger, fs, and templates
+ * Prepares the generator context with fs and templates
  */
 export async function prepareContext(options: CommanderOptions, awareness: ProjectAwareness) {
-  // Default log level is "info" (no verbose/quiet flags)
-  const minLevel: LogLevel = "info";
-
-  const logger = new Logger({ minLevel });
   // Provide FS functions from @dxgjs/fs (matching generators' FSInterface)
   // Note: executeCommand is intentionally omitted for security — it's only
   // added to the doctor context where it's needed, not exposed to generators.
@@ -128,7 +123,6 @@ export async function prepareContext(options: CommanderOptions, awareness: Proje
   }
 
   return {
-    logger,
     fs,
     templates: { render: templatesRender },
     awareness: agent

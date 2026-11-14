@@ -111,7 +111,6 @@ Examples:
           packageJson: awareness.packageJson,
           awareness,
           fs: doctorFs,
-          logger: context.logger,
           templates: context.templates,
           options: doctorOptions,
         };
