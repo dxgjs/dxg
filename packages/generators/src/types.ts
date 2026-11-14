@@ -1,4 +1,3 @@
-import { Logger } from "@dxgjs/logger";
 import type { ProjectAwareness } from "@dxgjs/workspace";
 import type { DependencyInstaller } from "./install/types";
 type FS = typeof import("@dxgjs/fs");
@@ -15,7 +14,6 @@ export interface FSInterface {
 }
 
 export interface GeneratorContext {
-  logger: Logger;
   fs: FSInterface;
   templates: {
     render: (template: string, data: Record<string, unknown>) => string;

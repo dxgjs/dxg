@@ -37,7 +37,6 @@ import {
   beforeAll,
   type Mock,
 } from "vitest";
-import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import { render as realRender } from "@dxgjs/templates";
 import type { FSInterface, Generator, GeneratorContext } from "../../types";
@@ -361,12 +360,6 @@ function makeContext(
   overrides: Partial<GeneratorContext> | Record<string, unknown> = {},
 ): GeneratorContext {
   return {
-    logger: {
-      info: vi.fn(),
-      error: vi.fn(),
-      warn: vi.fn(),
-      debug: vi.fn(),
-    } as unknown as Logger,
     fs,
     templates: {
       render: vi.fn(realRender),
