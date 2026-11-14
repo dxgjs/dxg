@@ -1,14 +1,11 @@
 import { readFile, stat } from "@dxgjs/fs";
   import { glob } from "@dxgjs/fs";
   import { join, dirname } from "path";
-  import { Logger } from "@dxgjs/logger";
   import type { PackageJson } from "./types";
   import {
     WorkspaceProject,
     WorkspaceResult,
   } from "./types";
-
-  const logger = new Logger({ minLevel: "info" });
 
   /**
    * Detect workspace configuration.
@@ -68,8 +65,8 @@ import { readFile, stat } from "@dxgjs/fs";
         typeof rootPackageJson.name !== "string" ||
         typeof rootPackageJson.private !== "boolean"
       ) {
-        logger.warn(
-          `Root package.json at ${rootPackageJsonPath} is missing required fields: name (string) and private (boolean)`,
+        console.warn(
+          `[WARN] Root package.json at ${rootPackageJsonPath} is missing required fields: name (string) and private (boolean)`,
         );
       }
     } catch (error) {
@@ -163,8 +160,8 @@ import { readFile, stat } from "@dxgjs/fs";
         projectNameToIndex.set(packageJson.name, projectIndex);
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        logger.warn(
-          `Failed to read package.json for project at ${projectPath}: ${msg}`,
+        console.warn(
+          `[WARN] Failed to read package.json for project at ${projectPath}: ${msg}`,
         );
       }
     }
@@ -202,8 +199,8 @@ import { readFile, stat } from "@dxgjs/fs";
         }
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        logger.warn(
-          `Failed to read package.json for dependency calculation at ${projectPath}: ${msg}`,
+        console.warn(
+          `[WARN] Failed to read package.json for dependency calculation at ${projectPath}: ${msg}`,
         );
       }
     }
