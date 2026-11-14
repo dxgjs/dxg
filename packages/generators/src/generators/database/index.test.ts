@@ -398,6 +398,9 @@ describe("Database Generator", () => {
 
   beforeEach(async () => {
     originalCwd = process.cwd();
+    // The generator skips prompts when CI is set (GitHub Actions always sets
+    // CI=true), which breaks every interactive-flow test below. Force it off.
+    vi.stubEnv("CI", "");
     // Create a temporary directory
     tempDir = path.join(
       os.tmpdir(),
@@ -442,6 +445,7 @@ describe("Database Generator", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     // Revert to original directory
     process.chdir(originalCwd);
     // Remove the temporary directory
