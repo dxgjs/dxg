@@ -178,13 +178,13 @@ export async function runPM(
   }
 }
 
-/** The real CLI: `dxg add database <flags>` through the built bin entry. */
+/** The real CLI: `dxg add db <flags>` through the built bin entry. */
 export function runDxg(
   dir: string,
   flags: string[],
   opts: { timeoutMs?: number } = {},
 ): Promise<RunResult> {
-  return runNode(CLI_BIN, ["add", "database", ...flags], {
+  return runNode(CLI_BIN, ["add", "db", ...flags], {
     cwd: dir,
     timeoutMs: opts.timeoutMs,
   });

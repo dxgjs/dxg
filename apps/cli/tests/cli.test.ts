@@ -96,7 +96,7 @@ describe("root command (dxg without subcommand shows help/error)", () => {
 
 describe("add command (dxg add <generator>)", () => {
   test("--dry-run AFTER the subcommand activates dry run", async () => {
-    await runCli(["add", "database", "--dry-run"]);
+    await runCli(["add", "db", "--dry-run"]);
 
     const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
@@ -106,7 +106,7 @@ describe("add command (dxg add <generator>)", () => {
   });
 
   test("--dry-run BEFORE the subcommand activates dry run too", async () => {
-    await runCli(["--dry-run", "add", "database"]);
+    await runCli(["--dry-run", "add", "db"]);
 
     const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
@@ -116,7 +116,7 @@ describe("add command (dxg add <generator>)", () => {
   });
 
   test("--non-interactive AFTER the subcommand reaches the generator context", async () => {
-    await runCli(["add", "database", "--non-interactive"]);
+    await runCli(["add", "db", "--non-interactive"]);
 
     const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
@@ -125,7 +125,7 @@ describe("add command (dxg add <generator>)", () => {
   });
 
   test("--non-interactive BEFORE the subcommand reaches the generator context too", async () => {
-    await runCli(["--non-interactive", "add", "database"]);
+    await runCli(["--non-interactive", "add", "db"]);
 
     const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
@@ -134,7 +134,7 @@ describe("add command (dxg add <generator>)", () => {
   });
 
   test("--force AFTER the subcommand reaches the generator context", async () => {
-    await runCli(["add", "database", "--force"]);
+    await runCli(["add", "db", "--force"]);
 
     const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
@@ -143,7 +143,7 @@ describe("add command (dxg add <generator>)", () => {
   });
 
   test("--provider is forwarded as a plain answer", async () => {
-    await runCli(["add", "database", "--provider", "postgresql"]);
+    await runCli(["add", "db", "--provider", "postgresql"]);
 
     const calls = vi.mocked(databaseGenerator.run).mock.calls;
     expect(calls).toHaveLength(1);
@@ -151,7 +151,16 @@ describe("add command (dxg add <generator>)", () => {
     expect(answers.provider).toBe("postgresql");
   });
 
-  test("add database dispatches to the database generator", async () => {
+  test("add db dispatches to the database generator", async () => {
+    await runCli(["add", "db", "--provider", "sqlite"]);
+
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
+    expect(calls).toHaveLength(1);
+    const [answers] = calls[0];
+    expect(answers.provider).toBe("sqlite");
+  });
+
+  test("add database (alias) dispatches to the same database generator", async () => {
     await runCli(["add", "database", "--provider", "sqlite"]);
 
     const calls = vi.mocked(databaseGenerator.run).mock.calls;
@@ -160,9 +169,30 @@ describe("add command (dxg add <generator>)", () => {
     expect(answers.provider).toBe("sqlite");
   });
 
+  test("both db and database trigger the exact same action", async () => {
+    // Run with "db"
+    await runCli(["add", "db", "--provider", "postgresql", "--dry-run"]);
+    const callsDb = vi.mocked(databaseGenerator.run).mock.calls;
+    expect(callsDb).toHaveLength(1);
+    const [answersDb] = callsDb[0];
+
+    // Reset mock
+    vi.clearAllMocks();
+
+    // Run with "database" (alias)
+    await runCli(["add", "database", "--provider", "postgresql", "--dry-run"]);
+    const callsDatabase = vi.mocked(databaseGenerator.run).mock.calls;
+    expect(callsDatabase).toHaveLength(1);
+    const [answersDatabase] = callsDatabase[0];
+
+    // Both should produce identical answers
+    expect(answersDatabase.provider).toBe(answersDb.provider);
+    expect(answersDatabase.dryRun).toBe(answersDb.dryRun);
+  });
+
   test("a positional directory argument after the generator is rejected", async () => {
     await expectCommanderError(
-      ["add", "database", "some-project"],
+      ["add", "db", "some-project"],
       "too many arguments for 'add'",
     );
   });
@@ -209,7 +239,7 @@ describe("add command (dxg add <generator>)", () => {
 
     const before = process.exitCode;
     try {
-      await runCli(["add", "database"]);
+      await runCli(["add", "db"]);
 
       // isCancel(CANCEL_STANDIN) is true (see the module-level mock): the
       // CLI must treat it as a clean user exit — no error print, no failure

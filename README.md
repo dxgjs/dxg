@@ -22,23 +22,26 @@ pnpm add -g @dxgjs/cli
 ## Usage
 
 ```bash
-dxg add database  # Add database setup with Prisma ORM
+dxg add db  # Add database setup with Prisma ORM
+# or
+dxg add database  # Alias, works identically
 ```
 
 ## Available Generators
 
-- `database` – Add database setup with Prisma ORM (SQLite, PostgreSQL, MySQL, SQL Server, CockroachDB, PlanetScale, Prisma Postgres)
+- `db` – Add database setup with Prisma ORM (SQLite, PostgreSQL, MySQL, SQL Server, CockroachDB, PlanetScale, Prisma Postgres)
+- `database` – Alias for `db`
 
 ## Options
 
-### `dxg add database`
+### `dxg add db` (also works with `dxg add database`)
 
 - `--provider <value>` – Specify database provider (sqlite|postgresql|mysql|sqlserver|cockroachdb|planetscale|prisma-postgres)
 - `--non-interactive` – Do not prompt for input; fail if required values are missing
 - `--dry-run` – Perform a dry run without making any changes
 - `--force` – Force overwrite of conflicting files
 
-### Global Options (available on `dxg` and `dxg add database`)
+### Global Options (available on `dxg` and `dxg add db`)
 
 - `--non-interactive` – Do not prompt for input; fail if required values are missing
 - `--dry-run` – Perform a dry run without making any changes

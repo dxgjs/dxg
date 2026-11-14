@@ -30,11 +30,11 @@ export function registerAddCommand(program: Command): void {
     .option("--force", "Force overwrite of conflicting files")
     .action(async (generatorName, _options, cmd) => {
       // Merge local options with the root's global options so flags given
-      // before the subcommand (e.g. `dxg --dry-run add database`) are honored
+      // before the subcommand (e.g. `dxg --dry-run add db`) are honored
       // too. Commander's root parser consumes the flag wherever it appears;
       // without this merge the action would only see options declared
       // locally on this command, and root-level flags would be silently
-      // dropped (the classic `dxg add database --dry-run` prompt bug).
+      // dropped (the classic `dxg add db --dry-run` prompt bug).
       const options = cmd.optsWithGlobals() as CommanderOptions;
 
       try {
@@ -44,8 +44,9 @@ export function registerAddCommand(program: Command): void {
         // Shared setup
         const awareness = await detectProjectAwarenessSilently(projectRoot);
 
-        // Get generator instance
+        // Get generator instance - support both "db" (primary) and "database" (alias)
         const generatorMap: Record<string, Generator> = {
+          db: databaseGenerator,
           database: databaseGenerator,
         };
 
