@@ -25,7 +25,6 @@
     "@dxgjs/database-meta": "workspace:*",
     "@dxgjs/errors": "workspace:*",
     "@dxgjs/fs": "workspace:*",
-    "@dxgjs/logger": "workspace:*",
     "@dxgjs/prompts": "workspace:*",
     "@dxgjs/workspace": "workspace:*",
     "picocolors": "^1.1.1"
