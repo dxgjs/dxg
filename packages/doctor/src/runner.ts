@@ -101,7 +101,7 @@ export async function applyFixes(
           }
           applied++;
         } catch (error) {
-          ctx.logger.error(
+          console.error(
             `Failed to apply fix for ${result.id}: ${error instanceof Error ? error.message : String(error)}`
           );
         }

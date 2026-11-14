@@ -4,7 +4,6 @@
  */
 
 import type { ProjectAwareness } from "@dxgjs/workspace";
-import type { Logger } from "@dxgjs/logger";
 import type { Stats } from "fs";
 
 /** Category of diagnostic check. */
@@ -77,8 +76,6 @@ export interface DoctorCheckOptions {
   awareness: ProjectAwareness;
   /** FS abstraction for reading/writing files. */
   fs: FSInterface;
-  /** Logger for output. */
-  logger: Logger;
   /** Template renderer. */
   templates: TemplateRenderer;
   /** CLI options merged with global options. */
@@ -115,8 +112,6 @@ export interface DoctorContext {
   awareness: ProjectAwareness;
   /** FS abstraction for reading/writing files. */
   fs: FSInterface;
-  /** Logger for output. */
-  logger: Logger;
   /** Template renderer. */
   templates: TemplateRenderer;
   /** CLI options merged with global options. */
