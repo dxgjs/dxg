@@ -1,10 +1,7 @@
 import { stat } from "@dxgjs/fs";
   import { join } from "path";
-  import { Logger } from "@dxgjs/logger";
   import type { PackageJson } from "./types";
   import { CapabilityInfo } from "./types";
-
-  const logger = new Logger({ minLevel: "info" });
 
   /**
    * Detect capabilities (tests, linting, formatting, CI, Docker).
@@ -91,8 +88,8 @@ import { stat } from "@dxgjs/fs";
       }
     } catch (error) {
       // Failed to read package.json, leave as false
-      logger.warn(
-        `Failed to read package.json for capability detection at ${projectRoot}: ${error instanceof Error ? error.message : String(error)}`,
+      console.warn(
+        `[WARN] Failed to read package.json for capability detection at ${projectRoot}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
 
