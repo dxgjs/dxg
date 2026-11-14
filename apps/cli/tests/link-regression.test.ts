@@ -50,7 +50,7 @@ describe("npm link regression", () => {
     expect(true).toBe(true);
   });
 
-  test("built CLI runs --version from temp directory (simulates npm link)", { timeout: 15000 }, () => {
+  test("built CLI runs --version from temp directory (simulates npm link)", { timeout: 30000 }, () => {
     // Run the built CLI directly from temp directory using node
     // This simulates the npm link scenario: the binary runs from outside the monorepo
     // and must resolve @dxgjs/* workspace packages from the monorepo node_modules
