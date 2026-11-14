@@ -37,7 +37,6 @@ import {
   beforeAll,
   type Mock,
 } from "vitest";
-import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import { render as realRender } from "@dxgjs/templates";
 import { note as noteMock } from "@dxgjs/prompts";
@@ -310,7 +309,7 @@ function makeContext(
       error: vi.fn(),
       warn: vi.fn(),
       debug: vi.fn(),
-    } as unknown as Logger,
+    },
     fs,
     templates: {
       render: vi.fn(realRender),

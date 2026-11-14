@@ -8,7 +8,6 @@ import {
   beforeAll,
   type Mock,
 } from "vitest";
-import { Logger } from "@dxgjs/logger";
 import * as fs from "@dxgjs/fs";
 import type { ReadFileOptions, WriteFileOptions, MkdirOptions } from "@dxgjs/fs";
 import { render as realRender } from "@dxgjs/templates";
@@ -922,7 +921,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const templatesMock = {
         // Real renderer semantics (delegates to @dxgjs/templates render):
@@ -1021,7 +1020,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const templatesMock = {
         // Real renderer semantics (delegates to @dxgjs/templates render):
@@ -1121,7 +1120,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const templatesMock = {
         // Real renderer semantics (delegates to @dxgjs/templates render).
@@ -1184,7 +1183,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const templatesMock = {
         render: vi.fn(realRender),
@@ -1260,7 +1259,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const templatesMock = {
         render: vi.fn(realRender),
@@ -1341,7 +1340,7 @@ describe("Database Generator", () => {
       });
 
       const context = {
-        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
         fs,
         templates: { render: vi.fn(realRender) },
         installer: makeInstaller(),
@@ -1415,7 +1414,7 @@ describe("Database Generator", () => {
       );
 
       const context = {
-        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
         fs,
         templates: { render: vi.fn(realRender) },
         installer: makeInstaller(),
@@ -1463,7 +1462,7 @@ describe("Database Generator", () => {
       workaroundFlags.triggerPrismaGenerateWorkaround = true;
 
       const context = {
-        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
         fs,
         templates: { render: vi.fn(realRender) },
         installer: makeInstaller(),
@@ -1507,7 +1506,7 @@ describe("Database Generator", () => {
       (fs.executeCommand as Mock).mockClear();
 
       const context = {
-        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
         fs,
         templates: { render: vi.fn(realRender) },
         installer: makeInstaller(),
@@ -1569,7 +1568,7 @@ describe("Database Generator", () => {
       (fs.executeCommand as Mock).mockClear();
 
       const context = {
-        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() } as unknown as Logger,
+        logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
         fs,
         templates: { render: vi.fn(realRender) },
         installer: makeInstaller(),
@@ -1624,7 +1623,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger,
+      },
       fs,
       templates: {
         // Real renderer semantics (delegates to @dxgjs/templates render).
@@ -1955,7 +1954,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const templatesMock = {
         // Real renderer semantics (delegates to @dxgjs/templates render).
@@ -2042,7 +2041,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const templatesMock = {
         // Real renderer semantics (delegates to @dxgjs/templates render).
@@ -2129,7 +2128,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const templatesMock = {
         // Real renderer semantics (delegates to @dxgjs/templates render).
@@ -2186,7 +2185,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const context = {
         logger: mockLogger,
@@ -2236,7 +2235,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const context = {
         logger: mockLogger,
@@ -2320,7 +2319,7 @@ describe("Database Generator", () => {
         error: vi.fn(),
         warn: vi.fn(),
         debug: vi.fn(),
-      } as unknown as Logger;
+      };
 
       const context = {
         logger: mockLogger,
