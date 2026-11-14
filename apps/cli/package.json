@@ -33,7 +33,6 @@
     "@dxgjs/errors": "workspace:*",
     "@dxgjs/fs": "workspace:*",
     "@dxgjs/generators": "workspace:*",
-    "@dxgjs/logger": "workspace:*",
     "@dxgjs/prompts": "workspace:*",
     "@dxgjs/templates": "workspace:*",
     "@dxgjs/workspace": "workspace:*",
