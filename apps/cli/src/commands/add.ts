@@ -1,7 +1,11 @@
 import type { Command } from "commander";
-import { isCancel } from "@dxgjs/prompts";
+import { isCancel, note, outro } from "@dxgjs/prompts";
 import { databaseGenerator, type Generator } from "@dxgjs/generators";
-import { formatError, ValidationError } from "@dxgjs/errors";
+import {
+  formatError,
+  ValidationError,
+  ProviderMismatchError,
+} from "@dxgjs/errors";
 import type { GeneratorContext } from "@dxgjs/generators";
 import {
   type CommanderOptions,
@@ -10,6 +14,7 @@ import {
   runInTargetDirectory,
   findProjectRoot,
 } from "../generator-run";
+import pc from "picocolors";
 
 /**
  * Registers the `add` command — runs a specific generator on the project.
@@ -58,7 +63,7 @@ export function registerAddCommand(program: Command): void {
         // Build initial answers from CLI options and package.json
         const configAnswers = {
           name: awareness.packageJson.name,
-          version: awareness.packageJson.version
+          version: awareness.packageJson.version,
         };
         const cliAnswers = { ...options, ...configAnswers };
 
@@ -78,6 +83,31 @@ export function registerAddCommand(program: Command): void {
         if (isCancel(err)) {
           return;
         }
+
+        // Special handling for ProviderMismatchError: use Clack's note() for
+        // a nicely boxed display matching the success output style (single note
+        // with multiple sections, like summarizeDatabase's Operation Summary).
+        if (err instanceof ProviderMismatchError) {
+          const { existingProvider, requestedProvider } = err;
+
+          const sections = [
+            `${pc.red(`[${err.code}]`)}: Prisma is already configured with "${existingProvider}", but you requested "${requestedProvider}"`,
+            `Hints:\n${err.hints.map((h) => `  • ${h}`).join("\n")}`,
+            `Info:\n  • Docs: ${err.docsUrl}\n  • Recovery: ${err.recoveryAction}`,
+          ];
+
+          note(sections.join("\n\n"), "Error");
+
+          // Outro: clear final message
+          outro(
+            `Database setup failed: provider mismatch (${existingProvider} vs ${requestedProvider})`,
+          );
+
+          process.exitCode = 1;
+          return;
+        }
+
+        // Default formatting for other errors
         console.error(formatError(err));
         process.exitCode = 1;
       }

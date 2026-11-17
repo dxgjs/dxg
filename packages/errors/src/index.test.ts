@@ -3,6 +3,7 @@ import {
   DXGError,
   PrismaVersionConflictError,
   ProviderUnsupportedError,
+  ProviderMismatchError,
   BuildBlockedError,
   TemplateMissingError,
   InstallerFailureError,
@@ -54,7 +55,7 @@ describe("PrismaVersionConflictError", () => {
     const error = new PrismaVersionConflictError("Version mismatch");
 
     expect(error.name).toBe("PrismaVersionConflictError");
-    expect(error.code).toBe("DXG_E_PRISMA_VERSION_CONFLICT");
+    expect(error.code).toBe("DXG_ERR_PRISMA_VERSION_CONFLICT");
     expect(error.recoverable).toBe(true);
     expect(error.recoveryAction).toBe("reconfigure");
     expect(error.hints.length).toBeGreaterThan(0);
@@ -66,8 +67,49 @@ describe("ProviderUnsupportedError", () => {
     const error = new ProviderUnsupportedError("unknown-db");
 
     expect(error.name).toBe("ProviderUnsupportedError");
-    expect(error.code).toBe("DXG_E_UNSUPPORTED_PROVIDER");
+    expect(error.code).toBe("DXG_ERR_UNSUPPORTED_PROVIDER");
     expect(error.message).toContain("unknown-db");
+  });
+});
+
+describe("ProviderMismatchError", () => {
+  it("should create with existing and requested providers", () => {
+    const error = new ProviderMismatchError("postgresql", "mysql");
+
+    expect(error.name).toBe("ProviderMismatchError");
+    expect(error.code).toBe("DXG_ERR_PROVIDER_MISMATCH");
+    expect(error.existingProvider).toBe("postgresql");
+    expect(error.requestedProvider).toBe("mysql");
+    expect(error.message).toContain("postgresql");
+    expect(error.message).toContain("mysql");
+    expect(error.recoverable).toBe(false);
+    expect(error.recoveryAction).toBe("manual");
+  });
+
+  it("should format with boxed layout containing all sections", () => {
+    const error = new ProviderMismatchError("postgresql", "mysql");
+    const formatted = formatError(error);
+
+    // Check for boxed structure
+    expect(formatted).toContain("┌");
+    expect(formatted).toContain("└");
+    expect(formatted).toContain("│");
+
+    // Check for all sections
+    expect(formatted).toContain("DXG Database Setup");
+    expect(formatted).toContain("Detected");
+    expect(formatted).toContain("Hints");
+    expect(formatted).toContain("Info");
+
+    // Check content
+    expect(formatted).toContain("postgresql");
+    expect(formatted).toContain("mysql");
+    expect(formatted).toContain("✖ mismatch");
+    expect(formatted).toContain(
+      "Rerun with the already configured provider: --provider postgresql",
+    );
+    expect(formatted).toContain("https://dxg.dev/errors/provider-mismatch");
+    expect(formatted).toContain("manual");
   });
 });
 
@@ -76,7 +118,7 @@ describe("BuildBlockedError", () => {
     const error = new BuildBlockedError(["pkg1", "pkg2"]);
 
     expect(error.name).toBe("BuildBlockedError");
-    expect(error.code).toBe("DXG_E_BUILD_BLOCKED");
+    expect(error.code).toBe("DXG_ERR_BUILD_BLOCKED");
     expect(error.message).toContain("pkg1");
     expect(error.message).toContain("pkg2");
   });
@@ -87,7 +129,7 @@ describe("TemplateMissingError", () => {
     const error = new TemplateMissingError("/path/to/template.ts");
 
     expect(error.name).toBe("TemplateMissingError");
-    expect(error.code).toBe("DXG_E_TEMPLATE_MISSING");
+    expect(error.code).toBe("DXG_ERR_TEMPLATE_MISSING");
     expect(error.message).toContain("/path/to/template.ts");
     expect(error.recoverable).toBe(false);
   });
@@ -98,7 +140,7 @@ describe("InstallerFailureError", () => {
     const error = new InstallerFailureError("network", "connection refused");
 
     expect(error.name).toBe("InstallerFailureError");
-    expect(error.code).toBe("DXG_E_INSTALLER_FAILURE");
+    expect(error.code).toBe("DXG_ERR_INSTALLER_FAILURE");
     expect(error.message).toContain("network");
     expect(error.message).toContain("connection refused");
   });
@@ -109,7 +151,7 @@ describe("ValidationError", () => {
     const error = new ValidationError("Invalid input");
 
     expect(error.name).toBe("ValidationError");
-    expect(error.code).toBe("DXG_E_VALIDATION");
+    expect(error.code).toBe("DXG_ERR_VALIDATION");
     expect(error.message).toBe("Invalid input");
   });
 });
@@ -119,7 +161,7 @@ describe("GitError", () => {
     const error = new GitError("not a git repo");
 
     expect(error.name).toBe("GitError");
-    expect(error.code).toBe("DXG_E_GIT");
+    expect(error.code).toBe("DXG_ERR_GIT");
     expect(error.message).toContain("not a git repo");
   });
 });
@@ -129,7 +171,7 @@ describe("SpawnError", () => {
     const error = new SpawnError("prisma", ["generate"], "command not found");
 
     expect(error.name).toBe("SpawnError");
-    expect(error.code).toBe("DXG_E_SPAWN");
+    expect(error.code).toBe("DXG_ERR_SPAWN");
     expect(error.message).toContain("prisma");
     expect(error.message).toContain("generate");
   });
@@ -160,7 +202,7 @@ describe("formatError", () => {
     });
     const formatted = formatError(error);
 
-    expect(formatted).toContain("DXG_E_VALIDATION");
+    expect(formatted).toContain("DXG_ERR_VALIDATION");
     expect(formatted).toContain("Invalid input");
     expect(formatted).toContain("Check the input");
     expect(formatted).toContain("Try again");
@@ -188,7 +230,7 @@ describe("formatErrorJSON", () => {
 
     expect(json).toEqual({
       name: "ValidationError",
-      code: "DXG_E_VALIDATION",
+      code: "DXG_ERR_VALIDATION",
       message: "Invalid input",
       recoverable: true,
       hints: [
@@ -208,7 +250,7 @@ describe("formatErrorJSON", () => {
 
     expect(json).toEqual({
       name: "Error",
-      code: "DXG_E_UNKNOWN",
+      code: "DXG_ERR_UNKNOWN",
       message: "regular error",
       recoverable: false,
       hints: [],
@@ -224,7 +266,7 @@ describe("formatErrorJSON", () => {
 
     expect(json).toEqual({
       name: "UnknownError",
-      code: "DXG_E_UNKNOWN",
+      code: "DXG_ERR_UNKNOWN",
       message: "string error",
       recoverable: false,
       hints: [],

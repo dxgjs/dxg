@@ -70,11 +70,8 @@ export class DXGError extends Error {
  * User must align their package.json to the verified pin (prisma@7.10.0).
  */
 export class PrismaVersionConflictError extends DXGError {
-  constructor(
-    message: string,
-    options: DXGErrorOptions = {}
-  ) {
-    super("DXG_E_PRISMA_VERSION_CONFLICT", message, {
+  constructor(message: string, options: DXGErrorOptions = {}) {
+    super("DXG_ERR_PRISMA_VERSION_CONFLICT", message, {
       recoverable: true,
       hints: [
         "Align the declared Prisma version to 7.10.0 (or a range containing exactly it, e.g., ^7.10.0)",
@@ -95,10 +92,10 @@ export class ProviderUnsupportedError extends DXGError {
   constructor(
     provider: string,
     supportedProviders: string[] = [],
-    options: DXGErrorOptions = {}
+    options: DXGErrorOptions = {},
   ) {
     super(
-      "DXG_E_UNSUPPORTED_PROVIDER",
+      "DXG_ERR_UNSUPPORTED_PROVIDER",
       `Provider "${provider}" is not supported.`,
       {
         recoverable: true,
@@ -112,7 +109,7 @@ export class ProviderUnsupportedError extends DXGError {
         docsUrl: "https://dxg.dev/errors/provider-unsupported",
         recoveryAction: "reconfigure",
         ...options,
-      }
+      },
     );
     this.name = "ProviderUnsupportedError";
   }
@@ -122,13 +119,16 @@ export class ProviderUnsupportedError extends DXGError {
  * Thrown when the requested database provider differs from the existing Prisma configuration.
  */
 export class ProviderMismatchError extends DXGError {
+  public readonly existingProvider: string;
+  public readonly requestedProvider: string;
+
   constructor(
     existingProvider: string,
     requestedProvider: string,
-    options: DXGErrorOptions = {}
+    options: DXGErrorOptions = {},
   ) {
     super(
-      "DXG_E_PROVIDER_MISMATCH",
+      "DXG_ERR_PROVIDER_MISMATCH",
       `Prisma is already configured with "${existingProvider}".\n  You requested "${requestedProvider}".`,
       {
         recoverable: false,
@@ -139,9 +139,11 @@ export class ProviderMismatchError extends DXGError {
         docsUrl: "https://dxg.dev/errors/provider-mismatch",
         recoveryAction: "manual",
         ...options,
-      }
+      },
     );
     this.name = "ProviderMismatchError";
+    this.existingProvider = existingProvider;
+    this.requestedProvider = requestedProvider;
   }
 }
 
@@ -150,13 +152,10 @@ export class ProviderMismatchError extends DXGError {
  * User must approve the build and rebuild.
  */
 export class BuildBlockedError extends DXGError {
-  constructor(
-    blockedPackages: string[],
-    options: DXGErrorOptions = {}
-  ) {
+  constructor(blockedPackages: string[], options: DXGErrorOptions = {}) {
     const packageList = blockedPackages.join(", ");
     super(
-      "DXG_E_BUILD_BLOCKED",
+      "DXG_ERR_BUILD_BLOCKED",
       `Build scripts blocked for: ${packageList}`,
       {
         recoverable: true,
@@ -167,7 +166,7 @@ export class BuildBlockedError extends DXGError {
         docsUrl: "https://dxg.dev/errors/build-blocked",
         recoveryAction: "retry",
         ...options,
-      }
+      },
     );
     this.name = "BuildBlockedError";
   }
@@ -177,12 +176,9 @@ export class BuildBlockedError extends DXGError {
  * Thrown when a required template file is missing.
  */
 export class TemplateMissingError extends DXGError {
-  constructor(
-    templatePath: string,
-    options: DXGErrorOptions = {}
-  ) {
+  constructor(templatePath: string, options: DXGErrorOptions = {}) {
     super(
-      "DXG_E_TEMPLATE_MISSING",
+      "DXG_ERR_TEMPLATE_MISSING",
       `Template file not found: ${templatePath}`,
       {
         recoverable: false,
@@ -194,7 +190,7 @@ export class TemplateMissingError extends DXGError {
         docsUrl: "https://dxg.dev/errors/template-missing",
         recoveryAction: "manual-intervention",
         ...options,
-      }
+      },
     );
     this.name = "TemplateMissingError";
   }
@@ -204,13 +200,9 @@ export class TemplateMissingError extends DXGError {
  * Thrown when the dependency installer fails.
  */
 export class InstallerFailureError extends DXGError {
-  constructor(
-    reason: string,
-    output: string,
-    options: DXGErrorOptions = {}
-  ) {
+  constructor(reason: string, output: string, options: DXGErrorOptions = {}) {
     super(
-      "DXG_E_INSTALLER_FAILURE",
+      "DXG_ERR_INSTALLER_FAILURE",
       `Dependency installation failed (${reason}): ${output}`,
       {
         recoverable: true,
@@ -222,7 +214,7 @@ export class InstallerFailureError extends DXGError {
         docsUrl: "https://dxg.dev/errors/installer-failure",
         recoveryAction: "retry",
         ...options,
-      }
+      },
     );
     this.name = "InstallerFailureError";
   }
@@ -232,11 +224,8 @@ export class InstallerFailureError extends DXGError {
  * Thrown when validation fails (e.g., missing required fields, invalid input).
  */
 export class ValidationError extends DXGError {
-  constructor(
-    message: string,
-    options: DXGErrorOptions = {}
-  ) {
-    super("DXG_E_VALIDATION", message, {
+  constructor(message: string, options: DXGErrorOptions = {}) {
+    super("DXG_ERR_VALIDATION", message, {
       recoverable: true,
       hints: [
         "Check the error message for the specific validation failure",
@@ -254,11 +243,8 @@ export class ValidationError extends DXGError {
  * Thrown when a Git operation fails.
  */
 export class GitError extends DXGError {
-  constructor(
-    message: string,
-    options: DXGErrorOptions = {}
-  ) {
-    super("DXG_E_GIT", `Git operation failed: ${message}`, {
+  constructor(message: string, options: DXGErrorOptions = {}) {
+    super("DXG_ERR_GIT", `Git operation failed: ${message}`, {
       recoverable: true,
       hints: [
         "Ensure you are in a Git repository",
@@ -281,10 +267,10 @@ export class SpawnError extends DXGError {
     command: string,
     args: string[],
     message: string,
-    options: DXGErrorOptions = {}
+    options: DXGErrorOptions = {},
   ) {
     super(
-      "DXG_E_SPAWN",
+      "DXG_ERR_SPAWN",
       `Failed to spawn ${command} ${args.join(" ")}: ${message}`,
       {
         recoverable: true,
@@ -296,7 +282,7 @@ export class SpawnError extends DXGError {
         docsUrl: "https://dxg.dev/errors/spawn",
         recoveryAction: "manual-intervention",
         ...options,
-      }
+      },
     );
     this.name = "SpawnError";
   }
@@ -310,11 +296,85 @@ export function isDXGError(error: unknown): error is DXGError {
 }
 
 /**
+ * Unicode box drawing characters for pretty error boxes.
+ */
+const BOX = {
+  tl: "┌",
+  tr: "┐",
+  bl: "└",
+  br: "┘",
+  h: "─",
+  v: "│",
+  teeR: "├",
+  teeL: "┤",
+  teeT: "┬",
+  teeB: "┴",
+  cross: "┼",
+} as const;
+
+/**
+ * Creates a boxed section with title and content lines.
+ */
+function createBox(title: string, lines: string[], width: number = 88): string {
+  const contentWidth = width - 4; // Account for "│ " and " │"
+  const titleLine = ` ${title} `;
+  const titlePadding = Math.max(0, contentWidth - titleLine.length);
+  const leftPad = Math.floor(titlePadding / 2);
+  const rightPad = titlePadding - leftPad;
+
+  const top = `${BOX.tl}${BOX.h.repeat(leftPad)}${titleLine}${BOX.h.repeat(rightPad)}${BOX.tr}`;
+  const bottom = `${BOX.bl}${BOX.h.repeat(width - 2)}${BOX.br}`;
+
+  const body = lines
+    .map((line) => {
+      // Handle lines that might be too long - truncate with ellipsis
+      if (line.length > contentWidth) {
+        return `${BOX.v} ${line.slice(0, contentWidth - 3)}... ${BOX.v}`;
+      }
+      const padding = contentWidth - line.length;
+      return `${BOX.v} ${line}${" ".repeat(padding)} ${BOX.v}`;
+    })
+    .join("\n");
+
+  return `${top}\n${body}\n${bottom}`;
+}
+
+/**
+ * Normalizes a Prisma provider string for comparison.
+ * "postgres" -> "postgresql", etc.
+ */
+function normalizeProvider(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/^["']|["']$/g, "")
+    .replace("postgres", "postgresql");
+}
+
+/**
+ * Compares two provider keys for equality, normalizing both.
+ * "postgres" and "postgresql" are considered equal.
+ */
+function providersMatch(a: string, b: string): boolean {
+  return normalizeProvider(a) === normalizeProvider(b);
+}
+
+/**
  * Formats a DXGError for user-friendly console output.
  * Includes hints, docs URL, and recovery action.
+ * Special formatting for ProviderMismatchError with boxed layout.
  */
 export function formatError(error: unknown): string {
   if (error instanceof DXGError) {
+    // Special boxed formatting for ProviderMismatchError
+    if (
+      error.code === "DXG_ERR_PROVIDER_MISMATCH" &&
+      error instanceof ProviderMismatchError
+    ) {
+      return formatProviderMismatchError(error);
+    }
+
+    // Default formatting for other DXG errors
     let message = `Error [${error.code}]: ${error.message}`;
 
     if (error.hints.length > 0) {
@@ -349,6 +409,48 @@ export function formatError(error: unknown): string {
 }
 
 /**
+ * Special formatter for ProviderMismatchError with boxed layout
+ * matching the success output style.
+ */
+function formatProviderMismatchError(error: ProviderMismatchError): string {
+  const existingProvider = error.existingProvider;
+  const requestedProvider = error.requestedProvider;
+  const width = 88;
+
+  const sections: string[] = [];
+
+  // Error header box
+  const headerLines = [
+    `Error [${error.code}]: Prisma is already configured with "${existingProvider}".`,
+    `You requested "${requestedProvider}".`,
+  ];
+  sections.push(createBox(" DXG Database Setup ", headerLines, width));
+
+  // Detected section (matching success output style)
+  const matchStatus = providersMatch(existingProvider, requestedProvider)
+    ? " → ✔ match"
+    : " → ✖ mismatch";
+  const detectedLines = [
+    `Prisma provider: ${existingProvider}`,
+    `Requested: ${requestedProvider}${matchStatus}`,
+  ];
+  sections.push(createBox(" Detected ", detectedLines, width));
+
+  // Hints section
+  const hintLines = error.hints.map((h) => `• ${h}`);
+  sections.push(createBox(" Hints ", hintLines, width));
+
+  // Docs and Recovery in a single box
+  const infoLines = [
+    `Docs: ${error.docsUrl}`,
+    `Recovery: ${error.recoveryAction}`,
+  ];
+  sections.push(createBox(" Info ", infoLines, width));
+
+  return sections.join("\n\n");
+}
+
+/**
  * Formats a DXGError as a machine-readable JSON object.
  * Useful for CI/CD, logging, and programmatic error handling.
  */
@@ -360,7 +462,7 @@ export function formatErrorJSON(error: unknown): object {
   if (error instanceof Error) {
     return {
       name: error.name,
-      code: "DXG_E_UNKNOWN",
+      code: "DXG_ERR_UNKNOWN",
       message: error.message,
       recoverable: false,
       hints: [],
@@ -373,7 +475,7 @@ export function formatErrorJSON(error: unknown): object {
 
   return {
     name: "UnknownError",
-    code: "DXG_E_UNKNOWN",
+    code: "DXG_ERR_UNKNOWN",
     message: String(error),
     recoverable: false,
     hints: [],

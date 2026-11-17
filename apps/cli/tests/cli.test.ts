@@ -205,7 +205,9 @@ describe("add command (dxg add <generator>)", () => {
 
       // The error is now a ValidationError (DXGError), formatted with code, hints, docs, etc.
       expect(errorSpy).toHaveBeenCalledExactlyOnceWith(
-        expect.stringContaining("Error [DXG_E_VALIDATION]: Unknown generator: nope"),
+        expect.stringContaining(
+          "Error [DXG_ERR_VALIDATION]: Unknown generator: nope",
+        ),
       );
       // The failed run must not dispatch to any generator
       expect(vi.mocked(databaseGenerator.run).mock.calls).toHaveLength(0);
