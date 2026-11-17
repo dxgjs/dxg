@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "Diagnostic and repair tool for DXG projects",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dxgjs/dxg.git",
+    "directory": "packages/doctor"
+  },
+  "homepage": "https://github.com/dxgjs/dxg/tree/main/packages/doctor#readme",
+  "bugs": {
+    "url": "https://github.com/dxgjs/dxg/issues"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -15,6 +24,9 @@
   ],
   "engines": {
     "node": ">=22.13"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "description": "AST manipulation utilities powered by Magicast for preserving formatting, comments, and structure when modifying config files",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dxgjs/dxg.git",
+    "directory": "packages/ast"
+  },
+  "homepage": "https://github.com/dxgjs/dxg/tree/main/packages/ast#readme",
+  "bugs": {
+    "url": "https://github.com/dxgjs/dxg/issues"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -23,6 +32,9 @@
   ],
   "engines": {
     "node": ">=22.13"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
