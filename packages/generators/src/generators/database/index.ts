@@ -795,7 +795,7 @@ export async function executeDatabase(
           [
             "Some dependency build scripts were blocked by your package manager:",
             ...installResult.blockedBuilds.map((name) => `  • ${name}`),
-            "Native artifacts (e.g. .node bindings) may be missing until the builds are approved.",
+            "  Native artifacts (e.g. .node bindings) may be missing until the builds are approved.",
           ].join("\n"),
           "Install scripts blocked",
         );
@@ -837,9 +837,7 @@ export async function executeDatabase(
   const providerObj =
     providerDataLocal[planToUse.provider as keyof typeof providerDataLocal];
   if (!ctx.dryRun && !planToUse.initRequired) {
-    result.skipped.push(
-      "Prisma initialization (schema.prisma already exists)",
-    );
+    result.skipped.push("Prisma initialization (schema.prisma already exists)");
   } else if (!ctx.dryRun) {
     try {
       const s = spinner();
@@ -1677,13 +1675,13 @@ export function summarizeDatabase(options: SummarizeDatabaseOptions): void {
       : "Prisma provider: (not determined)";
     const requestedLine = requestedProvider
       ? `Requested: ${requestedProvider}`
-      : "Requested: (inconnu)";
+      : "Requested: (unknown)";
 
     let matchStatus = "";
     if (detectedProvider && requestedProvider) {
       matchStatus = providersMatch(detectedProvider, requestedProvider)
-        ? " → ✔ match"
-        : " → ✖ mismatch, aucune action";
+        ? " (match)"
+        : " (mismatch), no action";
     }
 
     sections.push(
@@ -2143,29 +2141,29 @@ export const databaseGenerator: Generator = {
         lines.push(
           "SQLite is ready — the dev.db file will be created on first migration.",
           "",
-          `1. Push schema to database:`,
-          `   ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
+          `  1. Push schema to database:`,
+          `     ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
           "",
-          `2. Generate Prisma Client:`,
-          `   ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
+          `  2. Generate Prisma Client:`,
+          `     ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
           "",
-          `3. Open Prisma Studio:`,
-          `   ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
+          `  3. Open Prisma Studio:`,
+          `     ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
         );
       } else {
         lines.push(
-          "1. Configure your connection string",
-          `   Edit ${pc.cyan(".env")} and replace the placeholder:`,
-          `   ${pc.cyan(`DATABASE_URL="${placeholder}"`)}`,
+          "  1. Configure your connection string",
+          `     Edit ${pc.cyan(".env")} and replace the placeholder:`,
+          `     ${pc.cyan(`DATABASE_URL="${placeholder}"`)}`,
           "",
-          "2. Push schema to database:",
-          `   ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
+          "  2. Push schema to database:",
+          `     ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
           "",
-          "3. Generate Prisma Client:",
-          `   ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
+          "  3. Generate Prisma Client:",
+          `     ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
           "",
-          "4. Open Prisma Studio:",
-          `   ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
+          "  4. Open Prisma Studio:",
+          `     ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
         );
 
         // Provider-specific tips

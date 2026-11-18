@@ -39,7 +39,7 @@ Blocked 1 postinstall. Run \`bun pm untrusted\` for details.
 41 packages installed`;
 
 const YARN_BERRY_YN0004 = `\
-➤ YN0004: │ @prisma/engines@npm:7.10.0 lists build scripts, but all build scripts have been disabled
+-> YN0004: | @prisma/engines@npm:7.10.0 lists build scripts, but all build scripts have been disabled
 Done in 1.2s`;
 
 describe("packageNameFromSpec", () => {
@@ -121,7 +121,7 @@ describe("yarn berry YN0004 signature", () => {
     expect(isYarnDisabledBuildScripts(YARN_BERRY_YN0004)).toBe(true);
   });
   test("does not match other yarn notices", () => {
-    expect(isYarnDisabledBuildScripts("➤ YN0000: │ @prisma/client@npm:7.10.0 doesn't satisfy")).toBe(
+    expect(isYarnDisabledBuildScripts("-> YN0000: | @prisma/client@npm:7.10.0 doesn't satisfy")).toBe(
       false,
     );
   });

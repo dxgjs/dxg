@@ -209,7 +209,7 @@ export function showFixPreview(fixes: string[]): void {
   if (fixes.length === 0) return;
 
   note(
-    fixes.map((f) => pc.gray("• ") + f).join("\n"),
+    fixes.map((f) => pc.gray("  • ") + f).join("\n"),
     pc.cyan("Proposed fixes (dry run)"),
   );
 }

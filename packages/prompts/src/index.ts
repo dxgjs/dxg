@@ -155,16 +155,16 @@ function createHeadlessSpinner(options?: SpinnerOptions): SpinnerResult {
       write(`${styleText("magenta", "◒")}  ${current}...`);
     },
     stop(message = "") {
-      finish("✔", "green", message);
+      finish("[OK]", "green", message);
     },
     cancel(message = "") {
       const wasActive = active;
       cancelled = true;
-      finish("■", "red", message);
+      finish("[X]", "red", message);
       if (wasActive) options?.onCancel?.();
     },
     error(message = "") {
-      finish("✖", "red", message);
+      finish("[ERR]", "red", message);
     },
     clear() {
       active = false;

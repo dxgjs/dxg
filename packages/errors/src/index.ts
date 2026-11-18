@@ -428,8 +428,8 @@ function formatProviderMismatchError(error: ProviderMismatchError): string {
 
   // Detected section (matching success output style)
   const matchStatus = providersMatch(existingProvider, requestedProvider)
-    ? " → ✔ match"
-    : " → ✖ mismatch";
+    ? " (match)"
+    : " (mismatch)";
   const detectedLines = [
     `Prisma provider: ${existingProvider}`,
     `Requested: ${requestedProvider}${matchStatus}`,

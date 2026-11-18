@@ -86,30 +86,21 @@ describe("ProviderMismatchError", () => {
     expect(error.recoveryAction).toBe("manual");
   });
 
-  it("should format with boxed layout containing all sections", () => {
+  it("should format with clean layout showing both providers in parentheses", () => {
     const error = new ProviderMismatchError("postgresql", "mysql");
     const formatted = formatError(error);
 
-    // Check for boxed structure
-    expect(formatted).toContain("┌");
-    expect(formatted).toContain("└");
-    expect(formatted).toContain("│");
+    // Check for clean format with providers in parentheses
+    expect(formatted).toContain('Error [DXG_ERR_PROVIDER_MISMATCH]: Prisma is already configured with "postgresql" (requested: "mysql")');
 
-    // Check for all sections
-    expect(formatted).toContain("DXG Database Setup");
-    expect(formatted).toContain("Detected");
-    expect(formatted).toContain("Hints");
-    expect(formatted).toContain("Info");
+    // Check for hints section
+    expect(formatted).toContain("Hints:");
+    expect(formatted).toContain("Rerun with the already configured provider: --provider postgresql");
+    expect(formatted).toContain("To change provider, follow the Prisma guide");
 
-    // Check content
-    expect(formatted).toContain("postgresql");
-    expect(formatted).toContain("mysql");
-    expect(formatted).toContain("✖ mismatch");
-    expect(formatted).toContain(
-      "Rerun with the already configured provider: --provider postgresql",
-    );
+    // Check for docs and recovery
     expect(formatted).toContain("https://dxg.dev/errors/provider-mismatch");
-    expect(formatted).toContain("manual");
+    expect(formatted).toContain("Recovery: manual");
   });
 });
 

@@ -1,6 +1,6 @@
 /**
  * Regression tests for the pnpm dlx build-approval adapter — the fix for
- * the "Choose which packages to build ❯○ @prisma/engines" prompt that
+ * the "Choose which packages to build -> @prisma/engines" prompt that
  * appeared INSIDE `dxg add database`'s "Initializing Prisma" spinner.
  *
  * Root cause (verified in pnpm 11.18.0 source + machine state, see

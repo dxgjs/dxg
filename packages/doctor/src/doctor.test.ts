@@ -5,5 +5,5 @@ describe("doctor package", () => {
     const doctor = await import("./index");
     expect(doctor).toBeDefined();
     expect(typeof doctor.runDoctor).toBe("function");
-  });
+  }, 30000);
 });

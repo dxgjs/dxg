@@ -1,219 +1,63 @@
-# CURRENT PHASE
+# Project State
 
-Phase 6 — Auth Generator Implementation (IMPLEMENTED)
+_Last reviewed against the code: 2026-11-18 · Version: 0.1.0 (first npm release pending)_
 
-## COMPLETED
+DXG is a command-line tool (`@dxgjs/cli`) built on nine supporting libraries that live in this monorepo. Today it automates one thing, setting up a database with Prisma ORM in an existing project, and it can diagnose and repair the result.
 
-### Phase 4A — COMPLETE
-- Enhanced `@dxgjs/fs` operations:
-  - mkdir / mkdirSync
-  - rm / rmSync
-  - copyFile / copyFileSync
-  - appendFile / appendFileSync
-- Workspace dependency calculation
-- `.mjs` ESM build output configuration where applicable
-- Corresponding tests
-- Successful validation:
-  - lint
-  - typecheck
-  - tests
-  - build
+## Commands
 
-### Phase 4B / 4B.1 — COMPLETE
-- Tailwind CSS v4 ecosystem researched
-- Existing DXG architecture audited against generator requirements
-- Existing Generator lifecycle considered sufficient
-- GeneratorContext did not require architectural expansion
-- No new generic command-execution abstraction required at this stage
-- Required Phase 4C implementation scope identified
+| Command | What it does |
+| --- | --- |
+| `dxg add db` (alias `dxg add database`) | Sets up Prisma ORM in an existing project |
+| `dxg doctor` | Diagnoses a DXG project and, with `--fix`, repairs its configuration |
 
-### Phase 4C — `dxg add tailwind` — COMPLETE
-- Tailwind CSS v4 generator implemented
-- Framework detection
-- Package-manager detection
-- Existing Tailwind detection
-- Node.js version validation
-- Package.json validation
-- CSS entrypoint detection
-- Tailwind directive insertion
-- Optional Tailwind configuration generation
-- Optional PostCSS configuration generation
-- Actual `.tmpl` template usage
-- Idempotent file modifications
-- Dependency installation
-- Verification phase
-- Summary phase
-- Generator follows the established lifecycle: `validate → plan → execute → verify → summarize`
-- Generator does NOT require changes to:
-  - GeneratorRunner
-  - GeneratorContext
-  - `@dxgjs/fs`
-  - `@dxgjs/workspace`
-  - `@dxgjs/prompts`
-  - `@dxgjs/templates`
-  - `@dxgjs/logger`
-  - `@dxgjs/terminal`
-  (unless proven otherwise by repository evidence)
+Global options: `--non-interactive`, `--dry-run`, `--force`. See the [CLI README](../apps/cli/README.md) for the full option list.
 
-### Final Phase 4C Validation
-- Existing Tailwind detection: PASS
-- Package-manager detection tests: PASS
-- lint: PASS
-- typecheck: PASS
-- tests: PASS
-- build: PASS
-- Final status: COMPLETE / READY
+### `dxg add db`
 
-### Phase 5 — Database Generator Implementation — COMPLETE
-- Database generator implemented with Prisma ORM support
-- Provider selection (SQLite, PostgreSQL, MySQL)
-- Package-manager detection
-- Dependency installation
-- Schema file generation
-- Idempotent file operations
-- Verification of generated schema
-- Summary phase
-- Generator follows the established lifecycle: `validate → plan → execute → verify → summarize`
-- Generator does NOT require changes to:
-  - GeneratorRunner
-  - GeneratorContext
-  - `@dxgjs/fs`
-  - `@dxgjs/workspace`
-  - `@dxgjs/prompts`
-  - `@dxgjs/templates`
-  - `@dxgjs/logger`
-  - `@dxgjs/terminal`
-  (unless proven otherwise by repository evidence)
+- **Providers:** `sqlite`, `postgresql`, `mysql`, `sqlserver`, `cockroachdb`, `planetscale`, `prismapostgres`.
+- **Prisma version:** pinned in `@dxgjs/database-meta` (currently 7.10.0).
+- **Project awareness:** detects the framework (Next.js app/pages, Vite, Astro, React Router), the language (TypeScript or JavaScript), the package manager and Tailwind (detection only).
+- **Dependency installation:** goes through an installer that tells "the install exited 0" apart from "the project is operational", and pre-approves native build scripts (for example `better-sqlite3`) for pnpm, npm and Yarn Berry.
+- **Database setup:** for SQLite, `prisma db push` is run for you; for server providers DXG does not touch the database and migrations are left to you.
+- **Safe by default:** idempotent (a second run changes nothing), supports `--dry-run`, and refuses to overwrite conflicting files unless `--force` is given.
 
-### Final Phase 5 Validation
-- Package-manager detection tests: PASS
-- lint: PASS
-- typecheck: PASS
-- tests: PASS
-- build: PASS
-- Final status: COMPLETE / READY
+### `dxg doctor`
 
-### Phase 6 — `dxg add auth` — COMPLETE
-- Auth generator implemented with multiple provider support (better-auth, auth.js, clerk, lucia)
-- Package-manager detection (reused from existing implementation)
-- Dependency installation (optional)
-- Example configuration file generation (optional)
-- Idempotent file operations
-- Verification of generated files
-- Summary phase
-- Generator follows the established lifecycle: `validate → plan → execute → verify → summarize`
-- Generator does NOT require changes to:
-  - GeneratorRunner
-  - GeneratorContext
-  - `@dxgjs/fs`
-  - `@dxgjs/workspace`
-  - `@dxgjs/prompts`
-  - `@dxgjs/templates`
-  - `@dxgjs/logger`
-  - `@dxgjs/terminal`
-  (unless proven otherwise by repository evidence)
+Sixteen checks in four categories (select them with `--category`):
 
-### Final Phase 6 Validation
-- Provider selection tests: PASS
-- Package-manager detection tests: PASS
-- Dependency installation tests: PASS
-- Template rendering tests: PASS
-- File creation/update/skip logic tests: PASS
-- Verification tests: PASS
-- Summary logging tests: PASS
-- lint: PASS
-- typecheck: PASS
-- tests: PASS
-- build: PASS
-- Final status: COMPLETE / READY
+| Category | Checks |
+| --- | --- |
+| `env` | `database-url`, `database-url-format`, `dotenv-exists`, `no-secrets-in-git` |
+| `project` | `gitignore`, `package-json` |
+| `database` | `connectivity`, `helper-file`, `prisma-client`, `prisma-config`, `prisma-schema`, `provider`, `seed-config`, `sqlite-db-file` |
+| `scripts` | `package-json-scripts`, `prisma-scripts` |
 
-### English-only Standardization
-- Developer-facing content standardized to English
-- User-facing CLI/generator content standardized to English
-- Architecture documentation standardized to English
-- Final verification performed
-- No intentional French developer/user-facing content remains
-- Rule: DXG developer-facing and user-facing content = English only
+Exit codes: `0` ok, `1` issues found, `2` invalid usage.
 
-## CURRENT STATE
+## Packages
 
-DXG now has:
-- Validated generator lifecycle
-- Reusable filesystem primitives (`@dxgjs/fs`)
-- Workspace awareness (`@dxgjs/workspace`)
-- Production-oriented Tailwind generator (`dxg add tailwind`)
-- Database generator (`dxg add database`)
-- Auth generator (`dxg add auth`)
-- Framework-aware generation
-- Package-manager-aware generation
-- Idempotent generation
-- Generator tests
-- Validated build/typecheck/test pipeline
-- CLI with subcommand support for `dxg add <generator>`
+Nine public libraries and one CLI, all under the `@dxgjs` scope: `ast`, `database-meta`, `doctor`, `errors`, `fs`, `generators`, `prompts`, `templates`, `workspace`, plus `@dxgjs/cli`. Two private packages (`tooling/eslint-config`, `tooling/typescript-config`) hold shared configuration. See [`architecture/PACKAGES.md`](architecture/PACKAGES.md).
 
-## DEFERRED
+## Quality gates
 
-Keep genuinely deferred architecture items deferred, including:
-- Generic command execution abstraction
-- `@dxgjs/utils`
-- Generator registry
-- Plugin architecture
-- Transactions
-- Rollback
-- Dry-run
-- Force mode
-- Advanced template system
+- `pnpm check` runs lint, typecheck and unit tests for every package through Turborepo. `pnpm check:ci` does the same with `CI=true`, like GitHub Actions.
+- The end-to-end suite (`pnpm --filter @dxgjs/cli test:e2e`) performs real installs with npm, pnpm, Yarn classic, Yarn Berry and Bun. It needs network access and is not part of `pnpm check` or of CI.
+- CI (`.github/workflows/ci.yml`) runs `pnpm build` then `pnpm check` on Ubuntu, Windows and macOS with Node 22 and 26.
 
-## NEXT PHASE
+## Releases
 
-Phase 6 implementation work completed. Generator ecosystem expansion has been intentionally closed. Phase 7 generator expansion has been abandoned.
+Versions and changelogs are managed with changesets, one version per package (independent versioning). All libraries are published as public packages. The first release (`0.1.0` for every package) has not been published yet.
 
-Current DXG generator ecosystem:
-- init
-- tailwind
-- database
-- auth
+## Not part of the project
 
-No additional generators are currently planned for implementation.
+- **Other generators.** `init`, `tailwind` and `auth` were considered earlier but are not part of DXG: the only generator is `database`.
+- **A generator registry.** `dxg add` resolves generators from a fixed map in `apps/cli/src/commands/add.ts`.
+- **A plugin system.** It exists only as an idea, in [`vision/PLUGIN-SYSTEM.md`](vision/PLUGIN-SYSTEM.md).
+- **Rollback or transactions.** A failed run is not rolled back. Use `--dry-run` first and rely on idempotence to re-run safely.
 
-Focus remains on improving the quality, reliability, UX, composability, diagnostics, configuration, and developer experience of the existing foundation.
+## Known environment constraints
 
-## VERIFICATION
-
-- Modified source code to fix workspace test failures:
-  - Fixed framework detection to properly clean version strings (strip ^, ~, >, <, = prefixes)
-  - Updated PackageJson interface to include missing scripts property
-- Fixed generator test expectations:
-  - Corrected database generator idempotence test to match actual behavior
-- Ran successful validation:
-  - lint: PASS (workspace package)
-  - typecheck: PASS (all packages)
-  - tests: PASS (workspace package and CLI package)
-  - build: PASS (all packages)
-- Verified FS type ownership is correctly maintained in workspace package usage
-
-## KNOWN ENVIRONMENT CONSTRAINTS (2026-10-25)
-
-### yarn-berry (yarn@4.x) Node Version Requirement
-
-**Issue**: Node.js 24.15.0 has a CJS-in-ESM zip-fstat bug ([yarnpkg/berry#7065](https://github.com/yarnpkg/berry/issues/7065)) causing `EBADF` errors during yarn-berry operations.
-
-**Requirement**: Node 24.16.0+ or Node 26 LTS (current CI matrix pins Node 26).
-
-**CI Configuration**: `.github/workflows/ci.yml` matrix updated from `node: [22, 24]` to `node: [22, 26]`.
-
-**Impact**: yarn-berry E2E tests will fail on Node 24.15.0. This is an upstream Node.js bug, not a DXG code issue.
-
-### TLS Certificate Issues (npm / yarn-classic)
-
-**Issue**: `registry.yarnpkg.com` and `registry.npmjs.org` TLS certificate mismatches in some CI environments.
-
-**Workaround**: Use registry mirror (e.g., `npmmirror.com`) or set `NODE_EXTRA_CA_CERTS` in CI.
-
-**Impact**: npm and yarn-classic fresh matrix tests fail on TLS. pnpm and yarn-berry fresh tests pass completely.
-
-### SQLite Native Build (better-sqlite3)
-
-**Issue**: `better-sqlite3` requires Visual Studio C++ build tools on Windows.
-
-**Workaround**: Add `better-sqlite3: true` to `pnpm-workspace.yaml` `allowBuilds` (done in H-4 fix). Long-term: LibSQL/Turso provider eliminates native dependency.
+- **Yarn Berry on Node 24.15.0.** An upstream Node.js bug ([yarnpkg/berry#7065](https://github.com/yarnpkg/berry/issues/7065)) causes `EBADF` errors. Use Node 22 or 26, as the CI matrix does.
+- **TLS certificate mismatches** on `registry.npmjs.org` and `registry.yarnpkg.com` happen on some runners. The CI workflow points npm at `https://registry.npmmirror.com` as a workaround. Make sure `npm config get registry` returns the official registry before publishing.
+- **`better-sqlite3` on Windows** needs the Visual Studio C++ build tools when no prebuilt binary matches.

@@ -442,7 +442,7 @@ describe("createDependencyInstaller", () => {
         fs: fsStore,
       });
       (executeCommand as Mock).mockResolvedValue({
-        all: "➤ YN0004: │ better-sqlite3 lists build scripts, but all build scripts have been disabled",
+        all: "-> YN0004: | better-sqlite3 lists build scripts, but all build scripts have been disabled",
       });
 
       const result = await installer.install(defaultPlan, { cwd: "/proj" });
