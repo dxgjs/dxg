@@ -7,7 +7,7 @@ export const providerPlaceholders: Record<string, string> = {
   sqlite: "file:./dev.db",
   postgresql: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
   mysql: "mysql://USER:PASSWORD@HOST:3306/DATABASE",
-  sqlserver: "sqlserver://USER:PASSWORD@HOST:1433;database=DATABASE",
+  sqlserver: "sqlserver://HOST:1433;database=DATABASE;user=USER;password=PASSWORD;encrypt=true",
   cockroachdb: "postgresql://USER:PASSWORD@HOST:26257/DATABASE?sslmode=require",
   planetscale: "mysql://USER:PASSWORD@HOST:3306/DATABASE?sslaccept=strict",
   prismapostgres: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?sslmode=require",

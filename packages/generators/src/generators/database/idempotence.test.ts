@@ -161,6 +161,23 @@ vi.mock("@dxgjs/fs", async () => {
         return undefined;
       },
     ),
+    open: vi.fn().mockImplementation(
+      async (filePath: string, _flags: string, _mode?: number) => {
+        void _flags;
+        void _mode;
+        // Mock file descriptor with writeFile and close
+        return {
+          writeFile: vi.fn().mockImplementation(async (data: string | Buffer) => {
+            _files.set(filePath, data.toString());
+            const dir = filePath.split("/").slice(0, -1).join("/");
+            if (dir) {
+              _directories.add(dir);
+            }
+          }),
+          close: vi.fn().mockResolvedValue(undefined),
+        };
+      },
+    ),
     executeCommand: vi.fn().mockImplementation(
       async (command: string, args: string[] = []) => {
         // Simulate the package manager persisting installed dependencies

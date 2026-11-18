@@ -2,11 +2,12 @@ export type { PrismaState } from "./types";
 
 /**
  * Normalizes a Prisma datasource provider string to the canonical DXG provider key.
- * Handles "postgres" -> "postgresql" and other aliases.
+ * Handles "postgres" -> "postgresql" and "prisma-postgres" -> "prismapostgres" aliases.
  */
 export function normalizePrismaProvider(raw: string): string {
   const normalized = raw.trim().toLowerCase().replace(/^["']|["']$/g, "");
   if (normalized === "postgres") return "postgresql";
+  if (normalized === "prisma-postgres") return "prismapostgres";
   return normalized;
 }
 

@@ -145,9 +145,49 @@ const defaultExecuteFake = vi.hoisted(() => {
 // We need to mock the modules before importing the databaseGenerator
 vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
+  // Define question shape for type safety in mock
+  type PromptQuestion = {
+    name: string;
+    default?: unknown;
+    [key: string]: unknown;
+  };
   return {
     ...actual,
-    prompt: vi.fn(),
+    prompt: vi.fn().mockImplementation(async (questions: PromptQuestion[]) => {
+      // Handle the new opt-in confirm prompt for server providers
+      // Default to "No" (user doesn't want to configure URL now)
+      const configureUrlPrompt = questions.find(
+        (q) => q.name === "configureDatabaseUrl",
+      );
+      if (configureUrlPrompt) {
+        return { configureDatabaseUrl: false };
+      }
+      // Handle databaseUrl prompt (should not be reached if configureDatabaseUrl is false)
+      const databaseUrlPrompt = questions.find(
+        (q) => q.name === "databaseUrl",
+      );
+      if (databaseUrlPrompt) {
+        return { databaseUrl: databaseUrlPrompt.default ?? "" };
+      }
+      // Handle other prompts (skills, scripts)
+      const skillsPrompt = questions.find(
+        (q) => q.name === "installPrismaSkills",
+      );
+      if (skillsPrompt) {
+        return { installPrismaSkills: false };
+      }
+      const scriptsPrompt = questions.find(
+        (q) => q.name === "databaseScripts",
+      );
+      if (scriptsPrompt) {
+        return { databaseScripts: "recommended" };
+      }
+      const helperPrompt = questions.find((q) => q.name === "helperPath");
+      if (helperPrompt) {
+        return { helperPath: "lib/prisma.ts" };
+      }
+      return {};
+    }),
     intro: vi.fn(),
     outro: vi.fn(),
     isCancel: vi.fn(),
@@ -246,6 +286,22 @@ vi.mock("@dxgjs/fs", async () => {
       }
       return actual.writeJson(path, data);
     }),
+    open: vi.fn().mockImplementation(
+      async (filePath: string, _flags: string, _mode?: number) => {
+        void _flags;
+        void _mode;
+        return {
+          writeFile: vi.fn().mockImplementation(async (data: string | Buffer) => {
+            fsMockStore._files.set(filePath, data.toString());
+            const dir = filePath.split("/").slice(0, -1).join("/");
+            if (dir) {
+              fsMockStore._directories.add(dir);
+            }
+          }),
+          close: vi.fn().mockResolvedValue(undefined),
+        };
+      },
+    ),
     // Fake side-effecting subprocess (hoisted defaultExecuteFake): installs
     // the default fake; scenario tests override it and beforeEach
     // reinstalls this default so implementations never leak between tests.

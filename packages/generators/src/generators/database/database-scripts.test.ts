@@ -179,6 +179,22 @@ vi.mock("@dxgjs/fs", async () => {
         return undefined;
       },
     ),
+    open: vi.fn().mockImplementation(
+      async (filePath: string, _flags: string, _mode?: number) => {
+        void _flags;
+        void _mode;
+        return {
+          writeFile: vi.fn().mockImplementation(async (data: string | Buffer) => {
+            _files.set(filePath, data.toString());
+            const dir = filePath.split("/").slice(0, -1).join("/");
+            if (dir) {
+              _directories.add(dir);
+            }
+          }),
+          close: vi.fn().mockResolvedValue(undefined),
+        };
+      },
+    ),
     executeCommand: vi.fn().mockImplementation(
       async (command: string, args: string[] = []) => {
         // Simulate the package manager persisting installed dependencies
@@ -702,15 +718,15 @@ describe("interactive database scripts phase", () => {
     (promptMock as unknown as Mock).mockRejectedValueOnce(CANCEL);
 
     // The mocked isCancel recognizes the stand-in symbol; cancellation must
-    // propagate (the CLI turns it into a clean exit).
+    // propagate (the CLI handles the cancellation rendering).
     await expect(
       databaseGenerator.run(
         { provider: "postgresql", installPrismaSkills: false, databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public" },
         makeContext(),
       ),
     ).rejects.toBe(CANCEL);
-    // The Clack cancellation boundary was reached.
-    expect(cancelMock).toHaveBeenCalledWith("Operation cancelled");
+    // The generator propagates the cancel symbol; CLI renders the message.
+    expect(cancelMock).not.toHaveBeenCalled();
   });
 
   test("non-interactive mode defaults to the recommended set without prompting", async () => {

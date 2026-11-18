@@ -1,6 +1,6 @@
 // Get the directory where this module is located
 import { GeneratorContext, Generator } from "../../types";
-import { addPackageScripts } from "@dxgjs/fs";
+import { addPackageScripts, open } from "@dxgjs/fs";
 
 // Import Clack-native UX utilities from @dxgjs/prompts
 import {
@@ -524,6 +524,12 @@ export function planDatabase(
     helperPath,
     generatedClientImport,
     helperImportFromSeed,
+    // Individual params env lines for providers using individualParams pattern (mysql, sqlserver).
+    // These are written to .env alongside DATABASE_URL so the adapter works out-of-the-box.
+    envIndividualLines:
+      provider.instantiationPattern === "individualParams" && hasUserDatabaseUrl
+        ? buildIndividualEnvLines(provider.key, answers.databaseUrl as string)
+        : "",
   };
 }
 
@@ -656,6 +662,19 @@ async function applySeedConfigToPrismaFile(
   return { added: true, skipped: false };
 }
 
+/**
+ * Writes a file with restricted permissions (0o600) for sensitive files like .env.
+ * Uses fs.open to explicitly set the mode, avoiding world-readable defaults.
+ */
+async function writeSecureFile(filePath: string, content: string): Promise<void> {
+  const fd = await open(filePath, "w", 0o600);
+  try {
+    await fd.writeFile(content, "utf8");
+  } finally {
+    await fd.close();
+  }
+}
+
 // Helper-derived default generator output. Deterministic co-location
 // rule: the generated client lands in <helperDir>/generated/prisma, so
 // the helper's import is always "./generated/prisma/client" and stays
@@ -664,6 +683,91 @@ async function applySeedConfigToPrismaFile(
 // helper's subtree — even above the project root.)
 function computeDefaultGeneratorOutput(helperPath: string): string {
   return posix.join(posix.dirname(helperPath), "generated", "prisma");
+}
+
+/**
+ * Parses a DATABASE_URL for mysql or sqlserver providers and returns
+ * the individual environment variable lines to write to .env.
+ * Each provider's adapter expects different variable names:
+ * - mysql: DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME, DATABASE_PORT
+ * - sqlserver: HOST, DB_USER, DB_PASSWORD, DB_NAME
+ */
+function buildIndividualEnvLines(providerKey: string, databaseUrl: string): string {
+  const parsed = parseDatabaseUrl(providerKey, databaseUrl);
+  if (!parsed) {
+    return "";
+  }
+
+  const lines: string[] = [];
+
+  if (providerKey === "mysql") {
+    // MySQL adapter expects: DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME, DATABASE_PORT
+    if (parsed.host) lines.push(`DATABASE_HOST="${sanitizeEnvValue(parsed.host)}"`);
+    if (parsed.user) lines.push(`DATABASE_USER="${sanitizeEnvValue(parsed.user)}"`);
+    if (parsed.password) lines.push(`DATABASE_PASSWORD="${sanitizeEnvValue(parsed.password)}"`);
+    if (parsed.database) lines.push(`DATABASE_NAME="${sanitizeEnvValue(parsed.database)}"`);
+    if (parsed.port) lines.push(`DATABASE_PORT="${sanitizeEnvValue(parsed.port)}"`);
+  } else if (providerKey === "sqlserver") {
+    // SQL Server adapter expects: HOST, DB_USER, DB_PASSWORD, DB_NAME
+    if (parsed.host) lines.push(`HOST="${sanitizeEnvValue(parsed.host)}"`);
+    if (parsed.user) lines.push(`DB_USER="${sanitizeEnvValue(parsed.user)}"`);
+    if (parsed.password) lines.push(`DB_PASSWORD="${sanitizeEnvValue(parsed.password)}"`);
+    if (parsed.database) lines.push(`DB_NAME="${sanitizeEnvValue(parsed.database)}"`);
+    // Note: encrypt is already in DATABASE_URL, adapter reads from connection string options
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Parses a database URL for mysql or sqlserver format.
+ * Returns extracted components or null if parsing fails.
+ */
+function parseDatabaseUrl(
+  providerKey: string,
+  databaseUrl: string,
+): { host?: string; user?: string; password?: string; database?: string; port?: string } | null {
+  try {
+    if (providerKey === "mysql") {
+      // mysql://user:password@host:port/database?params
+      const url = new URL(databaseUrl);
+      return {
+        host: url.hostname || undefined,
+        user: url.username || undefined,
+        password: url.password || undefined,
+        database: url.pathname.slice(1) || undefined, // remove leading /
+        port: url.port || "3306",
+      };
+    } else if (providerKey === "sqlserver") {
+      // sqlserver://host:port;database=db;user=user;password=pass;encrypt=true
+      // This format doesn't work with URL constructor, parse manually
+      const params = new URLSearchParams(databaseUrl.replace("sqlserver://", "").replace(/;/g, "&"));
+      const hostPort = params.get("")?.split(":") || databaseUrl.match(/sqlserver:\/\/([^:;]+):(\d+)/);
+      let host = "";
+      let port = "1433";
+
+      if (hostPort) {
+        if (Array.isArray(hostPort)) {
+          host = hostPort[0];
+          port = hostPort[1] || "1433";
+        } else {
+          host = hostPort[1] || "";
+          port = hostPort[2] || "1433";
+        }
+      }
+
+      return {
+        host: host || undefined,
+        user: params.get("user") || undefined,
+        password: params.get("password") || undefined,
+        database: params.get("database") || undefined,
+        port: port || "1433",
+      };
+    }
+  } catch {
+    // Parsing failed, return empty
+  }
+  return null;
 }
 
 // Execution function
@@ -975,21 +1079,37 @@ export async function executeDatabase(
   // is written — user configures later.
   // Track whether we created/updated .env in this run (for .gitignore gating)
   let envCreatedOrUpdated = false;
+  // Check if we have individual env lines to write (for mysql, sqlserver)
+  const hasIndividualLines = Boolean(planToUse.envIndividualLines);
   if (ctx.dryRun) {
     if (!planToUse.envExists) {
-      result.wouldRun.push("create minimal .env (header only)");
+      const parts = ["create minimal .env (header only"];
+      if (planToUse.envDatabaseUrlLine) parts.push("DATABASE_URL");
+      if (hasIndividualLines) parts.push("individual params");
+      result.wouldRun.push(parts.join(" + ") + ")");
     } else if (!planToUse.envHasDatabaseUrl) {
       const isServerProvider = planToUse.provider !== "sqlite";
       const hasDatabaseUrlLine = Boolean(planToUse.envDatabaseUrlLine);
-      if (isServerProvider && !hasDatabaseUrlLine) {
+      if (isServerProvider && !hasDatabaseUrlLine && !hasIndividualLines) {
         result.wouldRun.push(
           "skip .env DATABASE_URL (server provider, user configures later)",
         );
       } else {
-        result.wouldRun.push("append DATABASE_URL to .env");
+        const parts = ["append"];
+        if (hasDatabaseUrlLine) parts.push("DATABASE_URL");
+        if (hasIndividualLines) parts.push("individual params");
+        result.wouldRun.push(parts.join(" + ") + " to .env");
       }
     } else {
-      result.wouldRun.push("skip .env (already has DATABASE_URL)");
+      // Check if individual params are missing even when DATABASE_URL exists
+      if (hasIndividualLines) {
+        // In dry-run we can't check actual .env content, so we note the possibility
+        result.wouldRun.push(
+          "check .env for missing individual params (mysql/sqlserver)",
+        );
+      } else {
+        result.wouldRun.push("skip .env (already has DATABASE_URL)");
+      }
     }
   } else {
     const envPath = join(ctx.awareness.projectRoot, ".env");
@@ -1005,41 +1125,89 @@ export async function executeDatabase(
       // No .env at all: create minimal file with header.
       // For SQLite, include DATABASE_URL; for server providers without
       // explicit databaseUrl, create header only (user configures later).
+      // For individualParams providers (mysql, sqlserver), also include individual params.
       const lines = [
         "# Environment variables — declared by the database layer",
       ];
       if (planToUse.envDatabaseUrlLine) {
         lines.push(planToUse.envDatabaseUrlLine);
       }
+      if (planToUse.envIndividualLines) {
+        lines.push(planToUse.envIndividualLines);
+      }
       lines.push("");
-      await fs.writeFile(envPath, lines.join("\n"), "utf8");
+      await writeSecureFile(envPath, lines.join("\n"));
       envCreatedOrUpdated = true;
+      const parts = [];
+      if (planToUse.envDatabaseUrlLine) parts.push("DATABASE_URL");
+      if (planToUse.envIndividualLines) parts.push("individual params");
       result.created.push(
-        planToUse.envDatabaseUrlLine
-          ? ".env (minimal, DATABASE_URL placeholder)"
+        parts.length > 0
+          ? `.env (minimal, ${parts.join(" + ")})`
           : ".env (minimal, header only — server provider, user configures later)",
       );
     } else if (!/^\s*(?:export\s+)?DATABASE_URL\s*=/m.test(envText)) {
       // .env exists but no DATABASE_URL.
       // SQLite: append DATABASE_URL. Server providers without databaseUrl: do nothing.
+      // For individualParams providers (mysql, sqlserver), also append individual params.
+      const linesToAppend: string[] = [];
       if (planToUse.envDatabaseUrlLine) {
+        linesToAppend.push(planToUse.envDatabaseUrlLine);
+      }
+      if (planToUse.envIndividualLines) {
+        // Split individual lines and only append those not already present
+        const individualLines = planToUse.envIndividualLines.split("\n");
+        for (const line of individualLines) {
+          const varName = line.split("=")[0];
+          if (!new RegExp(`^\\s*(?:export\\s+)?${varName}\\s*=`).test(envText)) {
+            linesToAppend.push(line);
+          }
+        }
+      }
+
+      if (linesToAppend.length > 0) {
         const needsLeadingNewline =
           envText.length > 0 && !envText.endsWith("\n");
-        await fs.writeFile(
+        await writeSecureFile(
           envPath,
-          `${envText}${needsLeadingNewline ? "\n" : ""}${planToUse.envDatabaseUrlLine}\n`,
-          "utf8",
+          `${envText}${needsLeadingNewline ? "\n" : ""}${linesToAppend.join("\n")}\n`,
         );
         envCreatedOrUpdated = true;
-        result.updated.push(".env (appended DATABASE_URL)");
+        const parts = [];
+        if (planToUse.envDatabaseUrlLine) parts.push("DATABASE_URL");
+        if (planToUse.envIndividualLines) parts.push("individual params");
+        result.updated.push(`.env (appended ${parts.join(" + ")})`);
       } else {
         result.skipped.push(
           ".env (no DATABASE_URL added — server provider, user configures later)",
         );
       }
     } else {
-      // .env already has DATABASE_URL — nothing to do.
-      result.skipped.push(".env (already has DATABASE_URL)");
+      // .env already has DATABASE_URL — check if individual params are missing.
+      if (planToUse.envIndividualLines) {
+        const individualLines = planToUse.envIndividualLines.split("\n");
+        const missingLines: string[] = [];
+        for (const line of individualLines) {
+          const varName = line.split("=")[0];
+          if (!new RegExp(`^\\s*(?:export\\s+)?${varName}\\s*=`).test(envText)) {
+            missingLines.push(line);
+          }
+        }
+        if (missingLines.length > 0) {
+          const needsLeadingNewline =
+            envText.length > 0 && !envText.endsWith("\n");
+          await writeSecureFile(
+            envPath,
+            `${envText}${needsLeadingNewline ? "\n" : ""}${missingLines.join("\n")}\n`,
+          );
+          envCreatedOrUpdated = true;
+          result.updated.push(".env (appended individual params)");
+        } else {
+          result.skipped.push(".env (already has DATABASE_URL and individual params)");
+        }
+      } else {
+        result.skipped.push(".env (already has DATABASE_URL)");
+      }
     }
   }
 
@@ -1833,7 +2001,7 @@ export const databaseGenerator: Generator = {
         );
       } catch (error) {
         if (isCancel(error)) {
-          cancel("Operation cancelled");
+          throw error;
         }
         throw error;
       }
@@ -1922,7 +2090,7 @@ export const databaseGenerator: Generator = {
           );
         } catch (error) {
           if (isCancel(error)) {
-            cancel("Operation cancelled");
+            throw error;
           }
           throw error;
         }
@@ -1962,7 +2130,7 @@ export const databaseGenerator: Generator = {
         );
       } catch (error) {
         if (isCancel(error)) {
-          cancel("Operation cancelled");
+          throw error;
         }
         throw error;
       }
@@ -2069,7 +2237,7 @@ export const databaseGenerator: Generator = {
           answers = { ...answers, ...helperAnswer };
         } catch (error) {
           if (isCancel(error)) {
-            cancel("Operation cancelled");
+            throw error;
           }
           throw error;
         }
@@ -2087,7 +2255,7 @@ export const databaseGenerator: Generator = {
           answers = { ...answers, ...helperAnswer };
         } catch (error) {
           if (isCancel(error)) {
-            cancel("Operation cancelled");
+            throw error;
           }
           throw error;
         }
@@ -2208,7 +2376,7 @@ export const databaseGenerator: Generator = {
           lines.push(
             "",
             pc.dim(
-              "Tip: SQL Server uses semicolon syntax: sqlserver://user:pass@host:1433;database=db",
+              "Tip: SQL Server uses semicolon syntax: sqlserver://host:1433;database=db;user=user;password=pass;encrypt=true",
             ),
           );
         }
@@ -2227,9 +2395,8 @@ export const databaseGenerator: Generator = {
       // Outro — completion message only
       outro(`Database setup completed for ${answers.provider}!`);
     } catch (error) {
-      // Handle cancellation
+      // Handle cancellation - propagate to CLI for consistent rendering
       if (isCancel(error)) {
-        cancel("Operation cancelled");
         throw error;
       }
 

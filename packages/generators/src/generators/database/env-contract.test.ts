@@ -50,9 +50,15 @@ type PackageJson = ProjectAwareness["packageJson"];
 
 vi.mock("@dxgjs/prompts", async () => {
   const actual = await vi.importActual("@dxgjs/prompts");
+  // Define question shape for type safety in mock
+  type PromptQuestion = {
+    name: string;
+    default?: unknown;
+    [key: string]: unknown;
+  };
   return {
     ...actual,
-    prompt: vi.fn().mockImplementation(async (questions: any[]) => {
+    prompt: vi.fn().mockImplementation(async (questions: PromptQuestion[]) => {
       // Handle the new opt-in confirm prompt for server providers
       // Default to "No" (user doesn't want to configure URL now)
       const configureUrlPrompt = questions.find(
@@ -153,6 +159,22 @@ vi.mock("@dxgjs/fs", async () => {
       }
       return undefined;
     }),
+    open: vi.fn().mockImplementation(
+      async (filePath: string, _flags: string, _mode?: number) => {
+        void _flags;
+        void _mode;
+        return {
+          writeFile: vi.fn().mockImplementation(async (data: string | Buffer) => {
+            _files.set(filePath, data.toString());
+            const dir = filePath.split("/").slice(0, -1).join("/");
+            if (dir) {
+              _directories.add(dir);
+            }
+          }),
+          close: vi.fn().mockResolvedValue(undefined),
+        };
+      },
+    ),
     readJson: vi.fn().mockImplementation(async (filePath: string) => {
       const content = _files.get(filePath);
       if (content !== undefined) {

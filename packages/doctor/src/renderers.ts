@@ -16,10 +16,10 @@ import type {
 
 // 6-character colored tags for consistent alignment
 const TAGS: Record<DoctorSeverity, string> = {
-  ok: pc.green("[ OK ]  "),
-  info: pc.blue("[ INFO ] "),
-  warn: pc.yellow("[ WARN ] "),
-  error: pc.red("[ ERR ]  "),
+  ok: pc.green("[OK]  "),
+  info: pc.blue("[INFO] "),
+  warn: pc.yellow("[WARN] "),
+  error: pc.red("[ERR]  "),
 };
 
 const CATEGORY_LABELS: Record<DoctorCategory, string> = {
@@ -33,7 +33,7 @@ const CATEGORY_LABELS: Record<DoctorCategory, string> = {
  * Strip ANSI escape codes from a string to get visual length.
  */
 function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*m/g, "");
+  return str.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
 /**
@@ -62,9 +62,7 @@ function formatCheckLines(
   // so indent = tagVisualLength to align with tag position
   const detailIndent = tagVisualLength;
 
-  const lines: string[] = [
-    `${prefix}${message}`,
-  ];
+  const lines: string[] = [`${prefix}${message}`];
 
   if (result.detail) {
     const indent = " ".repeat(detailIndent);
@@ -118,9 +116,9 @@ export function showOutro(
   } else if (options.fix && summary.fixable > 0) {
     outro(pc.green(`Fixed ${summary.fixable} issue(s) — ${summaryLine}`));
   } else if (report.hasErrors && summary.fixable > 0) {
-    outro(pc.red(`${summaryLine} • Run with --fix to attempt repairs`));
+    outro(`${pc.red(`${summaryLine} • Run with --fix to attempt repairs`)}`);
   } else if (report.hasWarnings && summary.fixable > 0) {
-    outro(pc.yellow(`${summaryLine} • Run with --fix to attempt repairs`));
+    outro(`${pc.yellow(`${summaryLine} • Run with --fix to attempt repairs`)}`);
   } else if (report.hasErrors) {
     outro(pc.red(`${summaryLine}`));
   } else if (report.hasWarnings) {

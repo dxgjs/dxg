@@ -640,7 +640,7 @@ async function fixHelperFile(
 
   // Build the helper template based on provider
   // This mirrors the templates in generators/database/templates/
-  let template = "";
+  let template: string;
 
   if (isSqlite) {
     // SQLite template uses BetterSqlite3 adapter

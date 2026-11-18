@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { isCancel, note, outro } from "@dxgjs/prompts";
+import { isCancel, cancel, note, outro } from "@dxgjs/prompts";
 import { databaseGenerator, type Generator } from "@dxgjs/generators";
 import {
   formatError,
@@ -78,9 +78,10 @@ export function registerAddCommand(program: Command): void {
         // Natural exit (code 0)
       } catch (err) {
         // A Clack cancellation (Ctrl+C during a prompt) is a clean user exit,
-        // not an error: the generator already rendered cancel("Operation
-        // cancelled"). Don't print the cancel symbol, don't fail the process.
+        // not an error. Render the cancellation message once at the top level
+        // for consistent styling, then exit cleanly.
         if (isCancel(err)) {
+          cancel("Operation cancelled");
           return;
         }
 

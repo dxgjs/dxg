@@ -8,6 +8,7 @@ import { mkdir, mkdirSync, type MkdirOptions } from "./mkdir";
 import { rm, rmSync } from "./rm";
 import { copyFile, copyFileSync } from "./copyFile";
 import { appendFile, appendFileSync } from "./appendFile";
+import { open, type OpenOptions } from "./open";
 import { detect, getUserAgent } from "package-manager-detector";
 import { execa, type Options } from "execa";
 
@@ -21,6 +22,7 @@ export { rm, rmSync };
 export { copyFile, copyFileSync };
 export { appendFile, appendFileSync };
 export { glob, globSync };
+export { open, type OpenOptions };
 export { type Options };
 
 /**

@@ -50,7 +50,7 @@ export function createMemoryFS(files: Record<string, string> = {}): MemoryFS {
   }
 
   return {
-    async readFile(filePath: string, _encoding = "utf-8"): Promise<string> {
+    async readFile(filePath: string, _encoding?: string): Promise<string> {
       const normalized = normalizePath(filePath);
       const content = fs.get(normalized);
       if (content === undefined) {
@@ -62,7 +62,7 @@ export function createMemoryFS(files: Record<string, string> = {}): MemoryFS {
       return content; // Always return string, encoding ignored for memory fs
     },
 
-    async writeFile(filePath: string, content: string, _encoding = "utf-8"): Promise<void> {
+    async writeFile(filePath: string, content: string, _encoding?: string): Promise<void> {
       const normalized = normalizePath(filePath);
       await ensureDir(dirname(normalized));
       fs.set(normalized, content);

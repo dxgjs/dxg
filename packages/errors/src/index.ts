@@ -5,6 +5,8 @@
  * All DXG errors should inherit from DXGError.
  */
 
+import pc from "picocolors";
+
 export type RecoveryAction =
   | "retry"
   | "reconfigure"
@@ -296,86 +298,39 @@ export function isDXGError(error: unknown): error is DXGError {
 }
 
 /**
- * Unicode box drawing characters for pretty error boxes.
- */
-const BOX = {
-  tl: "┌",
-  tr: "┐",
-  bl: "└",
-  br: "┘",
-  h: "─",
-  v: "│",
-  teeR: "├",
-  teeL: "┤",
-  teeT: "┬",
-  teeB: "┴",
-  cross: "┼",
-} as const;
-
-/**
- * Creates a boxed section with title and content lines.
- */
-function createBox(title: string, lines: string[], width: number = 88): string {
-  const contentWidth = width - 4; // Account for "│ " and " │"
-  const titleLine = ` ${title} `;
-  const titlePadding = Math.max(0, contentWidth - titleLine.length);
-  const leftPad = Math.floor(titlePadding / 2);
-  const rightPad = titlePadding - leftPad;
-
-  const top = `${BOX.tl}${BOX.h.repeat(leftPad)}${titleLine}${BOX.h.repeat(rightPad)}${BOX.tr}`;
-  const bottom = `${BOX.bl}${BOX.h.repeat(width - 2)}${BOX.br}`;
-
-  const body = lines
-    .map((line) => {
-      // Handle lines that might be too long - truncate with ellipsis
-      if (line.length > contentWidth) {
-        return `${BOX.v} ${line.slice(0, contentWidth - 3)}... ${BOX.v}`;
-      }
-      const padding = contentWidth - line.length;
-      return `${BOX.v} ${line}${" ".repeat(padding)} ${BOX.v}`;
-    })
-    .join("\n");
-
-  return `${top}\n${body}\n${bottom}`;
-}
-
-/**
- * Normalizes a Prisma provider string for comparison.
- * "postgres" -> "postgresql", etc.
- */
-function normalizeProvider(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/^["']|["']$/g, "")
-    .replace("postgres", "postgresql");
-}
-
-/**
- * Compares two provider keys for equality, normalizing both.
- * "postgres" and "postgresql" are considered equal.
- */
-function providersMatch(a: string, b: string): boolean {
-  return normalizeProvider(a) === normalizeProvider(b);
-}
-
-/**
  * Formats a DXGError for user-friendly console output.
  * Includes hints, docs URL, and recovery action.
- * Special formatting for ProviderMismatchError with boxed layout.
  */
 export function formatError(error: unknown): string {
   if (error instanceof DXGError) {
-    // Special boxed formatting for ProviderMismatchError
-    if (
-      error.code === "DXG_ERR_PROVIDER_MISMATCH" &&
-      error instanceof ProviderMismatchError
-    ) {
-      return formatProviderMismatchError(error);
+    // Special formatting for ProviderMismatchError - clean format with providers in parentheses
+    if (error instanceof ProviderMismatchError) {
+      let message = `${pc.red(`Error [${error.code}]`)}: Prisma is already configured with "${error.existingProvider}" (requested: "${error.requestedProvider}")`;
+
+      if (error.hints.length > 0) {
+        message += "\n\nHints:";
+        for (const hint of error.hints) {
+          message += `\n  • ${hint}`;
+        }
+      }
+
+      if (error.docsUrl) {
+        message += `\n\nDocs: ${error.docsUrl}`;
+      }
+
+      if (error.recoveryAction) {
+        message += `\nRecovery: ${error.recoveryAction}`;
+      }
+
+      if (error.cause) {
+        message += `\n\nCaused by: ${error.cause.message}`;
+      }
+
+      return message;
     }
 
-    // Default formatting for other DXG errors
-    let message = `Error [${error.code}]: ${error.message}`;
+    // Default formatting for DXG errors
+    let message = `${pc.red(`Error [${error.code}]`)}: ${error.message}`;
 
     if (error.hints.length > 0) {
       message += "\n\nHints:";
@@ -406,48 +361,6 @@ export function formatError(error: unknown): string {
 
   // For unknown errors, stringify
   return `Error: ${String(error)}`;
-}
-
-/**
- * Special formatter for ProviderMismatchError with boxed layout
- * matching the success output style.
- */
-function formatProviderMismatchError(error: ProviderMismatchError): string {
-  const existingProvider = error.existingProvider;
-  const requestedProvider = error.requestedProvider;
-  const width = 88;
-
-  const sections: string[] = [];
-
-  // Error header box
-  const headerLines = [
-    `Error [${error.code}]: Prisma is already configured with "${existingProvider}".`,
-    `You requested "${requestedProvider}".`,
-  ];
-  sections.push(createBox(" DXG Database Setup ", headerLines, width));
-
-  // Detected section (matching success output style)
-  const matchStatus = providersMatch(existingProvider, requestedProvider)
-    ? " (match)"
-    : " (mismatch)";
-  const detectedLines = [
-    `Prisma provider: ${existingProvider}`,
-    `Requested: ${requestedProvider}${matchStatus}`,
-  ];
-  sections.push(createBox(" Detected ", detectedLines, width));
-
-  // Hints section
-  const hintLines = error.hints.map((h) => `• ${h}`);
-  sections.push(createBox(" Hints ", hintLines, width));
-
-  // Docs and Recovery in a single box
-  const infoLines = [
-    `Docs: ${error.docsUrl}`,
-    `Recovery: ${error.recoveryAction}`,
-  ];
-  sections.push(createBox(" Info ", infoLines, width));
-
-  return sections.join("\n\n");
 }
 
 /**

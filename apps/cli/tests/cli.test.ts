@@ -1,6 +1,11 @@
 import { describe, test, expect, vi, afterEach } from "vitest";
 import type { Command } from "commander";
 
+/** Strip ANSI escape codes from a string. */
+function stripAnsi(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
 // Generator implementations are mocked: these tests exercise Commander
 // parsing — how argv flags reach the action, the generator context and the
 // answer mappings — not the generators themselves (covered by their own
@@ -204,11 +209,13 @@ describe("add command (dxg add <generator>)", () => {
       await runCli(["add", "nope"]);
 
       // The error is now a ValidationError (DXGError), formatted with code, hints, docs, etc.
-      expect(errorSpy).toHaveBeenCalledExactlyOnceWith(
-        expect.stringContaining(
-          "Error [DXG_ERR_VALIDATION]: Unknown generator: nope",
-        ),
+      // The output includes ANSI color codes from picocolors, so strip them for comparison.
+      expect(errorSpy).toHaveBeenCalledOnce();
+      const actualErrorOutput = errorSpy.mock.calls[0][0] as string;
+      expect(stripAnsi(actualErrorOutput)).toContain(
+        "Error [DXG_ERR_VALIDATION]: Unknown generator: nope",
       );
+
       // The failed run must not dispatch to any generator
       expect(vi.mocked(databaseGenerator.run).mock.calls).toHaveLength(0);
     } finally {
