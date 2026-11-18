@@ -51,4 +51,4 @@ Checks are registered by category (`env`, `project`, `database`, `scripts`), eac
 
 ## Extensibility
 
-DXG has no plugin system today. A design idea is kept in [`../vision/PLUGIN-SYSTEM.md`](../vision/PLUGIN-SYSTEM.md).
+DXG has no plugin system today. Generators are resolved from a fixed map in `apps/cli/src/commands/add.ts`; doctor checks use a registry in `@dxgjs/doctor`.

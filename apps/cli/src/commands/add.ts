@@ -99,9 +99,9 @@ export function registerAddCommand(program: Command): void {
 
           note(sections.join("\n\n"), "Error");
 
-          // Outro: clear final message
+          // Outro: clear final message (red for error)
           outro(
-            `Database setup failed: provider mismatch (${existingProvider} vs ${requestedProvider})`,
+            pc.red(`Database setup failed: provider mismatch (${existingProvider} vs ${requestedProvider})`),
           );
 
           process.exitCode = 1;

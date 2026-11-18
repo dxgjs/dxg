@@ -85,7 +85,6 @@ See [`.changeset/README.md`](./.changeset/README.md) for details.
 - [`docs/architecture/DEPENDENCIES.md`](./docs/architecture/DEPENDENCIES.md) – the dependency graph
 - [`docs/architecture/PACKAGES.md`](./docs/architecture/PACKAGES.md) – what each package is for
 - [`docs/architecture/PUBLIC-API.md`](./docs/architecture/PUBLIC-API.md) – the exported API of each library
-- [`docs/vision/PLUGIN-SYSTEM.md`](./docs/vision/PLUGIN-SYSTEM.md) – a plugin system design idea, not implemented
 
 ## License
 

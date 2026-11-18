@@ -2392,8 +2392,8 @@ export const databaseGenerator: Generator = {
       // Render Next steps in a separate note box
       note(lines.join("\n"), "Next Steps");
 
-      // Outro — completion message only
-      outro(`Database setup completed for ${answers.provider}!`);
+      // Outro — completion message only (green for success)
+      outro(pc.green(`Database setup completed for ${answers.provider}!`));
     } catch (error) {
       // Handle cancellation - propagate to CLI for consistent rendering
       if (isCancel(error)) {
@@ -2401,8 +2401,8 @@ export const databaseGenerator: Generator = {
       }
 
       // Handle other errors — the CLI's error formatter prints the message;
-      // the outro marks the Clack boundary without duplicating it.
-      outro(`Failed to setup database for ${answers.provider}`);
+      // the outro marks the Clack boundary without duplicating it (red for error).
+      outro(pc.red(`Failed to setup database for ${answers.provider}`));
       throw error;
     }
   },

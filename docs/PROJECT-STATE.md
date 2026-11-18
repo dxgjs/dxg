@@ -53,7 +53,6 @@ Versions and changelogs are managed with changesets, one version per package (in
 
 - **Other generators.** `init`, `tailwind` and `auth` were considered earlier but are not part of DXG: the only generator is `database`.
 - **A generator registry.** `dxg add` resolves generators from a fixed map in `apps/cli/src/commands/add.ts`.
-- **A plugin system.** It exists only as an idea, in [`vision/PLUGIN-SYSTEM.md`](vision/PLUGIN-SYSTEM.md).
 - **Rollback or transactions.** A failed run is not rolled back. Use `--dry-run` first and rely on idempotence to re-run safely.
 
 ## Known environment constraints
