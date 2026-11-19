@@ -18,9 +18,18 @@ describe("drizzle-flow", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockContext = {
-      fs: {} as any,
+      fs: {
+        pathExists: vi.fn(),
+        readFile: vi.fn(),
+        writeFile: vi.fn(),
+        stat: vi.fn(),
+        mkdir: vi.fn(),
+        readdir: vi.fn(),
+        readJson: vi.fn(),
+        writeJson: vi.fn(),
+      },
       templates: { render: vi.fn() },
-      awareness: {} as any,
+      awareness: {} as GeneratorContext["awareness"],
       dryRun: false,
       force: false,
       nonInteractive: false,
