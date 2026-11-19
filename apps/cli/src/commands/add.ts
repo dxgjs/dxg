@@ -28,6 +28,11 @@ export function registerAddCommand(program: Command): void {
       "Provider to use (for database: sqlite|postgresql|mysql|sqlserver|cockroachdb|planetscale|prisma-postgres)",
     )
     .option(
+      "--orm <type>",
+      "ORM to use (prisma|drizzle)",
+      "prisma"
+    )
+    .option(
       "--non-interactive",
       "Do not prompt for input; fail if required values are missing",
     )

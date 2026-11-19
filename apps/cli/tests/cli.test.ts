@@ -259,4 +259,31 @@ describe("add command (dxg add <generator>)", () => {
       process.exitCode = before;
     }
   });
+
+  test("--orm flag is forwarded as a plain answer", async () => {
+    await runCli(["add", "db", "--orm", "prisma"]);
+
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
+    expect(calls).toHaveLength(1);
+    const [answers] = calls[0];
+    expect(answers.orm).toBe("prisma");
+  });
+
+  test("--orm flag with drizzle value is forwarded", async () => {
+    await runCli(["add", "db", "--orm", "drizzle"]);
+
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
+    expect(calls).toHaveLength(1);
+    const [answers] = calls[0];
+    expect(answers.orm).toBe("drizzle");
+  });
+
+  test("--orm flag works with database alias too", async () => {
+    await runCli(["add", "database", "--orm", "prisma"]);
+
+    const calls = vi.mocked(databaseGenerator.run).mock.calls;
+    expect(calls).toHaveLength(1);
+    const [answers] = calls[0];
+    expect(answers.orm).toBe("prisma");
+  });
 });
