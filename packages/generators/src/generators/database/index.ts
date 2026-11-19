@@ -2410,3 +2410,9 @@ export const databaseGenerator: Generator = {
 
 // Default export for convenience
 export default databaseGenerator;
+
+// Re-export new exports from prisma-flow for backward compatibility
+export {
+  setupPrismaFlow,
+  type PlanDatabaseResult,
+} from "./prisma-flow";
