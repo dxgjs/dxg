@@ -195,7 +195,21 @@ vi.mock("@dxgjs/fs", async () => {
         };
       },
     ),
-    executeCommand: vi.fn().mockImplementation(
+    resolvePackageManagerCommands: vi.fn().mockImplementation(
+        (agent: import("@dxgjs/fs").PackageManagerAgent) => {
+          const commands: Record<
+            import("@dxgjs/fs").PackageManagerAgent,
+            { run: string; exec: string }
+          > = {
+            npm: { run: "npm run", exec: "npx" },
+            pnpm: { run: "pnpm", exec: "pnpm dlx" },
+            yarn: { run: "yarn", exec: "yarn dlx" },
+            bun: { run: "bun run", exec: "bunx" },
+          };
+          return commands[agent] ?? commands.npm;
+        },
+      ),
+      executeCommand: vi.fn().mockImplementation(
       async (command: string, args: string[] = []) => {
         // Simulate the package manager persisting installed dependencies
         // into package.json (same semantics as package-manifest.test.ts).
@@ -482,6 +496,8 @@ describe("interactive database scripts phase", () => {
       })
       .mockResolvedValueOnce({
         databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
+      })
+      .mockResolvedValueOnce({
         installPrismaSkills: false,
         databaseScripts: "recommended",
       })
@@ -489,7 +505,7 @@ describe("interactive database scripts phase", () => {
         helperPath: "lib/prisma.ts",
       });
 
-    await databaseGenerator.run({}, makeContext());
+    await databaseGenerator.run({ orm: "prisma" }, makeContext());
 
     // The phase question is asked interactively...
     const question = scriptsQuestion();
@@ -529,14 +545,17 @@ describe("interactive database scripts phase", () => {
     await seedProject();
     // Provider is provided in run() call, so NOT prompted.
     // First call: configureDatabaseUrl (opt-in confirm)
-    // Second call: databaseUrl + databaseScripts (combined)
-    // Third call: helperPath
+    // Second call: databaseUrl
+    // Third call: databaseScripts (combined with skills if needed)
+    // Fourth call: helperPath
     (promptMock as unknown as Mock)
       .mockResolvedValueOnce({
         configureDatabaseUrl: true,
       })
       .mockResolvedValueOnce({
         databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
+      })
+      .mockResolvedValueOnce({
         databaseScripts: "customize",
       })
       .mockResolvedValueOnce({
@@ -548,7 +567,7 @@ describe("interactive database scripts phase", () => {
     ]);
 
     await databaseGenerator.run(
-      { provider: "postgresql", installPrismaSkills: false },
+      { orm: "prisma", provider: "postgresql", installPrismaSkills: false },
       makeContext(),
     );
 

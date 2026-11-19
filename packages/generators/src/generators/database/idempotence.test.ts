@@ -178,7 +178,21 @@ vi.mock("@dxgjs/fs", async () => {
         };
       },
     ),
-    executeCommand: vi.fn().mockImplementation(
+    resolvePackageManagerCommands: vi.fn().mockImplementation(
+        (agent: import("@dxgjs/fs").PackageManagerAgent) => {
+          const commands: Record<
+            import("@dxgjs/fs").PackageManagerAgent,
+            { run: string; exec: string }
+          > = {
+            npm: { run: "npm run", exec: "npx" },
+            pnpm: { run: "pnpm", exec: "pnpm dlx" },
+            yarn: { run: "yarn", exec: "yarn dlx" },
+            bun: { run: "bun run", exec: "bunx" },
+          };
+          return commands[agent] ?? commands.npm;
+        },
+      ),
+      executeCommand: vi.fn().mockImplementation(
       async (command: string, args: string[] = []) => {
         // Simulate the package manager persisting installed dependencies
         // into package.json. Command shape: getCliCommand resolves batches
@@ -640,7 +654,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
     await seedProject(SATISFIED_PACKAGE_JSON);
 
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       makeContext(),
     );
 
@@ -667,7 +681,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
 
     const context = makeContext();
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false, databaseScripts: "recommended" },
+      { provider: "sqlite", installPrismaSkills: false, databaseScripts: "recommended", databaseUrl: "file:./dev.db" },
       context,
     );
     const schemaAfterFirst = fsMockStore._files.get("prisma/schema.prisma");
@@ -676,7 +690,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
     (fs.executeCommand as Mock).mockClear();
 
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false, databaseScripts: "recommended" },
+      { provider: "sqlite", installPrismaSkills: false, databaseScripts: "recommended", databaseUrl: "file:./dev.db" },
       context,
     );
 
@@ -733,7 +747,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
     fsMockStore._directories.add("prisma");
 
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       makeContext(),
     );
 
@@ -770,7 +784,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
     );
 
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       makeContext(),
     );
 
@@ -794,7 +808,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
     // other specs install. DXG never force-reinstalls on a satisfied
     // declaration.
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       makeContext(),
     );
 
@@ -819,13 +833,13 @@ describe("idempotence reconciliation (satisfied state)", () => {
     await seedProject(MY_APP_PACKAGE_JSON);
     const context = makeContext();
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       context,
     );
     (fs.executeCommand as Mock).mockClear();
 
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       context,
     );
 
@@ -890,6 +904,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
         provider: "sqlite",
         installPrismaSkills: false,
         databaseScripts: ["db:generate", "db:push", "db:seed"],
+        databaseUrl: "file:./dev.db",
       },
       makeContext(),
     );
@@ -931,7 +946,7 @@ describe(".env additive reconciliation", () => {
     seedReconciledProject();
 
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       makeContext(),
     );
 
@@ -961,7 +976,7 @@ describe(".env additive reconciliation", () => {
     fsMockStore._files.set(".env", originalEnv);
 
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       makeContext(),
     );
 
@@ -986,7 +1001,7 @@ describe(".env additive reconciliation", () => {
     fsMockStore._files.set(".env", originalEnv);
 
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       makeContext(),
     );
 
@@ -1026,6 +1041,7 @@ describe("helper path resolution and dynamic imports", () => {
         provider: "sqlite",
         installPrismaSkills: false,
         helperPath: "src/lib/db.ts",
+        databaseUrl: "file:./dev.db",
       },
       makeContext(),
     );
@@ -1055,6 +1071,7 @@ describe("helper path resolution and dynamic imports", () => {
         provider: "sqlite",
         installPrismaSkills: false,
         helperPath: "src/lib/prisma.ts",
+        databaseUrl: "file:./dev.db",
       },
       makeContext(),
     );
@@ -1065,7 +1082,7 @@ describe("helper path resolution and dynamic imports", () => {
     // Second run WITHOUT an explicit helperPath: the inspection discovers
     // src/lib/prisma.ts and planDatabase reuses it — still no lib/prisma.ts.
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       makeContext(),
     );
     expect(fsMockStore._files.has("src/lib/prisma.ts")).toBe(true);
@@ -1081,6 +1098,7 @@ describe("helper path resolution and dynamic imports", () => {
           provider: "sqlite",
           installPrismaSkills: false,
           helperPath: "/absolutely/not/here.ts",
+          databaseUrl: "file:./dev.db",
         },
         makeContext(),
       ),
@@ -1098,6 +1116,7 @@ describe("helper path resolution and dynamic imports", () => {
           provider: "sqlite",
           installPrismaSkills: false,
           helperPath: "prisma/seed.ts",
+          databaseUrl: "file:./dev.db",
         },
         makeContext(),
       ),
@@ -1112,6 +1131,7 @@ describe("helper path resolution and dynamic imports", () => {
         provider: "sqlite",
         installPrismaSkills: false,
         helperPath: "src\\helpers\\db",
+        databaseUrl: "file:./dev.db",
       },
       makeContext(),
     );
@@ -1174,6 +1194,7 @@ describe("mode contracts and staleness", () => {
         provider: "sqlite",
         installPrismaSkills: false,
         databaseScripts: "skip",
+        databaseUrl: "file:./dev.db",
       },
       makeContext(),
     );
@@ -1187,6 +1208,7 @@ describe("mode contracts and staleness", () => {
         provider: "sqlite",
         installPrismaSkills: false,
         databaseScripts: "skip",
+        databaseUrl: "file:./dev.db",
       },
       makeContext({ force: true }),
     );
@@ -1202,7 +1224,7 @@ describe("mode contracts and staleness", () => {
 
     // Run 1: full setup.
     await databaseGenerator.run(
-      { provider: "sqlite", installPrismaSkills: false },
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
       makeContext(),
     );
 

@@ -11,7 +11,7 @@ import {
 import * as fs from "@dxgjs/fs";
 import type { ReadFileOptions, WriteFileOptions, MkdirOptions } from "@dxgjs/fs";
 import { render as realRender } from "@dxgjs/templates";
-import { note as noteMock, prompt as promptMock } from "@dxgjs/prompts";
+import { note as noteMock, prompt as promptMock, outro as outroMock } from "@dxgjs/prompts";
 import * as path from "path";
 import * as os from "os";
 import { getCliCommand } from "@antfu/ni";
@@ -305,7 +305,21 @@ vi.mock("@dxgjs/fs", async () => {
     // Fake side-effecting subprocess (hoisted defaultExecuteFake): installs
     // the default fake; scenario tests override it and beforeEach
     // reinstalls this default so implementations never leak between tests.
-    executeCommand: vi.fn().mockImplementation(defaultExecuteFake),
+    resolvePackageManagerCommands: vi.fn().mockImplementation(
+        (agent: import("@dxgjs/fs").PackageManagerAgent) => {
+          const commands: Record<
+            import("@dxgjs/fs").PackageManagerAgent,
+            { run: string; exec: string }
+          > = {
+            npm: { run: "npm run", exec: "npx" },
+            pnpm: { run: "pnpm", exec: "pnpm dlx" },
+            yarn: { run: "yarn", exec: "yarn dlx" },
+            bun: { run: "bun run", exec: "bunx" },
+          };
+          return commands[agent] ?? commands.npm;
+        },
+      ),
+      executeCommand: vi.fn().mockImplementation(defaultExecuteFake),
   };
   return _mock;
 });
@@ -448,6 +462,28 @@ function makeInstaller() {
   return createDependencyInstaller({ agent: "npm", fs: fs as FSInterface });
 }
 
+function makeContext(overrides: Record<string, unknown> = {}) {
+  return {
+    logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+    fs,
+    templates: { render: vi.fn(realRender) },
+    installer: makeInstaller(),
+    awareness: {
+      projectRoot: ".",
+      workspaceRoot: ".",
+      framework: { name: "unknown" as const, detected: false },
+      language: { name: "javascript" as const, detected: true },
+      packageManager: "npm",
+      styling: { name: "none", detected: false, version: null, configFile: null },
+      capabilities: { hasTests: false, hasLinting: false, hasFormatter: false, hasCI: false, hasDocker: false },
+      packageJson: { name: "test-project", version: "1.0.0", private: true },
+    },
+    dryRun: false,
+    force: false,
+    ...overrides,
+  };
+}
+
 describe("Database Generator", () => {
   let originalCwd: string;
   let tempDir: string;
@@ -522,12 +558,23 @@ describe("Database Generator", () => {
   test("databaseGenerator should have correct prompts for all providers", () => {
     const prompts = databaseGenerator.prompts;
 
-    // First prompt: provider
-    expect(prompts[0].name).toBe("provider");
+    // First prompt: ORM selection
+    expect(prompts[0].name).toBe("orm");
     expect(prompts[0].type).toBe("select");
-    expect(prompts[0].message).toBe("Choose your database provider:");
-    expect(prompts[0].default).toBe("postgresql");
-    const choices = prompts[0].choices;
+    expect(prompts[0].message).toBe("Which ORM would you like to use?");
+    expect(prompts[0].initialValue).toBe("prisma");
+    const ormChoices = prompts[0].choices;
+    expect(Array.isArray(ormChoices)).toBe(true);
+    expect(ormChoices!.length).toBe(2); // prisma and drizzle
+    expect(ormChoices!.find((c: { value: string }) => c.value === "prisma")).toBeDefined();
+    expect(ormChoices!.find((c: { value: string }) => c.value === "drizzle")).toBeDefined();
+
+    // Second prompt: provider
+    expect(prompts[1].name).toBe("provider");
+    expect(prompts[1].type).toBe("select");
+    expect(prompts[1].message).toBe("Choose your database provider:");
+    expect(prompts[1].default).toBe("postgresql");
+    const choices = prompts[1].choices;
     expect(Array.isArray(choices)).toBe(true);
     expect(choices!.length).toBe(Object.values(providerDataValue).length); // 7 providers
 
@@ -541,25 +588,176 @@ describe("Database Generator", () => {
     expect(choiceValues).toContain("planetscale");
     expect(choiceValues).toContain("prismapostgres");
 
-    // Second prompt: DATABASE_URL for SQLite (conditional prompt)
+    // Third prompt: DATABASE_URL for SQLite (conditional prompt)
     // This prompt is shown when provider is sqlite and databaseUrl is not provided.
-    expect(prompts[1].name).toBe("databaseUrl");
-    expect(prompts[1].type).toBe("input");
-    expect(prompts[1].message).toBe("Database connection URL (DATABASE_URL):");
-    // Third prompt: the Prisma agent skills decision — owned by DXG
+    expect(prompts[2].name).toBe("databaseUrl");
+    expect(prompts[2].type).toBe("input");
+    expect(prompts[2].message).toBe("Database connection URL (DATABASE_URL):");
+    // Fourth prompt: the Prisma agent skills decision — owned by DXG
     // (a Clack confirm), so Prisma itself never asks this question.
-    expect(prompts[2].name).toBe("installPrismaSkills");
-    expect(prompts[2].type).toBe("confirm");
-    expect(prompts[2].message).toBe("Install Prisma agent skills?");
+    expect(prompts[3].name).toBe("installPrismaSkills");
+    expect(prompts[3].type).toBe("confirm");
+    expect(prompts[3].message).toBe("Install Prisma agent skills?");
     // Default is No: skills artifacts (.claude/skills/, .windsurf/skills/,
     // .agents/skills/, skills-lock.json) only land in the project when the
     // user explicitly opts in.
-    expect(prompts[2].default).toBe(false);
+    expect(prompts[3].default).toBe(false);
   });
 
   test("databaseGenerator should validate correctly", () => {
     // Since verifyDatabase is the exported validation function
     expect(typeof verifyDatabase).toBe("function");
+  });
+
+  describe("ORM selection", () => {
+    let originalCwd: string;
+    let tempDir: string;
+
+    beforeEach(async () => {
+      originalCwd = process.cwd();
+      vi.stubEnv("CI", "");
+      tempDir = path.join(os.tmpdir(), `dxg-orm-test-${Date.now()}`);
+      fs.mkdirSync(tempDir, { recursive: true });
+      process.chdir(tempDir);
+      workaroundFlags.triggerPrismaInitWorkaround = false;
+      workaroundFlags.triggerPrismaGenerateWorkaround = false;
+      fsMockStore._files.clear();
+      fsMockStore._directories.clear();
+      lastPrismaInitOutput = null;
+      (fs.executeCommand as Mock).mockClear();
+      (fs.executeCommand as Mock).mockImplementation(defaultExecuteFake);
+      await fs.writeFile("package.json", '{"devDependencies":{}}', { encoding: "utf8" });
+    });
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      process.chdir(originalCwd);
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    test("prompts for ORM selection when --orm flag not provided (interactive)", async () => {
+      const mockContext = makeContext();
+
+      // First prompt: ORM selection
+      (promptMock as Mock)
+        .mockResolvedValueOnce({ orm: "prisma" })  // ORM prompt
+        .mockResolvedValueOnce({ provider: "sqlite" })  // provider prompt
+        .mockResolvedValueOnce({ configureDatabaseUrl: false })  // server provider opt-in
+        .mockResolvedValueOnce({ installPrismaSkills: false, databaseScripts: "recommended" })  // skills + scripts
+        .mockResolvedValueOnce({ helperPath: "lib/prisma.ts" });  // helper path
+
+      await databaseGenerator.run({}, mockContext);
+
+      // First prompt call should be ORM selection
+      const firstCallQuestions = (promptMock as Mock).mock.calls[0][0] as Array<{
+        name: string;
+        message: string;
+        type: string;
+        initialValue: string;
+        choices: Array<{ name: string; value: string; hint?: string }>;
+      }>;
+      expect(firstCallQuestions.map((q) => q.name)).toEqual(["orm"]);
+      expect(firstCallQuestions[0].message).toBe("Which ORM would you like to use?");
+      expect(firstCallQuestions[0].type).toBe("select");
+      expect(firstCallQuestions[0].initialValue).toBe("prisma");
+      // Check choices include prisma and drizzle with hints
+      const choices = firstCallQuestions[0].choices;
+      expect(choices.find(c => c.value === "prisma")?.hint).toBe("Next-generation ORM with schema & migrations");
+      expect(choices.find(c => c.value === "drizzle")?.hint).toBe("Lightweight & SQL-like TypeScript ORM (Coming soon)");
+    });
+
+    test("skips ORM prompt when --orm prisma provided via CLI", async () => {
+      const mockContext = makeContext();
+
+      // Should NOT have ORM prompt, first prompt should be provider
+      (promptMock as Mock)
+        .mockResolvedValueOnce({ provider: "sqlite" })
+        .mockResolvedValueOnce({ configureDatabaseUrl: false })
+        .mockResolvedValueOnce({ installPrismaSkills: false, databaseScripts: "recommended" })
+        .mockResolvedValueOnce({ helperPath: "lib/prisma.ts" });
+
+      await databaseGenerator.run({ orm: "prisma" }, mockContext);
+
+      // First prompt should be provider, not orm
+      const firstCallQuestions = (promptMock as Mock).mock.calls[0][0] as Array<{ name: string }>;
+      expect(firstCallQuestions.map((q) => q.name)).toEqual(["provider"]);
+    });
+
+    test("skips ORM prompt when --orm drizzle provided via CLI", async () => {
+      const mockContext = makeContext();
+
+      // Should call setupDrizzleFlow, no Prisma prompts
+      await databaseGenerator.run({ orm: "drizzle" }, mockContext);
+
+      // No prompts at all for drizzle
+      expect(promptMock).not.toHaveBeenCalled();
+      // Should have shown the coming soon note and outro
+      expect(noteMock).toHaveBeenCalled();
+      expect(outroMock).toHaveBeenCalled();
+    });
+
+    test("handles ORM selection: user picks drizzle interactively", async () => {
+      const mockContext = makeContext();
+
+      (promptMock as Mock)
+        .mockResolvedValueOnce({ orm: "drizzle" });  // User picks drizzle
+
+      await databaseGenerator.run({}, mockContext);
+
+      // Should have shown drizzle coming soon message
+      expect(noteMock).toHaveBeenCalled();
+      const noteCall = String((noteMock as Mock).mock.calls[0][0]);
+      expect(noteCall).toContain("Drizzle ORM support is coming soon");
+      expect(outroMock).toHaveBeenCalled();
+    });
+
+    test("handles ORM selection: user picks prisma interactively", async () => {
+      const mockContext = makeContext();
+
+      (promptMock as Mock)
+        .mockResolvedValueOnce({ orm: "prisma" })  // User picks prisma
+        .mockResolvedValueOnce({ provider: "sqlite" })
+        .mockResolvedValueOnce({ configureDatabaseUrl: false })
+        .mockResolvedValueOnce({ installPrismaSkills: false, databaseScripts: "recommended" })
+        .mockResolvedValueOnce({ helperPath: "lib/prisma.ts" });
+
+      await databaseGenerator.run({}, mockContext);
+
+      // Should proceed with full Prisma flow
+      expect(promptMock).toHaveBeenCalledTimes(5); // orm + provider + configureUrl + skills/scripts + helperPath
+      expect(fs.executeCommand).toHaveBeenCalled(); // Prisma commands executed
+    });
+
+    test("cancellation on ORM prompt exits cleanly", async () => {
+      const mockContext = makeContext();
+
+      // Need to import the CANCEL_STANDIN from the test setup
+      const CANCEL_STANDIN = Symbol("clack:cancel");
+      (promptMock as Mock).mockRejectedValueOnce(CANCEL_STANDIN);
+
+      await expect(databaseGenerator.run({}, mockContext)).rejects.toThrow(CANCEL_STANDIN);
+
+      // No further prompts or execution
+      expect(promptMock).toHaveBeenCalledTimes(1);
+      expect(fs.executeCommand).not.toHaveBeenCalled();
+    });
+
+    test("invalid --orm value throws ValidationError", async () => {
+      const mockContext = makeContext({ nonInteractive: true });
+
+      await expect(databaseGenerator.run({ orm: "invalid-orm" }, mockContext))
+        .rejects.toThrow(/Unsupported ORM: invalid-orm. Supported: prisma, drizzle/);
+    });
+
+    test("non-interactive mode with --orm drizzle exits gracefully", async () => {
+      const mockContext = makeContext({ nonInteractive: true });
+
+      // Should not throw, should show coming soon message
+      await databaseGenerator.run({ orm: "drizzle" }, mockContext);
+
+      expect(noteMock).toHaveBeenCalled();
+      expect(outroMock).toHaveBeenCalled();
+    });
   });
 
   /**
@@ -1874,8 +2072,9 @@ describe("Database Generator", () => {
       });
       // First call: provider
       // Second call: configureDatabaseUrl (opt-in confirm for server providers)
-      // Third call: databaseUrl, skills, databaseScripts (user said yes to configure)
-      // Fourth call: helperPath
+      // Third call: databaseUrl (user said yes to configure)
+      // Fourth call: skills, databaseScripts
+      // Fifth call: helperPath
       (promptMock as unknown as Mock)
         .mockResolvedValueOnce({
           provider: "postgresql",
@@ -1885,6 +2084,8 @@ describe("Database Generator", () => {
         })
         .mockResolvedValueOnce({
           databaseUrl: "postgresql://USER:PASSWORD@HOST:5432/DATABASE?schema=public",
+        })
+        .mockResolvedValueOnce({
           installPrismaSkills: false,
           databaseScripts: "recommended",
         })
@@ -1892,7 +2093,7 @@ describe("Database Generator", () => {
           helperPath: "lib/prisma.ts",
         });
 
-      await databaseGenerator.run({}, makeContext());
+      await databaseGenerator.run({ orm: "prisma" }, makeContext());
 
       // First prompt call: provider
       const firstCallQuestions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
@@ -1915,38 +2116,46 @@ describe("Database Generator", () => {
       expect(secondCallQuestions[0].message).toBe("Configure database connection URL now?");
       expect(secondCallQuestions[0].default).toBe(false);
 
-      // Third prompt call: databaseUrl, skills, databaseScripts
+      // Third prompt call: databaseUrl
       const thirdCallQuestions = (promptMock as unknown as Mock).mock.calls[2][0] as Array<{
         name: string;
         type: string;
         message: string;
         default?: unknown;
       }>;
-      expect(thirdCallQuestions.map((q) => q.name)).toEqual([
-        "databaseUrl",
-        "installPrismaSkills",
-        "databaseScripts",
-      ]);
+      expect(thirdCallQuestions.map((q) => q.name)).toEqual(["databaseUrl"]);
       // databaseUrl is now the first question (input type)
       expect(thirdCallQuestions[0].type).toBe("input");
-      // installPrismaSkills is the second question (confirm type)
-      expect(thirdCallQuestions[1].type).toBe("confirm");
-      expect(thirdCallQuestions[1].message).toBe("Install Prisma agent skills?");
-      expect(thirdCallQuestions[1].default).toBe(false);
-      // The database scripts phase question follows the skills question.
-      expect(thirdCallQuestions[2].type).toBe("select");
-      expect(thirdCallQuestions[2].default).toBe("recommended");
 
-      // Fourth prompt call: helperPath
+      // Fourth prompt call: skills, databaseScripts
       const fourthCallQuestions = (promptMock as unknown as Mock).mock.calls[3][0] as Array<{
         name: string;
         type: string;
         message: string;
         default?: unknown;
       }>;
-      expect(fourthCallQuestions.map((q) => q.name)).toEqual(["helperPath"]);
-      expect(fourthCallQuestions[0].type).toBe("input");
-      expect(fourthCallQuestions[0].default).toBe("lib/prisma.ts");
+      expect(fourthCallQuestions.map((q) => q.name)).toEqual([
+        "installPrismaSkills",
+        "databaseScripts",
+      ]);
+      // installPrismaSkills is the first question (confirm type)
+      expect(fourthCallQuestions[0].type).toBe("confirm");
+      expect(fourthCallQuestions[0].message).toBe("Install Prisma agent skills?");
+      expect(fourthCallQuestions[0].default).toBe(false);
+      // The database scripts phase question follows the skills question.
+      expect(fourthCallQuestions[1].type).toBe("select");
+      expect(fourthCallQuestions[1].default).toBe("recommended");
+
+      // Fifth prompt call: helperPath
+      const fifthCallQuestions = (promptMock as unknown as Mock).mock.calls[4][0] as Array<{
+        name: string;
+        type: string;
+        message: string;
+        default?: unknown;
+      }>;
+      expect(fifthCallQuestions.map((q) => q.name)).toEqual(["helperPath"]);
+      expect(fifthCallQuestions[0].type).toBe("input");
+      expect(fifthCallQuestions[0].default).toBe("lib/prisma.ts");
 
       // The "No" answer flows through to the Prisma arguments.
       expect(getPrismaInitArgs()).toContain("--no-skills");
@@ -1956,11 +2165,10 @@ describe("Database Generator", () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      // First call: databaseUrl, skills, databaseScripts (provider already provided as sqlite)
+      // First call: skills, databaseScripts (provider and databaseUrl already provided)
       // Second call: helperPath
       (promptMock as unknown as Mock)
         .mockResolvedValueOnce({
-          databaseUrl: "file:./dev.db",
           installPrismaSkills: true,
           databaseScripts: "recommended",
         })
@@ -1968,9 +2176,9 @@ describe("Database Generator", () => {
           helperPath: "lib/prisma.ts",
         });
 
-      await databaseGenerator.run({ provider: "sqlite" }, makeContext());
+      await databaseGenerator.run({ orm: "prisma", provider: "sqlite", databaseUrl: "file:./dev.db" }, makeContext());
 
-      // First prompt call: databaseUrl, skills, databaseScripts (provider already provided)
+      // First prompt call: skills, databaseScripts (provider and databaseUrl already provided)
       const firstCallQuestions = (promptMock as unknown as Mock).mock.calls[0][0] as Array<{
         name: string;
         type: string;
@@ -1978,7 +2186,6 @@ describe("Database Generator", () => {
         default?: unknown;
       }>;
       expect(firstCallQuestions.map((q) => q.name)).toEqual([
-        "databaseUrl",
         "installPrismaSkills",
         "databaseScripts",
       ]);

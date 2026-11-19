@@ -5,9 +5,7 @@ import { addPackageScripts, open } from "@dxgjs/fs";
 // Import Clack-native UX utilities from @dxgjs/prompts
 import {
   intro,
-  outro,
   isCancel,
-  cancel,
   spinner,
   note,
   prompt,
@@ -30,15 +28,17 @@ import { withDlxBuildApprovals } from "../../install/dlx";
 
 // DXG Error types
 import {
-  PrismaVersionConflictError,
   ProviderUnsupportedError,
-  ProviderMismatchError,
   BuildBlockedError,
   TemplateMissingError,
   InstallerFailureError,
   ValidationError,
   SpawnError,
 } from "@dxgjs/errors";
+
+// ORM flow modules
+import { setupPrismaFlow } from "./prisma-flow";
+import { setupDrizzleFlow } from "./drizzle-flow";
 
 // Shared database meta (single source of truth for Prisma version, providers, scripts, paths)
 import {
@@ -57,17 +57,13 @@ import {
   resolveDatabaseScripts,
   normalizeContent,
   sanitizeEnvValue,
-  validateDatabase,
   computeRelativeImport,
   computeFileImport,
   normalizeHelperPath,
   validateHelperPath,
   providersMatch,
-  normalizePrismaProvider,
   specName,
 } from "@dxgjs/database-meta";
-import { detectPrismaState } from "./detect-prisma-state";
-import { inspectDatabase } from "./inspect";
 
 // Get the directory where this module is located
 const __filename = fileURLToPath(import.meta.url);
@@ -95,6 +91,11 @@ export {
   SEED_FILE_PATH,
   SEED_CONFIG_COMMAND,
   PRISMA_CONFIG_PATH,
+  PRISMA_PINNED_VERSION,
+  DEFAULT_GENERATOR_OUTPUT,
+  DEFAULT_HELPER_PATH,
+  normalizePrismaProvider,
+  providersMatch,
 } from "@dxgjs/database-meta";
 export {
   providerScripts,
@@ -102,6 +103,8 @@ export {
   resolveDatabaseScripts,
 } from "@dxgjs/database-meta";
 export { buildPrismaInitArgs } from "@dxgjs/database-meta";
+export { detectPrismaState } from "./detect-prisma-state";
+export { inspectDatabase } from "./inspect";
 
 // Patch providerData with correct template paths for this package
 // The database-meta package calculates paths relative to itself, but templates
@@ -124,6 +127,18 @@ const providerDataLocal = patchedProviderData;
 
 // Prompt questions for the database generator
 export const databasePrompts = [
+  {
+    // ORM selection prompt: first interaction when --orm flag not provided.
+    // Prisma is default; Drizzle shows "Coming soon" hint.
+    type: "select" as const,
+    name: "orm",
+    message: "Which ORM would you like to use?",
+    initialValue: "prisma",
+    choices: [
+      { name: "Prisma", value: "prisma", hint: "Next-generation ORM with schema & migrations" },
+      { name: "Drizzle", value: "drizzle", hint: "Lightweight & SQL-like TypeScript ORM (Coming soon)" },
+    ],
+  },
   {
     type: "select" as const,
     name: "provider",
@@ -194,7 +209,7 @@ export const databasePrompts = [
   message: string;
   default?: unknown;
   initialValue?: unknown;
-  choices?: Array<{ name: string; value: string }>;
+  choices?: Array<{ name: string; value: string; hint?: string }>;
   validate?: (input: unknown) => boolean | string;
 }[];
 
@@ -215,7 +230,7 @@ export const databasePrompts = [
  */
 
 // Precondition checks
-async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
+export async function checkPreconditions(ctx: GeneratorContext): Promise<void> {
   // 1. package.json must exist (we are adding to an existing project)
   const packageJsonExists = await ctx.fs.pathExists("package.json");
   if (!packageJsonExists) {
@@ -534,7 +549,7 @@ export function planDatabase(
 }
 
 /** Runs the interactive part of the customize branch (the multiselect). */
-async function promptCustomScripts(providerKey: string): Promise<string[]> {
+export async function promptCustomScripts(providerKey: string): Promise<string[]> {
   const offered = providerScripts(providerKey);
   const selected = await multiselect({
     message: "Select database scripts to add",
@@ -564,7 +579,7 @@ async function promptCustomScripts(providerKey: string): Promise<string[]> {
  * task; this one intentionally handles only the single shape `prisma
  * init` writes (verified against the prisma@7.10.0 CLI bundle).
  */
-function insertSeedIntoPrismaConfig(configText: string): string | undefined {
+export function insertSeedIntoPrismaConfig(configText: string): string | undefined {
   // A pre-existing seed line is REPLACED in place (the --force path —
   // a conflict was already reported for the different value, force
   // resolves it by overwriting, exactly like conflicting scripts).
@@ -602,7 +617,7 @@ function insertSeedIntoPrismaConfig(configText: string): string | undefined {
  * file's raw text, if one is configured. Returns the trimmed command
  * string (e.g. `"node custom-seed.js"`) or undefined.
  */
-function readSeedFromPrismaConfig(configText: string): string | undefined {
+export function readSeedFromPrismaConfig(configText: string): string | undefined {
   const match = configText.match(/seed\s*:\s*["']([^"']+)["']/);
   return match ? match[1] : undefined;
 }
@@ -616,7 +631,7 @@ function readSeedFromPrismaConfig(configText: string): string | undefined {
  * preserved byte-for-byte. Domain-local on purpose — Prisma seed-config
  * knowledge belongs to the database domain.
  */
-async function applySeedConfigToPrismaFile(
+export async function applySeedConfigToPrismaFile(
   fs: GeneratorContext["fs"],
   projectRoot: string,
   force: boolean,
@@ -666,7 +681,7 @@ async function applySeedConfigToPrismaFile(
  * Writes a file with restricted permissions (0o600) for sensitive files like .env.
  * Uses fs.open to explicitly set the mode, avoiding world-readable defaults.
  */
-async function writeSecureFile(filePath: string, content: string): Promise<void> {
+export async function writeSecureFile(filePath: string, content: string): Promise<void> {
   const fd = await open(filePath, "w", 0o600);
   try {
     await fd.writeFile(content, "utf8");
@@ -681,7 +696,7 @@ async function writeSecureFile(filePath: string, content: string): Promise<void>
 // INSIDE the project whatever the helper path. (Replaces the old
 // /lib|custom/ heuristics, which could resolve the client outside the
 // helper's subtree — even above the project root.)
-function computeDefaultGeneratorOutput(helperPath: string): string {
+export function computeDefaultGeneratorOutput(helperPath: string): string {
   return posix.join(posix.dirname(helperPath), "generated", "prisma");
 }
 
@@ -692,7 +707,7 @@ function computeDefaultGeneratorOutput(helperPath: string): string {
  * - mysql: DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME, DATABASE_PORT
  * - sqlserver: HOST, DB_USER, DB_PASSWORD, DB_NAME
  */
-function buildIndividualEnvLines(providerKey: string, databaseUrl: string): string {
+export function buildIndividualEnvLines(providerKey: string, databaseUrl: string): string {
   const parsed = parseDatabaseUrl(providerKey, databaseUrl);
   if (!parsed) {
     return "";
@@ -723,7 +738,7 @@ function buildIndividualEnvLines(providerKey: string, databaseUrl: string): stri
  * Parses a database URL for mysql or sqlserver format.
  * Returns extracted components or null if parsing fails.
  */
-function parseDatabaseUrl(
+export function parseDatabaseUrl(
   providerKey: string,
   databaseUrl: string,
 ): { host?: string; user?: string; password?: string; database?: string; port?: string } | null {
@@ -1908,503 +1923,71 @@ export const databaseGenerator: Generator = {
     const ctx = context;
 
     // Collect inputs - use CLI/provided answers
-    let answers = { ...cliAnswers };
+    const answers = { ...cliAnswers };
 
     // ============================================================
-    // STEP 1: Validate provider BEFORE any prompts or side effects
+    // STEP 0: ORM Selection (MUST BE FIRST - before provider validation)
     // ============================================================
-    // Normalize provider (postgres -> postgresql) and validate it's supported
-    const rawProvider = answers.provider as string | undefined;
-    let normalizedProvider: string | undefined;
-    if (rawProvider !== undefined) {
-      normalizedProvider = normalizePrismaProvider(rawProvider);
-      answers.provider = normalizedProvider;
-    }
+    // Get ORM from CLI flag or prompt interactively
+    const rawOrm = answers.orm as string | undefined;
+    let orm: "prisma" | "drizzle" | undefined;
 
-    // Check if provider is supported (fail fast with dedicated error code)
-    const supportedProviders = Object.keys(providerDataLocal);
-    if (
-      normalizedProvider !== undefined &&
-      !providerDataLocal[normalizedProvider as keyof typeof providerDataLocal]
-    ) {
-      throw new ProviderUnsupportedError(
-        normalizedProvider,
-        supportedProviders,
-      );
-    }
-
-    // ============================================================
-    // STEP 2: Detect existing Prisma state (read-only)
-    // ============================================================
-    const prismaState = await detectPrismaState(ctx);
-
-    // ============================================================
-    // STEP 3: Compare providers (mismatch -> error, before prompts)
-    // ============================================================
-    if (
-      prismaState.installed &&
-      prismaState.provider &&
-      normalizedProvider !== undefined &&
-      !providersMatch(prismaState.provider, normalizedProvider)
-    ) {
-      throw new ProviderMismatchError(prismaState.provider, normalizedProvider);
-    }
-
-    // ============================================================
-    // STEP 3: Inspect project state BEFORE prompts (for idempotence)
-    // ============================================================
-    // We need the provider to inspect correctly (provider-specific deps, env handling)
-    const providerForInspection = (answers.provider as string) ?? "postgresql";
-    const inspection = await inspectDatabase(ctx, providerForInspection);
-
-    // ============================================================
-    // STEP 4: Now handle prompts (only if validation passed)
-    // ============================================================
-    // Intro (only show if we might prompt or in interactive mode)
-    const needsProvider = answers.provider === undefined;
-    const needsSkillsAnswer = answers.installPrismaSkills === undefined;
-    // Check if scripts are already configured in package.json
-    const packageJsonForScripts = await ctx.fs
-      .readJson<
-        Record<string, unknown> & { scripts?: Record<string, string> }
-      >("package.json")
-      .catch(() => undefined);
-    const existingScripts = packageJsonForScripts?.scripts ?? {};
-    const recommendedScriptNames = recommendedScripts(providerForInspection);
-    const hasAllRecommendedScripts = recommendedScriptNames.every(
-      (name) => existingScripts[name] === databaseScriptCatalog[name].command,
-    );
-    const needsScriptsAnswer =
-      answers.databaseScripts === undefined && !hasAllRecommendedScripts;
-
-    // Only prompt in interactive mode (not dry-run and not CI)
-    const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
-
-    if (shouldPrompt) {
-      // Show intro only in interactive mode
-      intro(pc.bgCyan(pc.black(" DXG Database Setup ")));
-    }
-
-    // First: prompt for provider if needed
-    if (shouldPrompt && needsProvider) {
-      // Use existing Prisma provider as default if detected, otherwise postgresql
-      const providerDefault = prismaState.provider ?? "postgresql";
-      const providerPrompt = {
-        ...databasePrompts[0],
-        default: providerDefault,
-      };
-      const promptQuestions = [providerPrompt];
-      let promptAnswers: Record<string, unknown>;
-      try {
-        promptAnswers = await prompt(
-          promptQuestions as Parameters<typeof prompt>[0],
-        );
-      } catch (error) {
-        if (isCancel(error)) {
-          throw error;
-        }
-        throw error;
-      }
-      answers = { ...answers, ...promptAnswers };
-      // Re-inspect with the now-known provider
-      const newProvider = answers.provider as string;
-      if (newProvider !== providerForInspection) {
-        // Provider changed, re-inspect for accurate provider-specific checks
-        Object.assign(inspection, await inspectDatabase(ctx, newProvider));
-      }
-      // Provider mismatch check for interactive mode: if project already has Prisma
-      // with a different provider, error out immediately (same as CLI mode)
-      if (
-        prismaState.installed &&
-        prismaState.provider &&
-        !providersMatch(prismaState.provider, newProvider)
-      ) {
-        throw new ProviderMismatchError(prismaState.provider, newProvider);
-      }
-    } else if (needsProvider && !shouldPrompt) {
-      // In non-interactive mode, throw error for missing required values
-      throw new ValidationError(
-        "Missing required values in non-interactive mode: provider",
-      );
-    }
-
-    // After provider is known (either from CLI or prompt), check if databaseUrl is needed
-    // databaseUrl prompt is needed for ALL providers when not provided AND no existing DATABASE_URL in .env
-    const isServerProvider = answers.provider !== "sqlite";
-    const needsDatabaseUrl =
-      answers.databaseUrl === undefined && !inspection.envHasDatabaseUrl;
-
-    // Second: prompt for remaining fields (databaseUrl for all providers, skills, databaseScripts)
-    if (
-      shouldPrompt &&
-      (needsDatabaseUrl || needsSkillsAnswer || needsScriptsAnswer)
-    ) {
-      const promptQuestions = [];
-
-      // For server providers, ask opt-in first: do they want to configure the URL now?
-      // Default is No — they can always set it later in .env
-      if (needsDatabaseUrl && isServerProvider) {
-        const { providerPlaceholders } = await import("@dxgjs/database-meta");
-        const placeholder =
-          providerPlaceholders[answers.provider as string] ?? "";
-        const configureUrlPrompt = {
-          type: "confirm" as const,
-          name: "configureDatabaseUrl",
-          message: "Configure database connection URL now?",
-          default: false,
-        };
-        const configureAnswer = await prompt([configureUrlPrompt]);
-        if (configureAnswer.configureDatabaseUrl) {
-          // Show the databaseUrl input with template
-          const databaseUrlPrompt = { ...databasePrompts[1] };
-          databaseUrlPrompt.initialValue = placeholder;
-          databaseUrlPrompt.default = placeholder;
-          databaseUrlPrompt.message +=
-            " (format: see template — replace USER/PASSWORD/HOST/DATABASE)";
-          promptQuestions.push(databaseUrlPrompt);
-        }
-        // If user says No, skip databaseUrl prompt — they'll set it in .env later
-      } else if (needsDatabaseUrl) {
-        // SQLite: always ask (has a working default)
-        const { providerPlaceholders } = await import("@dxgjs/database-meta");
-        const placeholder =
-          providerPlaceholders[answers.provider as string] ?? "";
-        const databaseUrlPrompt = { ...databasePrompts[1] };
-        databaseUrlPrompt.initialValue = placeholder;
-        databaseUrlPrompt.default = placeholder;
-        promptQuestions.push(databaseUrlPrompt);
-      }
-
-      if (needsSkillsAnswer) {
-        promptQuestions.push(databasePrompts[2]); // skills prompt
-      }
-      if (needsScriptsAnswer) {
-        promptQuestions.push(databasePrompts[3]); // database scripts prompt
-      }
-
-      if (promptQuestions.length > 0) {
-        let promptAnswers: Record<string, unknown>;
-        try {
-          promptAnswers = await prompt(
-            promptQuestions as Parameters<typeof prompt>[0],
-          );
-        } catch (error) {
-          if (isCancel(error)) {
-            throw error;
-          }
-          throw error;
-        }
-        answers = { ...answers, ...promptAnswers };
-      }
-    }
-
-    // Non-interactive / dry-run / CLI: provide default databaseUrl ONLY for SQLite
-    // For server providers, leave undefined — user configures in .env later
-    if (answers.databaseUrl === undefined && !inspection.envHasDatabaseUrl) {
-      if (answers.provider === "sqlite") {
-        const { providerPlaceholders } = await import("@dxgjs/database-meta");
-        answers.databaseUrl = providerPlaceholders.sqlite ?? "file:./dev.db";
-      }
-      // For server providers: no default, they'll set DATABASE_URL in .env manually
-    }
-
-    if (answers.installPrismaSkills === undefined) {
-      // Non-interactive / dry-run / CLI-only default: do NOT install Prisma
-      // agent skills. The conservative choice keeps the user's project free
-      // of .claude/skills/, .windsurf/skills/, .agents/skills/ and
-      // skills-lock.json unless explicitly requested (see buildPrismaInitArgs).
-      answers.installPrismaSkills = false;
-    }
-
-    // Database scripts phase — interactive customize branch. The user chose
-    // "Customize": show the provider-appropriate script catalogue (each
-    // option carries its hint) with the recommended set preselected. Clack
-    // primitives resolve with the cancel symbol; throw it so the existing
-    // cancellation boundary (run's isCancel catch → the CLI's clean exit)
-    // handles it. Asked AFTER database setup answers, BEFORE execution —
-    // cancelling here leaves package.json completely untouched.
-    if (answers.databaseScripts === "customize") {
-      try {
-        answers.databaseScripts = await promptCustomScripts(
-          answers.provider as string,
-        );
-      } catch (error) {
-        if (isCancel(error)) {
-          throw error;
-        }
-        throw error;
-      }
-    }
-
-    // Validate (interface compliance)
-    if (!validateDatabase()) {
-      // Use Clack cancel for validation failure
-      cancel("Invalid responses for database generator");
-      throw new ValidationError("Invalid responses for database generator");
-    }
-
-    try {
-      // Validate preconditions (inside the try so precondition failures close
-      // the Clack frame via the catch's outro, like execution failures do)
-      await checkPreconditions(ctx);
-
-      // Inspect BEFORE planning: every gate below reasons about the real
-      // on-disk state, never about what a previous run may have left.
-      const inspection = await inspectDatabase(ctx, answers.provider as string);
-
-      // GATE 1 (fail early, before ANY installation): `prisma init` exits 1
-      // when any prisma/ folder exists — even an empty one (verified
-      // empirically). A prisma/ directory without schema.prisma is therefore
-      // unrecoverable for this generator: it must neither install (the user
-      // decides the resolution) nor init (it would fail anyway).
-      if (inspection.prismaDirEmpty) {
-        throw new ValidationError(
-          [
-            "The prisma/ directory exists but contains no schema.prisma.",
-            "Prisma init refuses to run when a prisma/ folder already exists,",
-            "so DXG cannot reconcile this state automatically.",
-            "Either create prisma/schema.prisma yourself or remove the prisma/",
-            "directory, then run dxg add database again.",
-          ].join("\n"),
-        );
-      }
-
-      // GATE 2 (fail early, before ANY installation): an incompatible Prisma
-      // declaration (6.x, 8.x, another 7.x, a prerelease range) is a user
-      // decision DXG must not overturn silently — npm flips a declared
-      // 6.20.0 to ^7.10.0 without any warning (verified empirically). The
-      // user resolves the version conflict explicitly; nothing is touched.
-      if (
-        inspection.prismaVersion === "incompatible" ||
-        inspection.clientVersion === "incompatible"
-      ) {
-        const declared = [
-          inspection.prismaDeclaredSpec !== undefined
-            ? `prisma: ${inspection.prismaDeclaredSpec}`
-            : null,
-          inspection.clientDeclaredSpec !== undefined
-            ? `@prisma/client: ${inspection.clientDeclaredSpec}`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(", ");
-        throw new PrismaVersionConflictError(
-          [
-            `Prisma version conflict: this project declares ${declared},`,
-            `but DXG verifies against prisma@${PRISMA_PINNED_VERSION} (exact pin).`,
-            "DXG will not silently upgrade or downgrade an existing Prisma",
-            "declaration. Align the declared version to 7.10.0 (or a range that",
-            "contains exactly it, e.g. ^7.10.0) and run dxg add database again.",
-          ].join("\n"),
-        );
-      }
-
-      // GATE 3b: Provider installed but undetermined (unreadable schema).
-      // Warn but continue — don't block, just inform.
-      if (prismaState.installed && prismaState.provider === null) {
-        note(
-          [
-            "Existing Prisma provider not detected, verification impossible.",
-            "DXG will continue by filling in what is missing.",
-          ].join("\n"),
-          "Warning",
-        );
-      }
-
-      // ============================================================
-      // Helper path resolution: detect valid existing helpers BEFORE prompting
-      // ============================================================
-      // The inspection now returns only content-validated helpers in helperCandidates.
-      // - 0 valid helpers -> show prompt with default
-      // - 1 valid helper -> auto-reuse it, skip prompt
-      // - Multiple valid helpers -> prompt for disambiguation
-      const needsHelperPathNow = answers.helperPath === undefined;
-      const validHelpers = inspection.helperCandidates ?? [];
-      const validHelperCount = validHelpers.length;
-
-      if (needsHelperPathNow && validHelperCount === 1) {
-        // Exactly one valid helper found: auto-reuse it, no prompt
-        answers.helperPath = validHelpers[0];
-      } else if (shouldPrompt && needsHelperPathNow && validHelperCount > 1) {
-        // Multiple valid helpers: prompt for disambiguation
-        const helperPrompt = databasePrompts[4]; // helper path prompt (index 4)
-        // Show all valid helpers as hint
-        helperPrompt.message += ` (found ${validHelperCount} existing: ${validHelpers.join(", ")})`;
-        try {
-          const helperAnswer = await prompt([helperPrompt] as Parameters<
-            typeof prompt
-          >[0]);
-          answers = { ...answers, ...helperAnswer };
-        } catch (error) {
-          if (isCancel(error)) {
-            throw error;
-          }
-          throw error;
-        }
-      } else if (needsHelperPathNow && !shouldPrompt && validHelperCount > 0) {
-        // Non-interactive mode: auto-select first valid helper
-        answers.helperPath = validHelpers[0];
-      }
-      // If no valid helpers found, show the normal prompt with default
-      if (shouldPrompt && needsHelperPathNow && validHelperCount === 0) {
-        const helperPrompt = databasePrompts[4]; // helper path prompt (index 4)
-        try {
-          const helperAnswer = await prompt([helperPrompt] as Parameters<
-            typeof prompt
-          >[0]);
-          answers = { ...answers, ...helperAnswer };
-        } catch (error) {
-          if (isCancel(error)) {
-            throw error;
-          }
-          throw error;
-        }
-      } else if (
-        needsHelperPathNow &&
-        !shouldPrompt &&
-        validHelperCount === 0
-      ) {
-        // Non-interactive mode with no valid helpers: use default
-        answers.helperPath = DEFAULT_HELPER_PATH;
-      }
-
-      // Plan (state-aware: the inspection drives init/install gating and
-      // the dynamic imports for the template files)
-      const plan = planDatabase(answers, inspection);
-
-      // Execute
-      const execResult = await executeDatabase(answers, ctx, plan);
-
-      // Verify (skip in dry-run mode)
-      if (!ctx.dryRun) {
-        await verifyDatabase(answers, ctx, plan);
-      }
-
-      // Summarize using Clack UX
-      summarizeDatabase({
-        ...execResult,
-        detectedProvider: prismaState.provider,
-        requestedProvider: answers.provider as string,
-      });
-
-      // Next steps — provider-specific, package-manager-aware guided next steps
-      const { providerPlaceholders } = await import("@dxgjs/database-meta");
-      const placeholder =
-        providerPlaceholders[answers.provider as string] ?? "";
-      const isSqlite = answers.provider === "sqlite";
-      const pm = ctx.awareness.packageManager;
-
-      // Package-manager-specific command prefixes
-      const pmCommands: Record<string, { run: string; exec: string }> = {
-        npm: { run: "npm run", exec: "npx" },
-        pnpm: { run: "pnpm", exec: "pnpm dlx" },
-        yarn: { run: "yarn", exec: "yarn dlx" },
-        bun: { run: "bun run", exec: "bunx" },
-      };
-      const cmds = pmCommands[pm] ?? pmCommands.npm;
-
-      const lines: string[] = ["", pc.bold("Checklist:"), ""];
-
-      if (isSqlite) {
-        lines.push(
-          "SQLite is ready — the dev.db file will be created on first migration.",
-          "",
-          `  1. Push schema to database:`,
-          `     ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
-          "",
-          `  2. Generate Prisma Client:`,
-          `     ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
-          "",
-          `  3. Open Prisma Studio:`,
-          `     ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
-        );
+    if (rawOrm !== undefined) {
+      // CLI flag provided: validate it
+      if (rawOrm === "prisma" || rawOrm === "drizzle") {
+        orm = rawOrm;
       } else {
-        lines.push(
-          "  1. Configure your connection string",
-          `     Edit ${pc.cyan(".env")} and replace the placeholder:`,
-          `     ${pc.cyan(`DATABASE_URL="${placeholder}"`)}`,
-          "",
-          "  2. Push schema to database:",
-          `     ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
-          "",
-          "  3. Generate Prisma Client:",
-          `     ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
-          "",
-          "  4. Open Prisma Studio:",
-          `     ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
+        throw new ValidationError(
+          `Unsupported ORM: ${rawOrm}. Supported: prisma, drizzle`,
         );
-
-        // Provider-specific tips
-        if (answers.provider === "postgresql") {
-          lines.push(
-            "",
-            pc.dim(
-              "Tip: For Neon/Supabase: use pooled URL (port 6543) for CLI, direct URL (port 5432) for runtime via DIRECT_URL.",
-            ),
-          );
-        } else if (answers.provider === "planetscale") {
-          lines.push(
-            "",
-            pc.dim(
-              'Warning: PlanetScale requires `relationMode = "prisma"` in schema.prisma (MySQL protocol).',
-            ),
-            pc.dim(
-              "   Schema changes use PlanetScale's deploy request workflow, not prisma migrate.",
-            ),
-          );
-        } else if (answers.provider === "prismapostgres") {
-          lines.push(
-            "",
-            pc.dim(
-              "Tip: Prisma Postgres uses pooled connection: pooled.db.prisma.io (PgBouncer).",
-            ),
-            pc.dim("   Migrations use direct host: db.prisma.io."),
-          );
-        } else if (answers.provider === "cockroachdb") {
-          lines.push(
-            "",
-            pc.dim("Tip: CockroachDB uses port 26257 with sslmode=require."),
-          );
-        } else if (answers.provider === "mysql") {
-          lines.push(
-            "",
-            pc.dim(
-              "Tip: For SSL: add ?sslcert=./cert.pem&sslaccept=strict to the URL.",
-            ),
-          );
-        } else if (answers.provider === "sqlserver") {
-          lines.push(
-            "",
-            pc.dim(
-              "Tip: SQL Server uses semicolon syntax: sqlserver://host:1433;database=db;user=user;password=pass;encrypt=true",
-            ),
-          );
-        }
       }
-
-      lines.push(
-        "",
-        pc.dim(
-          `Docs: https://www.prisma.io/docs/orm/v7/core-concepts/supported-databases/${answers.provider}`,
-        ),
-      );
-
-      // Render Next steps in a separate note box
-      note(lines.join("\n"), "Next Steps");
-
-      // Outro — completion message only (green for success)
-      outro(pc.green(`Database setup completed for ${answers.provider}!`));
-    } catch (error) {
-      // Handle cancellation - propagate to CLI for consistent rendering
-      if (isCancel(error)) {
-        throw error;
-      }
-
-      // Handle other errors — the CLI's error formatter prints the message;
-      // the outro marks the Clack boundary without duplicating it (red for error).
-      outro(pc.red(`Failed to setup database for ${answers.provider}`));
-      throw error;
     }
+
+    // If ORM not provided via CLI, prompt in interactive mode
+    if (orm === undefined) {
+      const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
+      // Backward compatibility: if caller pre-provided Prisma-required answers
+      // (at minimum provider), assume Prisma and skip the ORM prompt.
+      // This allows existing tests and scripts to work unchanged.
+      const hasPrismaAnswers =
+        answers.provider !== undefined ||
+        answers.databaseUrl !== undefined ||
+        answers.installPrismaSkills !== undefined ||
+        answers.databaseScripts !== undefined ||
+        answers.helperPath !== undefined;
+
+      if (shouldPrompt && !hasPrismaAnswers) {
+        // Show intro only in interactive mode
+        intro(pc.bgCyan(pc.black(" DXG Database Setup ")));
+
+        // Prompt for ORM selection
+        const ormPrompt = databasePrompts[0]; // ORM prompt is now first in array
+        try {
+          const ormAnswer = await prompt([ormPrompt] as Parameters<typeof prompt>[0]);
+          orm = ormAnswer.orm as "prisma" | "drizzle";
+        } catch (error) {
+          if (isCancel(error)) {
+            throw error;
+          }
+          throw error;
+        }
+      } else {
+        // Non-interactive mode OR all Prisma answers pre-provided: default to prisma
+        orm = "prisma";
+      }
+    }
+
+    // Store ORM in answers for downstream use
+    answers.orm = orm;
+
+    // Handle Drizzle selection (graceful exit with coming soon message)
+    if (orm === "drizzle") {
+      await setupDrizzleFlow(answers, ctx);
+      return; // Graceful exit (exit code 0)
+    }
+
+    // Delegate to Prisma flow for all Prisma-specific logic
+    await setupPrismaFlow(answers, ctx);
   },
 };
 

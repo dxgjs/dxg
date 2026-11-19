@@ -11,6 +11,9 @@ export async function setupDrizzleFlow(
   _answers: Record<string, unknown>,
   _ctx: GeneratorContext,
 ): Promise<void> {
+  void _answers;
+  void _ctx;
+
   note(
     [
       "Drizzle ORM support is coming soon!",

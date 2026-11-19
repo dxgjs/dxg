@@ -10,7 +10,14 @@ import { copyFile, copyFileSync } from "./copyFile";
 import { appendFile, appendFileSync } from "./appendFile";
 import { open, type OpenOptions } from "./open";
 import { detect, getUserAgent } from "package-manager-detector";
+import { resolveCommand } from "package-manager-detector/commands";
 import { execa, type Options } from "execa";
+
+/**
+ * Supported package manager agents.
+ * Keep in sync with detectPackageManager return type.
+ */
+export type PackageManagerAgent = "npm" | "pnpm" | "yarn" | "bun";
 
 export { readFile, readFileSync, type ReadFileOptions };
 export { writeFile, writeFileSync, type WriteFileOptions };
@@ -215,7 +222,7 @@ export async function executeCommand(
 export async function detectPackageManager(
   startDir?: string,
   options: { withFallback?: boolean; stopDir?: string } = {},
-): Promise<"npm" | "pnpm" | "yarn" | "bun"> {
+): Promise<PackageManagerAgent> {
   const { withFallback = false, stopDir } = options;
   const cwd = startDir ?? process.cwd();
 
@@ -255,4 +262,37 @@ export async function detectPackageManager(
       `Unknown package manager: ${result.name} and fallback is disabled`,
     );
   }
+}
+
+/**
+ * Resolves the package manager command prefixes for running scripts and executing binaries.
+ * Uses package-manager-detector's resolveCommand to get the correct command and args
+ * for the given package manager agent.
+ * @param agent - The package manager name (npm, pnpm, yarn, bun)
+ * @returns Object with `run` prefix for npm scripts and `exec` prefix for binary execution
+ */
+export function resolvePackageManagerCommands(
+  agent: PackageManagerAgent,
+): { run: string; exec: string } {
+  // resolveCommand returns { command: string; args: string[] } | null
+  // For "run" we want the command to run npm scripts (e.g., "npm run", "pnpm", "yarn", "bun run")
+  // For "exec" we want the command to execute binaries (e.g., "npx", "pnpm dlx", "yarn dlx", "bunx")
+  const runResult = resolveCommand(agent, "run", []);
+  const execResult = resolveCommand(agent, "execute", []);
+
+  if (!runResult || !execResult) {
+    throw new Error(`Failed to resolve commands for package manager: ${agent}`);
+  }
+
+  // Build the run prefix: command + args (for run, args is typically empty or ["run"])
+  const runPrefix = runResult.args.length > 0
+    ? `${runResult.command} ${runResult.args.join(" ")}`
+    : runResult.command;
+
+  // Build the exec prefix: command + args (for execute, args is typically ["dlx"] for pnpm/yarn)
+  const execPrefix = execResult.args.length > 0
+    ? `${execResult.command} ${execResult.args.join(" ")}`
+    : execResult.command;
+
+  return { run: runPrefix, exec: execPrefix };
 }

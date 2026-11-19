@@ -32,13 +32,14 @@ dxg doctor --fix  # ...and repair what can be repaired
 
 ## Available Generators
 
-- `db` – Add database setup with Prisma ORM (SQLite, PostgreSQL, MySQL, SQL Server, CockroachDB, PlanetScale, Prisma Postgres)
+- `db` – Add database setup with Prisma ORM (default) or Drizzle ORM (placeholder) (SQLite, PostgreSQL, MySQL, SQL Server, CockroachDB, PlanetScale, Prisma Postgres)
 - `database` – Alias for `db`
 
 ## Options
 
 ### `dxg add db` (also works with `dxg add database`)
 
+- `--orm <type>` – ORM to use: `prisma` (default) or `drizzle` (placeholder)
 - `--provider <value>` – Specify database provider (sqlite|postgresql|mysql|sqlserver|cockroachdb|planetscale|prismapostgres)
 - `--non-interactive` – Do not prompt for input; fail if required values are missing
 - `--dry-run` – Perform a dry run without making any changes

@@ -166,7 +166,21 @@ vi.mock("@dxgjs/fs", async () => {
     // This is the disk state DXG's script injection must build upon.
     // executeCommand is called bare by the generator (direct import), so the
     // store MUST be captured in this closure rather than reached via `this`.
-    executeCommand: vi.fn().mockImplementation(
+    resolvePackageManagerCommands: vi.fn().mockImplementation(
+        (agent: import("@dxgjs/fs").PackageManagerAgent) => {
+          const commands: Record<
+            import("@dxgjs/fs").PackageManagerAgent,
+            { run: string; exec: string }
+          > = {
+            npm: { run: "npm run", exec: "npx" },
+            pnpm: { run: "pnpm", exec: "pnpm dlx" },
+            yarn: { run: "yarn", exec: "yarn dlx" },
+            bun: { run: "bun run", exec: "bunx" },
+          };
+          return commands[agent] ?? commands.npm;
+        },
+      ),
+      executeCommand: vi.fn().mockImplementation(
       async (command: string, args: string[] = []) => {
         if (command === "npm" && args[0] === "install") {
           const dev = args[1] === "-D";

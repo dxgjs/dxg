@@ -18,7 +18,7 @@ export interface PromptQuestion {
   message: string;
   default?: unknown;
   initialValue?: unknown;
-  choices?: Array<{ name: string; value: string }>;
+  choices?: Array<{ name: string; value: string; hint?: string }>;
   validate?: (input: unknown) => boolean | string;
 }
 

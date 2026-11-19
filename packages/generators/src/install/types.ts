@@ -16,6 +16,8 @@
  * generators own their own dependency plans.
  */
 
+import type { PackageManagerAgent as BasePackageManagerAgent } from "@dxgjs/fs";
+
 /**
  * A single dependency spec as a generator plans it.
  * `requiresBuild` marks packages whose install lifecycle scripts produce
@@ -49,8 +51,8 @@ export interface DependencyPlan {
   dependencies: DependencySpec[];
 }
 
-/** The package managers DXG's installer supports. */
-export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
+/** The package managers DXG's installer supports (base agents). */
+export type PackageManagerName = BasePackageManagerAgent;
 
 /**
  * Fine-grained agent identity. Yarn classic and berry need different
