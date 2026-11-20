@@ -56,7 +56,15 @@ async function freshScenario(pm: E2EPm, dir: string): Promise<FreshTimings> {
   const bootMs = await bootstrapProject(dir, pm);
 
   // 2. The REAL CLI, non-interactive, PostgreSQL (§7 main path).
-  const run1 = await runDxg(dir, ["--provider", "postgresql", "--non-interactive"]);
+  // Provide a databaseUrl so the generator adds it to .env (server providers
+  // only get DATABASE_URL in non-interactive mode when explicitly provided).
+  const run1 = await runDxg(dir, [
+    "--provider",
+    "postgresql",
+    "--non-interactive",
+    "--database-url",
+    "postgresql://test@localhost:5432/test",
+  ]);
   expect(
     run1.code,
     `dxg run 1 exited ${run1.code}\nSTDOUT:\n${run1.stdout}\nSTDERR:\n${run1.stderr}`,

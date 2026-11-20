@@ -24,12 +24,11 @@ const distOf = (name) =>
 // The BUILT workspace packages, by absolute file URL — the temp project
 // has no node_modules for DXG itself; resolution goes through each
 // package's own node_modules (pnpm workspace links).
-const [workspace, generators, fs, templates, logger] = await Promise.all([
+const [workspace, generators, fs, templates] = await Promise.all([
   import(distOf("workspace")),
   import(distOf("generators")),
   import(distOf("fs")),
   import(distOf("templates")),
-  import(distOf("logger")),
 ]);
 
 const projectDir = process.argv[2];
@@ -46,10 +45,18 @@ if (!agent) {
 }
 const awareness = await workspace.detectProjectAwareness(projectDir);
 
+// Simple no-op logger (the generator uses @dxgjs/prompts for UI output)
+const noopLogger = {
+  info: () => {},
+  warn: () => {},
+  error: () => {},
+  debug: () => {},
+};
+
 // Mirrors apps/cli prepareContext (Phase 1): ONE agent detection drives
 // both the installer and the awareness's coarse display name.
 const context = {
-  logger: new logger.Logger({ minLevel: "info" }),
+  logger: noopLogger,
   fs,
   templates: { render: templates.render },
   awareness: {

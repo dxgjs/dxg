@@ -220,7 +220,7 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
       // lines wrap inside the ~80-column Clack box under the spawned
       // pipe; assert on the said content (unwrapped()).
       expect(unwrapped(run2.stdout)).toContain(
-        "Prisma initialization (schema.prisma or prisma7.config.ts already exists)",
+        "Prisma initialization (schema.prisma already exists)",
       );
       // No reinstall — the pins run 1 wrote are already satisfied.
       expect(unwrapped(run2.stdout)).toContain("already declared at the verified pin");

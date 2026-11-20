@@ -262,9 +262,12 @@ export function createDependencyInstaller(
       try {
         // Piped (buffered) capture: classification needs the blocked-script
         // notices that arrive even on success. stdout+stderr interleaved.
+        // Use stdio: ["ignore", "pipe", "pipe"] to avoid stdin inheritance
+        // issues on Windows when the parent process has stdin ignored.
         const result = await executeCommand(command, args, {
           cwd: resolvedCwd ?? cwd,
           all: true,
+          stdio: ["ignore", "pipe", "pipe"],
         });
         output = String(result.all ?? result.stdout ?? "");
       } catch (error) {
@@ -321,6 +324,7 @@ export function createDependencyInstaller(
           const refreshed = await executeCommand(sync.binary, sync.args, {
             cwd,
             all: true,
+            stdio: ["ignore", "pipe", "pipe"],
           });
           outputs.push(String(refreshed.all ?? ""));
         } catch (error) {
