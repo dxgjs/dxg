@@ -121,6 +121,31 @@ describe("npm link regression", () => {
     expect(output).toContain("Would run:");
   });
 
+  test("--orm drizzle fails with a non-zero exit code", { timeout: 30000 }, () => {
+    let output = "";
+    let exitCode: number | null = 0;
+    try {
+      execSync(
+        `node "${cliDistIndex}" add database --orm drizzle --provider sqlite --non-interactive --dry-run`,
+        {
+          cwd: testDir,
+          encoding: "utf8",
+          stdio: "pipe",
+          timeout: 60000,
+          env: { ...process.env, VITEST: undefined },
+        },
+      );
+    } catch (error) {
+      const e = error as { status?: number | null; stdout?: string; stderr?: string };
+      exitCode = e.status ?? null;
+      output = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+    }
+
+    expect(exitCode).not.toBe(0);
+    expect(output).toContain("Drizzle ORM is not supported yet.");
+    expect(output).toContain("--orm prisma");
+  });
+
   test("no 'Cannot find module' errors in any command (core regression check)", { timeout: 30000 }, () => {
     // This is the core regression test - verify no module resolution errors
     // when running the CLI from outside the monorepo

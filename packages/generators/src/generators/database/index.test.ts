@@ -534,6 +534,7 @@ describe("Database Generator", () => {
     (getCliCommand as Mock).mockClear();
     (promptMock as Mock).mockClear();
     (noteMock as Mock).mockClear();
+    (outroMock as Mock).mockClear();
   });
 
   afterEach(() => {
@@ -686,14 +687,14 @@ describe("Database Generator", () => {
     test("skips ORM prompt when --orm drizzle provided via CLI", async () => {
       const mockContext = makeContext();
 
-      // Should call setupDrizzleFlow, no Prisma prompts
-      await databaseGenerator.run({ orm: "drizzle" }, mockContext);
+      // Drizzle is a placeholder: the run fails with a clear error
+      await expect(databaseGenerator.run({ orm: "drizzle" }, mockContext)).rejects.toThrow(
+        "Drizzle ORM is not supported yet.",
+      );
 
-      // No prompts at all for drizzle
+      // No prompts at all for drizzle, and no success outro
       expect(promptMock).not.toHaveBeenCalled();
-      // Should have shown the coming soon note and outro
-      expect(noteMock).toHaveBeenCalled();
-      expect(outroMock).toHaveBeenCalled();
+      expect(outroMock).not.toHaveBeenCalled();
     });
 
     test("handles ORM selection: user picks drizzle interactively", async () => {
@@ -702,13 +703,14 @@ describe("Database Generator", () => {
       (promptMock as Mock)
         .mockResolvedValueOnce({ orm: "drizzle" });  // User picks drizzle
 
-      await databaseGenerator.run({}, mockContext);
+      await expect(databaseGenerator.run({}, mockContext)).rejects.toThrow(
+        "Drizzle ORM is not supported yet.",
+      );
 
-      // Should have shown drizzle coming soon message
-      expect(noteMock).toHaveBeenCalled();
-      const noteCall = String((noteMock as Mock).mock.calls[0][0]);
-      expect(noteCall).toContain("Drizzle ORM support is coming soon");
-      expect(outroMock).toHaveBeenCalled();
+      // Only the ORM prompt was shown, nothing was executed
+      expect(promptMock).toHaveBeenCalledTimes(1);
+      expect(fs.executeCommand).not.toHaveBeenCalled();
+      expect(outroMock).not.toHaveBeenCalled();
     });
 
     test("handles ORM selection: user picks prisma interactively", async () => {
@@ -749,14 +751,14 @@ describe("Database Generator", () => {
         .rejects.toThrow(/Unsupported ORM: invalid-orm. Supported: prisma, drizzle/);
     });
 
-    test("non-interactive mode with --orm drizzle exits gracefully", async () => {
+    test("non-interactive mode with --orm drizzle fails instead of exiting gracefully", async () => {
       const mockContext = makeContext({ nonInteractive: true });
 
-      // Should not throw, should show coming soon message
-      await databaseGenerator.run({ orm: "drizzle" }, mockContext);
+      await expect(databaseGenerator.run({ orm: "drizzle" }, mockContext)).rejects.toThrow(
+        "Drizzle ORM is not supported yet.",
+      );
 
-      expect(noteMock).toHaveBeenCalled();
-      expect(outroMock).toHaveBeenCalled();
+      expect(fs.executeCommand).not.toHaveBeenCalled();
     });
   });
 

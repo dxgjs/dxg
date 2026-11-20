@@ -8,7 +8,7 @@ DXG is a command-line tool (`@dxgjs/cli`) built on nine supporting libraries tha
 
 | Command | What it does |
 | --- | --- |
-| `dxg add db` (alias `dxg add database`) | Sets up Prisma ORM in an existing project |
+| `dxg add db` (alias `dxg add database`) | Sets up Prisma ORM in an existing project (`--orm prisma`, the default) |
 | `dxg doctor` | Diagnoses a DXG project and, with `--fix`, repairs its configuration |
 
 Global options: `--non-interactive`, `--dry-run`, `--force`. See the [CLI README](../apps/cli/README.md) for the full option list.
@@ -16,6 +16,7 @@ Global options: `--non-interactive`, `--dry-run`, `--force`. See the [CLI README
 ### `dxg add db`
 
 - **Providers:** `sqlite`, `postgresql`, `mysql`, `sqlserver`, `cockroachdb`, `planetscale`, `prismapostgres`.
+- **ORM:** `--orm prisma` (the default). `--orm drizzle` is a placeholder: it exits with an error ("not supported yet") until Drizzle support is implemented.
 - **Prisma version:** pinned in `@dxgjs/database-meta` (currently 7.10.0).
 - **Project awareness:** detects the framework (Next.js app/pages, Vite, Astro, React Router), the language (TypeScript or JavaScript), the package manager and Tailwind (detection only).
 - **Dependency installation:** goes through an installer that tells "the install exited 0" apart from "the project is operational", and pre-approves native build scripts (for example `better-sqlite3`) for pnpm, npm and Yarn Berry.

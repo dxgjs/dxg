@@ -29,7 +29,7 @@ export function registerAddCommand(program: Command): void {
     )
     .option(
       "--orm <type>",
-      "ORM to use (prisma|drizzle)",
+      "ORM to use: prisma (drizzle is coming soon)",
       "prisma"
     )
     .option(

@@ -1,16 +1,7 @@
-import { describe, test, expect, vi, beforeEach, type Mock } from "vitest";
+import { describe, test, expect, vi, beforeEach } from "vitest";
+import { ValidationError } from "@dxgjs/errors";
 import { setupDrizzleFlow } from "./drizzle-flow";
 import type { GeneratorContext } from "../../types";
-import { note as noteMock, outro as outroMock } from "@dxgjs/prompts";
-
-vi.mock("@dxgjs/prompts", async () => {
-  const actual = await vi.importActual("@dxgjs/prompts");
-  return {
-    ...actual,
-    note: vi.fn(),
-    outro: vi.fn(),
-  };
-});
 
 describe("drizzle-flow", () => {
   let mockContext: GeneratorContext;
@@ -36,20 +27,36 @@ describe("drizzle-flow", () => {
     };
   });
 
-  test("shows coming soon message via Clack note and outro", async () => {
-    await setupDrizzleFlow({}, mockContext);
-
-    expect(noteMock).toHaveBeenCalledOnce();
-    expect(String((noteMock as Mock).mock.calls[0][0])).toContain("Drizzle ORM support is coming soon");
-    expect(outroMock).toHaveBeenCalledOnce();
-    expect(String((outroMock as Mock).mock.calls[0][0])).toContain("Check back later for Drizzle support");
+  test("fails with a ValidationError instead of reporting success", async () => {
+    await expect(setupDrizzleFlow({}, mockContext)).rejects.toBeInstanceOf(
+      ValidationError,
+    );
+    await expect(setupDrizzleFlow({}, mockContext)).rejects.toThrow(
+      "Drizzle ORM is not supported yet.",
+    );
   });
 
-  test("works in non-interactive mode (same behavior)", async () => {
-    mockContext.nonInteractive = true;
-    await setupDrizzleFlow({}, mockContext);
+  test("tells the user how to proceed with Prisma", async () => {
+    const error = await setupDrizzleFlow({}, mockContext).catch((e: unknown) => e);
 
-    expect(noteMock).toHaveBeenCalledOnce();
-    expect(outroMock).toHaveBeenCalledOnce();
+    expect(error).toBeInstanceOf(ValidationError);
+    const hints = (error as ValidationError).hints.join("\n");
+    expect(hints).toContain("coming soon");
+    expect(hints).toContain("--orm prisma");
+  });
+
+  test("behaves the same in non-interactive mode", async () => {
+    mockContext.nonInteractive = true;
+
+    await expect(setupDrizzleFlow({}, mockContext)).rejects.toThrow(
+      "Drizzle ORM is not supported yet.",
+    );
+  });
+
+  test("does not touch the filesystem", async () => {
+    await setupDrizzleFlow({}, mockContext).catch(() => undefined);
+
+    expect(mockContext.fs.writeFile).not.toHaveBeenCalled();
+    expect(mockContext.fs.mkdir).not.toHaveBeenCalled();
   });
 });

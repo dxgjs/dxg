@@ -1980,10 +1980,11 @@ export const databaseGenerator: Generator = {
     // Store ORM in answers for downstream use
     answers.orm = orm;
 
-    // Handle Drizzle selection (graceful exit with coming soon message)
+    // Drizzle is a placeholder for now: its flow throws a ValidationError
+    // ("not supported yet"), so the CLI exits with a non-zero code.
     if (orm === "drizzle") {
       await setupDrizzleFlow(answers, ctx);
-      return; // Graceful exit (exit code 0)
+      return;
     }
 
     // Delegate to Prisma flow for all Prisma-specific logic

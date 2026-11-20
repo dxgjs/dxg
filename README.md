@@ -12,7 +12,7 @@ npx @dxgjs/cli
 pnpm dlx @dxgjs/cli
 ```
 
-DXG sets up a database with Prisma ORM (default) or Drizzle ORM (placeholder) via `dxg add db` and diagnoses and repairs the result (`dxg doctor`). Usage and options are documented in the [CLI README](./apps/cli/README.md).
+DXG sets up a database with Prisma ORM via `dxg add db` and diagnoses and repairs the result (`dxg doctor`). Usage and options are documented in the [CLI README](./apps/cli/README.md).
 
 ## Repository layout
 

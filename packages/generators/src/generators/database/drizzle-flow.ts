@@ -1,11 +1,11 @@
 import type { GeneratorContext } from "../../types";
-import { note, outro } from "@dxgjs/prompts";
-import pc from "picocolors";
+import { ValidationError } from "@dxgjs/errors";
 
 /**
- * Placeholder flow for Drizzle ORM — displays a friendly "coming soon" message
- * and exits gracefully. This module will be replaced with real Drizzle setup
- * logic when Drizzle support is implemented.
+ * Placeholder flow for Drizzle ORM. Drizzle support is not implemented yet, so
+ * selecting it fails with an actionable error (the CLI exits with a non-zero
+ * code) instead of reporting success after doing nothing. This module will be
+ * replaced with real Drizzle setup logic when Drizzle support is implemented.
  */
 export async function setupDrizzleFlow(
   _answers: Record<string, unknown>,
@@ -14,18 +14,10 @@ export async function setupDrizzleFlow(
   void _answers;
   void _ctx;
 
-  note(
-    [
-      "Drizzle ORM support is coming soon!",
-      "",
-      "We're working on adding first-class Drizzle support to DXG.",
-      "In the meantime, you can use Prisma (the default) which provides",
-      "excellent type safety, migrations, and a great developer experience.",
-    ].join("\n"),
-    "Drizzle ORM",
-  );
-
-  outro(pc.green("Check back later for Drizzle support!"));
-
-  // Graceful exit - process.exitCode stays 0
+  throw new ValidationError("Drizzle ORM is not supported yet.", {
+    hints: [
+      "Drizzle support is coming soon",
+      "Use Prisma instead (the default): omit --orm or pass --orm prisma",
+    ],
+  });
 }
