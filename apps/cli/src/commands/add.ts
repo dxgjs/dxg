@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { isCancel, cancel, note, outro } from "@dxgjs/prompts";
+import { intro, isCancel, cancel, note, outro } from "@dxgjs/prompts";
 import { databaseGenerator, type Generator } from "@dxgjs/generators";
 import {
   formatError,
@@ -71,6 +71,18 @@ export function registerAddCommand(program: Command): void {
           version: awareness.packageJson.version,
         };
         const cliAnswers = { ...options, ...configAnswers };
+
+        // Show "DXG Database Setup" intro for the database generator in interactive terminals
+        // (matches the logo visibility: skipped in CI, when piped, or with --json)
+        const isDatabaseGenerator = generatorName === "db" || generatorName === "database";
+        const isInteractive =
+          process.stdout.isTTY &&
+          !process.env.CI &&
+          !options.json &&
+          !options.nonInteractive;
+        if (isDatabaseGenerator && isInteractive) {
+          intro(pc.bgCyan(pc.black(" DXG Database Setup ")));
+        }
 
         // Run generator in project root directory
         await runInTargetDirectory(projectRoot, async () => {
