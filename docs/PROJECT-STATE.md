@@ -13,6 +13,8 @@ DXG is a command-line tool (`@dxgjs/cli`) built on nine supporting libraries tha
 
 Global options: `--non-interactive`, `--dry-run`, `--force`. See the [CLI README](../apps/cli/README.md) for the full option list.
 
+Running `dxg` alone in an interactive terminal shows a welcome banner; elsewhere (pipes, CI) it prints the usual help. The DXG logo (`apps/cli/src/logo.ts`) is printed before commands only in an interactive terminal, never in CI, when piped, or with `--json`.
+
 ### `dxg add db`
 
 - **Providers:** `sqlite`, `postgresql`, `mysql`, `sqlserver`, `cockroachdb`, `planetscale`, `prismapostgres`.

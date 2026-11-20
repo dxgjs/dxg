@@ -121,6 +121,63 @@ describe("npm link regression", () => {
     expect(output).toContain("Would run:");
   });
 
+  test("prints no logo when output is piped (non-TTY)", { timeout: 30000 }, () => {
+    const output = execSync(
+      `node "${cliDistIndex}" add database --provider sqlite --non-interactive --dry-run`,
+      {
+        cwd: testDir,
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: 60000,
+        env: { ...process.env, VITEST: undefined },
+      },
+    );
+
+    expect(output).not.toContain("██╔══██╗");
+    expect(output).toContain("Requested: sqlite");
+  });
+
+  test("doctor --json stays valid JSON, without any logo", { timeout: 30000 }, () => {
+    let stdout = "";
+    try {
+      stdout = execSync(`node "${cliDistIndex}" doctor --json`, {
+        cwd: testDir,
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: 60000,
+        env: { ...process.env, VITEST: undefined },
+      });
+    } catch (error) {
+      // doctor exits non-zero when it finds issues; its JSON is still on stdout
+      stdout = (error as { stdout?: string }).stdout ?? "";
+    }
+
+    expect(() => JSON.parse(stdout)).not.toThrow();
+    expect(stdout).not.toContain("██╔══██╗");
+  });
+
+  test("dxg without arguments falls back to the help when not a TTY", { timeout: 30000 }, () => {
+    let output = "";
+    let exitCode: number | null = 0;
+    try {
+      execSync(`node "${cliDistIndex}"`, {
+        cwd: testDir,
+        encoding: "utf8",
+        stdio: "pipe",
+        timeout: 60000,
+        env: { ...process.env, VITEST: undefined },
+      });
+    } catch (error) {
+      const e = error as { status?: number | null; stdout?: string; stderr?: string };
+      exitCode = e.status ?? null;
+      output = `${e.stdout ?? ""}${e.stderr ?? ""}`;
+    }
+
+    expect(exitCode).not.toBe(0);
+    expect(output).toContain("Usage: dxg");
+    expect(output).not.toContain("██╔══██╗");
+  });
+
   test("--orm drizzle fails with a non-zero exit code", { timeout: 30000 }, () => {
     let output = "";
     let exitCode: number | null = 0;

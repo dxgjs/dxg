@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { registerAddCommand } from "./commands/add";
 import { registerDoctorCommand } from "./commands/doctor";
+import { shouldShowLogo, showBanner, showLogo } from "./logo";
 import pkg from "../package.json" with { type: "json" };
 
 /**
@@ -21,6 +22,13 @@ export function createProgram(): Command {
     .option("--dry-run", "Perform a dry run without making any changes")
     .option("--force", "Force overwrite of conflicting files");
 
+  // Show the logo before a command runs, in interactive terminals only
+  // (skipped when piped, in CI and for machine-readable output such as --json).
+  program.hook("preAction", (_thisCommand, actionCommand) => {
+    const { json } = actionCommand.opts<{ json?: boolean }>();
+    if (shouldShowLogo({ json })) showLogo();
+  });
+
   // Add command - adds a specific generator
   registerAddCommand(program);
 
@@ -34,6 +42,11 @@ export function createProgram(): Command {
 // parsing must happen at module load — except under Vitest, where tests
 // import createProgram() and drive parsing with their own argv.
 if (!process.env.VITEST) {
-  const program = createProgram();
-  program.parse();
+  // `dxg` alone: show the welcome banner in an interactive terminal. Otherwise
+  // fall back to commander's help, which keeps scripts' output and exit code.
+  if (process.argv.length <= 2 && shouldShowLogo()) {
+    showBanner(pkg.version);
+  } else {
+    createProgram().parse();
+  }
 }

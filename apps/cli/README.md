@@ -30,6 +30,8 @@ dxg doctor  # Diagnose your DXG project configuration
 dxg doctor --fix  # ...and repair what can be repaired
 ```
 
+Running `dxg` without arguments in an interactive terminal shows a welcome banner with the available commands. The DXG logo is printed before commands only in an interactive terminal: it is skipped when the output is piped or redirected, when the `CI` environment variable is set, and with `--json`, so scripted output stays clean. Set `NO_COLOR` to get the logo without colors.
+
 ## Available Generators
 
 - `db` – Add database setup with Prisma ORM (SQLite, PostgreSQL, MySQL, SQL Server, CockroachDB, PlanetScale, Prisma Postgres)
