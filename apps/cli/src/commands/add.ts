@@ -30,7 +30,7 @@ export function registerAddCommand(program: Command): void {
     .option(
       "--orm <type>",
       "ORM to use: prisma (drizzle is coming soon)",
-      "prisma"
+      "prisma",
     )
     .option(
       "--database-url <url>",
@@ -78,7 +78,8 @@ export function registerAddCommand(program: Command): void {
 
         // Show "DXG Database Setup" intro for the database generator in interactive terminals
         // (matches the logo visibility: skipped in CI, when piped, or with --json)
-        const isDatabaseGenerator = generatorName === "db" || generatorName === "database";
+        const isDatabaseGenerator =
+          generatorName === "db" || generatorName === "database";
         const isInteractive =
           process.stdout.isTTY &&
           !process.env.CI &&
@@ -122,7 +123,9 @@ export function registerAddCommand(program: Command): void {
 
           // Outro: clear final message (red for error)
           outro(
-            pc.red(`Database setup failed: provider mismatch (${existingProvider} vs ${requestedProvider})`),
+            pc.red(
+              `Failed to set up database: provider mismatch (${existingProvider} vs ${requestedProvider})`,
+            ),
           );
 
           process.exitCode = 1;

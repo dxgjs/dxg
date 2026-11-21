@@ -1413,73 +1413,26 @@ export async function executeDatabase(
     // @prisma/client ships a stub that throws "did not initialize yet" at
     // import time until `prisma generate` runs, and no install-lifecycle
     // script triggers it. Without this step the generated lib/prisma.ts
-    // would import a path that does not exist yet. Resolved through the
-    // SAME dlx mechanism as init (getCliCommand(parseNlx, ["prisma@7",
-    // "generate", "--no-hints"]) → pnpm dlx / npx / yarn dlx / bun x),
-    // guarded by the same "dlx resolved as add" mis-resolution workaround
-    // as init. `--no-hints` is Prisma's official documented flag (since
-    // 5.16.0): it suppresses the interactive agent-skills offer and the NPS
-    // survey — both of which render a 30s timeout prompt when stdin stays
-    // TTY-attached through the npx shim — while errors and warnings are
-    // still printed (verified against the prisma@7.10.0 CLI bundle).
+    // would import a path that does not exist yet.
+    //
+    // Use the locally installed Prisma binary via the package manager's
+    // exec command (pnpm prisma, npx prisma, yarn prisma, bunx prisma)
+    // instead of dlx (which downloads Prisma fresh each time). This is
+    // faster since Prisma is already installed as a dev dependency.
     try {
       const s = spinner();
       s.start("Generating Prisma Client (prisma generate)");
 
-      const generateResolved = await getCliCommand(
-        parseNlx,
-        ["prisma@7.10.0", "generate", "--no-hints"],
-        {
-          cwd: process.cwd(),
-          programmatic: true,
-        },
-      );
-      if (!generateResolved) {
-        throw new SpawnError(
-          "prisma",
-          ["generate", "--no-hints"],
-          "Failed to resolve prisma generate command",
-        );
-      }
-
-      const {
-        command: generateCmdInitial,
-        args: generateArgsInitial,
-        cwd: generateResolvedCwd,
-      } = generateResolved;
-
-      let generateCmd = generateCmdInitial;
-      let generateArgs = generateArgsInitial;
-
-      // Same @antfu/ni "dlx resolved as add" mis-resolution guard as init,
-      // with the same shape: the check runs on the RESOLVED args ("add"
-      // present = mis-resolved), the rewrite restores the INTENDED args
-      // (the original contract — here a literal, same as init's
-      // originalArgs). Checking resolved args[0] === "prisma@7" would never
-      // fire: a mis-resolved command starts with "add".
-      if (generateArgs.includes("add")) {
-        generateCmd = "npx";
-        generateArgs = [
-          `prisma@${PRISMA_PINNED_VERSION}`,
-          "generate",
-          "--no-hints",
-        ];
-      }
-
-      // Same pnpm dlx build approval as init (install-layer adapter): the
-      // generate cache is a separate dlx install with the same transitive
-      // @prisma/engines postinstall gate.
-      generateArgs = withDlxBuildApprovals(
-        generateCmd,
-        generateArgs,
-        planToUse.dependencyPlan,
-      );
+      // Map agent to exec command for running local binaries
+      const agent = ctx.installer?.agent ?? "npm";
+      const execCmd = agent === "bun" ? "bunx" : agent === "npm" ? "npx" : agent;
+      const generateArgs = ["prisma", "generate", "--no-hints"];
 
       try {
         // Use stdio: "pipe" to capture output and prevent leakage into the terminal.
         // Output is only surfaced on failure for diagnostics.
-        const generateResult = await executeCommand(generateCmd, generateArgs, {
-          cwd: generateResolvedCwd ?? process.cwd(),
+        const generateResult = await executeCommand(execCmd, generateArgs, {
+          cwd: process.cwd(),
           stdio: "pipe",
         });
         s.stop("Prisma Client generated");
@@ -1504,7 +1457,7 @@ export async function executeDatabase(
         const fullMessage = errorOutput
           ? `${errorMessage}\n\nCaptured output:\n${errorOutput}`
           : errorMessage;
-        throw new SpawnError(generateCmd, generateArgs, fullMessage, {
+        throw new SpawnError(execCmd, generateArgs, fullMessage, {
           cause: executeError instanceof Error ? executeError : undefined,
         });
       }
