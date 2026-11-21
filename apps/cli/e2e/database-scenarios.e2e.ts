@@ -137,6 +137,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "--provider",
         "postgresql",
         "--non-interactive",
+        "--database-url",
+        "postgresql://keepme@localhost:5432/custom",
       ]);
       expect(
         run.code,
@@ -184,6 +186,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "--provider",
         "postgresql",
         "--non-interactive",
+        "--database-url",
+        "postgresql://test@localhost:5432/test",
       ]);
       expect(
         run1.code,
@@ -208,6 +212,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "--provider",
         "postgresql",
         "--non-interactive",
+        "--database-url",
+        "postgresql://test@localhost:5432/test",
       ]);
       expect(
         run2.code,
@@ -248,6 +254,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "--provider",
         "postgresql",
         "--non-interactive",
+        "--database-url",
+        "postgresql://test@localhost:5432/test",
       ]);
 
       // §15: explicit failure, and NOTHING was mutated.
@@ -277,6 +285,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "--provider",
         "postgresql",
         "--non-interactive",
+        "--database-url",
+        "postgresql://test@localhost:5432/test",
       ]);
 
       // §18: fail-fast BEFORE any mutation — the declared version is
@@ -306,6 +316,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "--provider",
         "postgresql",
         "--non-interactive",
+        "--database-url",
+        "postgresql://keepme@localhost:5432/custom",
       ]);
       expect(run.code).toBe(0);
       // §17: user values survive, no silent replacement.
@@ -326,6 +338,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "--provider",
         "postgresql",
         "--non-interactive",
+        "--database-url",
+        "postgresql://test@localhost:5432/test",
       ]);
       expect(run.code).toBe(0);
       const after = readText(dir, ".env");
@@ -345,6 +359,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "--provider",
         "postgresql",
         "--non-interactive",
+        "--database-url",
+        "postgresql://test@localhost:5432/test",
       ]);
       expect(run1.code).toBe(0);
       const helperPath = path.join(dir, "lib", "prisma.ts");
@@ -357,6 +373,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "--provider",
         "postgresql",
         "--non-interactive",
+        "--database-url",
+        "postgresql://test@localhost:5432/test",
       ]);
       expect(run2.code).toBe(0);
       expect(readText(dir, "lib/prisma.ts")).toBe(modified);
@@ -369,6 +387,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
         "postgresql",
         "--non-interactive",
         "--force",
+        "--database-url",
+        "postgresql://test@localhost:5432/test",
       ]);
       expect(run3.code).toBe(0);
       const forced = readText(dir, "lib/prisma.ts");

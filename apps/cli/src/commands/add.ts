@@ -33,6 +33,10 @@ export function registerAddCommand(program: Command): void {
       "prisma"
     )
     .option(
+      "--database-url <url>",
+      "Database connection URL (DATABASE_URL) for non-interactive mode",
+    )
+    .option(
       "--non-interactive",
       "Do not prompt for input; fail if required values are missing",
     )

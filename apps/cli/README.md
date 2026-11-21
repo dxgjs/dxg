@@ -43,6 +43,7 @@ Running `dxg` without arguments in an interactive terminal shows a welcome banne
 
 - `--orm <type>` – ORM to use: `prisma` (default). `drizzle` is not available yet: selecting it exits with an error
 - `--provider <value>` – Specify database provider (sqlite|postgresql|mysql|sqlserver|cockroachdb|planetscale|prismapostgres)
+- `--database-url <url>` – Database connection URL (DATABASE_URL) for non-interactive mode with server providers
 - `--non-interactive` – Do not prompt for input; fail if required values are missing
 - `--dry-run` – Perform a dry run without making any changes
 - `--force` – Force overwrite of conflicting files
