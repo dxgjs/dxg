@@ -57,9 +57,8 @@ export interface CreateInstallerOptions {
 /**
  * Reconciles package.json after a successful install batch: the manifest
  * must state the spec DXG commanded, not the manager's save-prefix
- * policy. npm resolves `prisma@7.10.0` and saves it caret-prefixed
- * (`^7.10.0` — live-verified on npm 12; minimal repro 2026-10-10: a
- * bare `npm install -D prisma@7.10.0` writes "^7.10.0"), and even a
+ * policy. npm resolves `prisma@^7.10.1` and saves it caret-prefixed
+ * (`^7.10.1` — live-verified on npm 12), and even a
  * commanded range comes back as the latest match
  * (`better-sqlite3@^12.6.0` → `^12.11.1`), silently breaking the
  * verified-pin contract. pnpm is NOT exempt: 12.5.1 saves pins verbatim

@@ -469,12 +469,12 @@ export function scriptSection(pkg: Json): Record<string, string> {
  *
  *   • unicode (parent sets WT_SESSION — morning Windows-Terminal
  *     baseline): "│" U+2502 borders,
- *       │  • prisma@7.10.0 … reinstall (already declared at  │
+ *       │  • prisma@^7.10.1 … reinstall (already declared at  │
  *       │  the verified pin)                                  │
  *   • ASCII (parent sets none of the markers — VS Code session,
  *     2026-10-10 evening runs): "|" U+007C borders and "T"/"o"/"+"
  *     corners (S_BAR_START/S_STEP_SUBMIT/S_CORNER_* fallbacks),
- *       |  • prisma@7.10.0 … reinstall (already declared at  |
+ *       |  • prisma@^7.10.1 … reinstall (already declared at  |
  *       |  the verified pin)                                  |
  *
  * In BOTH modes the CLI said exactly the asserted string — a raw

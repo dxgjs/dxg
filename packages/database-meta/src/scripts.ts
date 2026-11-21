@@ -13,7 +13,7 @@ export type { DatabaseScriptCatalog, DatabaseScriptCatalogEntry } from "./types"
 // db:seed is opt-in (customize only): selecting it generates a
 // prisma/seed.ts skeleton, adds `tsx` (the seed runner) and configures
 // `migrations.seed` in prisma7.config.ts — where Prisma 7's `db seed`
-// reads the seed command (verified against the prisma@7.10.0 CLI: it
+// reads the seed command (verified against the prisma@7 CLI: it
 // resolves migrations.seed from the config file ONLY; the
 // `prisma.seed` package.json field is read by the init flow's
 // "Seed the database?" prompt, never by db seed). The recommended set

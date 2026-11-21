@@ -38,9 +38,9 @@ import type { DependencyPlan } from "./types";
 /** The REAL database plan shape for a postgresql project (from
  * planDatabase): the approvalOnly entry is the transitive @prisma/engines. */
 const postgresPlan: DependencyPlan = {
-  devDependencies: [{ spec: "prisma@7.10.0", requiresBuild: true }],
+  devDependencies: [{ spec: "prisma@^7.10.1", requiresBuild: true }],
   dependencies: [
-    { spec: "@prisma/client@7.10.0", requiresBuild: false },
+    { spec: "@prisma/client@^7.10.1", requiresBuild: false },
     {
       spec: "@prisma/engines",
       requiresBuild: true,

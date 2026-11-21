@@ -69,14 +69,14 @@ export class DXGError extends Error {
 
 /**
  * Thrown when the project declares an incompatible Prisma version.
- * User must align their package.json to the verified pin (prisma@7.10.0).
+ * User must align their package.json to the verified 7.x pin (prisma@7).
  */
 export class PrismaVersionConflictError extends DXGError {
   constructor(message: string, options: DXGErrorOptions = {}) {
     super("DXG_ERR_PRISMA_VERSION_CONFLICT", message, {
       recoverable: true,
       hints: [
-        "Align the declared Prisma version to 7.10.0 (or a range containing exactly it, e.g., ^7.10.0)",
+        "Align the declared Prisma version to 7.x (e.g., ^7.10.1 for package.json, @7 for CLI)",
         "Run `dxg add database` again after fixing package.json",
       ],
       docsUrl: "https://dxg.dev/errors/prisma-version-conflict",

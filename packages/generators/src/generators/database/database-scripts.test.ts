@@ -83,7 +83,7 @@ vi.mock("@dxgjs/fs", async () => {
   // receiver (same rationale as package-manifest.test.ts).
   const _files = new Map<string, string>();
   const _directories = new Set<string>();
-  // The exact prisma7.config.ts content written by `prisma init` 7.10.0
+  // The exact prisma7.config.ts content written by `prisma init` 7
   // (non-bun runtime, prisma identity) — verified against the installed
   // CLI bundle. Exposed so tests can pre-seed user-modified variants.
   const _prismaInitConfig = [
@@ -239,7 +239,7 @@ vi.mock("@dxgjs/fs", async () => {
             );
           }
         }
-        // Simulate `prisma init` (prisma@7.10.0, non-bun): it owns and
+        // Simulate `prisma init` (prisma@7, non-bun): it owns and
         // writes the root prisma7.config.ts plus the prisma/ scaffolding
         // (schema.prisma included — the real CLI always writes it; the
         // inspection's prismaDirEmpty gate depends on that fidelity).
@@ -247,7 +247,7 @@ vi.mock("@dxgjs/fs", async () => {
         // real CLI, which refuses to run in an existing Prisma project.
         if (
           command === "npx" &&
-          args[0] === "prisma@7.10.0" &&
+          args[0] === "prisma@7" &&
           args[1] === "init" &&
           !_files.has("prisma7.config.ts")
         ) {
@@ -281,12 +281,35 @@ vi.mock("@dxgjs/fs", async () => {
         }
         // Simulate `prisma generate`: emits the generated client at the
         // generator's output path (lib/generated/prisma — see schema).
-        // Generator uses "prisma@7" with "--no-hints" flag.
-        if (
-          command === "npx" &&
-          (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") &&
-          args[1] === "generate"
-        ) {
+        // Generator uses local binary via package manager exec:
+        // - npm: npx prisma generate --no-hints
+        // - pnpm: pnpm prisma generate --no-hints
+        // - yarn: yarn prisma generate --no-hints
+        // - bun: bunx prisma generate --no-hints
+        const isPrismaGenerate =
+          (command === "npx" || command === "pnpm" || command === "yarn" || command === "bunx") &&
+          args[0] === "prisma" &&
+          args[1] === "generate";
+        if (isPrismaGenerate) {
+          _files.set(
+            "lib/generated/prisma/client.ts",
+            "// generated prisma client\n",
+          );
+          _directories.add("lib/generated/prisma");
+          return { all: "prisma generate ok", stdout: "", stderr: "" };
+        }
+        // Simulate package manager run command for `db:generate` script
+        // (e.g., `npm run db:generate`, `pnpm db:generate`, `yarn db:generate`, `bun run db:generate`).
+        // The script is "prisma generate" which runs the local prisma binary.
+        // Handle different package manager command shapes:
+        // - npm: command="npm", args=["run", "db:generate"]
+        // - pnpm: command="pnpm", args=["db:generate"] or ["run", "db:generate"]
+        // - yarn: command="yarn", args=["db:generate"]
+        // - bun: command="bun", args=["run", "db:generate"]
+        const isDbGenerateRun =
+          (args[0] === "run" && args[1] === "db:generate") || // npm run, bun run, pnpm run
+          (args[0] === "db:generate"); // pnpm, yarn (direct)
+        if (isDbGenerateRun) {
           _files.set(
             "lib/generated/prisma/client.ts",
             "// generated prisma client\n",
@@ -314,9 +337,9 @@ vi.mock("@antfu/ni", () => {
           return { command: "npm", args: [] };
         }
         // prisma init / prisma generate: verbatim dlx passthrough (never an
-        // install) — matches ni's real npm resolution (npx prisma@7.10.0 …).
+        // install) — matches ni's real npm resolution (npx prisma@7 …).
         // Generator uses "prisma@7" (not pinned to patch) for both init and generate.
-        if (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") {
+        if (args[0] === "prisma@7") {
           return { command: "npx", args: [...args] };
         }
         if (args[0] === "-D") {
@@ -726,8 +749,8 @@ describe("interactive database scripts phase", () => {
     expect((final.scripts ?? {}).build).toBe("next build");
     expect((final.dependencies ?? {}).next).toBe("16.2.12");
     // DXG-installed dependencies survive the write-back.
-    expect((final.devDependencies ?? {}).prisma).toBe("7.10.0");
-    expect((final.dependencies ?? {})["@prisma/client"]).toBe("7.10.0");
+    expect((final.devDependencies ?? {}).prisma).toBe("^7.10.1");
+    expect((final.dependencies ?? {})["@prisma/client"]).toBe("^7.10.1");
   });
 
   test("cancellation during the phase propagates the Clack cancel symbol", async () => {

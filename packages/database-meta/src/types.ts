@@ -30,10 +30,10 @@ export interface DatabaseScriptCatalogEntry {
 
 export type DatabaseScriptCatalog = Record<string, DatabaseScriptCatalogEntry>;
 
-/** Prisma declaration classification (exact-match 7.10.0 policy). */
+/** Prisma declaration classification (7.x verification policy). */
 export type PrismaVersionClass =
-  | "satisfied" // declares exactly 7.10.0 or a range that contains it
-  | "incompatible" // any 6.x / 8.x / other 7.x — conflict, abort before install
+  | "satisfied" // declares a valid 7.x version or range (not prerelease, not 8.x)
+  | "incompatible" // any 6.x / 8.x / prerelease — conflict, abort before install
   | "missing"; // not declared at all (fresh project, or repairable install)
 
 /** Read-only project inspection for the database generator/doctor. */
@@ -54,7 +54,7 @@ export interface DatabaseInspection {
   generatorOutputEscapesRoot: boolean;
   /** Schema declares the legacy (<=6) datasource url form -> P1012 under 7. */
   datasourceLegacyForm: boolean;
-  /** Prisma CLI declaration class (exact-match 7.10.0 policy). */
+  /** Prisma CLI declaration class (7.x verification policy). */
   prismaVersion: PrismaVersionClass;
   /** Declared prisma spec string, when present. */
   prismaDeclaredSpec: string | undefined;

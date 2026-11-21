@@ -9,8 +9,8 @@
  *   verified empirically — the state is unrecoverable for DXG).
  * - Incompatible Prisma declarations (6.x / 8.x / other 7.x / prerelease
  *   ranges) → FAIL EARLY, before ANY installation (npm silently flips a
- *   declared 6.20.0 to ^7.10.0 — verified empirically; DXG must not).
- * - Both Prisma packages declared at the verified pin (7.10.0, ^7.10.0…) →
+ *   declared 6.20.0 to ^7.10.1 — verified empirically; DXG must not).
+ * - Both Prisma packages declared at the verified pin (7, ^7.10.1…) →
  *   install batches drop them, init is skipped, generate still runs.
  * - Existing schema.prisma or prisma7.config.ts → init never executes.
  * - generate always executes (byte-stable regen, staleness case).
@@ -77,7 +77,7 @@ vi.mock("@dxgjs/fs", async () => {
   const _files = fsMockStore._files;
   const _directories = fsMockStore._directories;
 
-  // The exact prisma7.config.ts content written by `prisma init` 7.10.0
+  // The exact prisma7.config.ts content written by `prisma init` 7
   const _prismaInitConfig = [
     'import { defineConfig } from "prisma/config";',
     "",
@@ -221,12 +221,12 @@ vi.mock("@dxgjs/fs", async () => {
             );
           }
         }
-        // Simulate `prisma init` (prisma@7.10.0, non-bun) — writes the root
+        // Simulate `prisma init` (prisma@7, non-bun) — writes the root
         // prisma7.config.ts plus the prisma/ scaffolding (schema.prisma
         // included: the real CLI always writes it).
         if (
           command === "npx" &&
-          args[0] === "prisma@7.10.0" &&
+          args[0] === "prisma@7" &&
           args[1] === "init" &&
           !_files.has("prisma7.config.ts")
         ) {
@@ -261,11 +261,16 @@ vi.mock("@dxgjs/fs", async () => {
           return { all: "prisma init ok", stdout: "", stderr: "" };
         }
         // Simulate `prisma generate`: emits the generated client.
-        if (
-          command === "npx" &&
-          args[0] === "prisma@7.10.0" &&
-          args[1] === "generate"
-        ) {
+        // Generator uses local binary via package manager exec:
+        // - npm: npx prisma generate --no-hints
+        // - pnpm: pnpm prisma generate --no-hints
+        // - yarn: yarn prisma generate --no-hints
+        // - bun: bunx prisma generate --no-hints
+        const isPrismaGenerate =
+          (command === "npx" || command === "pnpm" || command === "yarn" || command === "bunx") &&
+          args[0] === "prisma" &&
+          args[1] === "generate";
+        if (isPrismaGenerate) {
           // Determine the output path: try to read from schema.prisma first,
           // fall back to last captured from prisma init, then compute from
           // the default helper path (since helper file is created AFTER generate
@@ -313,7 +318,7 @@ vi.mock("@dxgjs/fs", async () => {
         // Simulate `prisma db push`: creates the database file for SQLite.
         if (
           command === "npx" &&
-          args[0] === "prisma@7.10.0" &&
+          args[0] === "prisma@7" &&
           args[1] === "db" &&
           args[2] === "push"
         ) {
@@ -334,9 +339,9 @@ vi.mock("@antfu/ni", () => {
       .fn()
       .mockImplementation((_parseNiFn: unknown, args: string[]) => {
         // dlx passthrough (real ni behavior): prisma init/generate/db push resolve
-        // to npx with verbatim args. Match both "prisma@7" and "prisma@7.10.0".
+        // to npx with verbatim args. Match "prisma@7" (default).
         const isPrismaCmd =
-          (args[0] === "prisma@7" || args[0] === "prisma@7.10.0") &&
+          args[0] === "prisma@7" &&
           (args[1] === "init" || args[1] === "generate" || (args[1] === "db" && args[2] === "push"));
         if (isPrismaCmd) {
           return { command: "npx", args: [...args], cwd: undefined };
@@ -387,11 +392,11 @@ const MY_APP_PACKAGE_JSON = {
 const SATISFIED_PACKAGE_JSON = {
   ...MY_APP_PACKAGE_JSON,
   devDependencies: {
-    prisma: "7.10.0",
+    prisma: "^7.10.1",
   },
   dependencies: {
     ...MY_APP_PACKAGE_JSON.dependencies,
-    "@prisma/client": "7.10.0",
+    "@prisma/client": "^7.10.1",
   },
 };
 
@@ -493,7 +498,16 @@ function prismaCommandCalls(): [string, string[]][] {
       }
     )
     .filter(([cmd, args]) => {
-      return cmd === "npx" && args[0] === "prisma@7.10.0";
+      // Match new pattern: package manager exec command (npx, pnpm, yarn, bunx) with "prisma generate"
+      const isGenerate =
+        (cmd === "npx" || cmd === "pnpm" || cmd === "yarn" || cmd === "bunx") &&
+        args[0] === "prisma" &&
+        args[1] === "generate";
+      // Match init command (still uses prisma@7 via getCliCommand)
+      const isInit = cmd === "npx" && args[0] === "prisma@7" && args[1] === "init";
+      // Match db push command (still uses prisma@7 via getCliCommand)
+      const isDbPush = cmd === "npx" && args[0] === "prisma@7" && args[1] === "db" && args[2] === "push";
+      return isGenerate || isInit || isDbPush;
     });
 }
 
@@ -585,12 +599,12 @@ describe("idempotence gates (fail-early, before any installation)", () => {
 
     expect(installCalls()).toHaveLength(0);
     expect(prismaCommandCalls()).toHaveLength(0);
-    // The declared version is untouched — no silent flip to ^7.10.0.
+    // The declared version is untouched — no silent flip to ^7.10.1.
     const manifest = readManifestFromDisk();
     expect(manifest.devDependencies!.prisma).toBe("6.20.0");
   });
 
-  test("declared @prisma/client ^7.0.0 → conflict (unverified floor)", async () => {
+  test("declared @prisma/client ^7.0.0 → satisfied (floor within 7.x), init runs, generate runs", async () => {
     await seedProject({
       ...MY_APP_PACKAGE_JSON,
       devDependencies: {},
@@ -600,14 +614,24 @@ describe("idempotence gates (fail-early, before any installation)", () => {
       },
     });
 
-    await expect(
-      databaseGenerator.run(
-        { provider: "sqlite", installPrismaSkills: false },
-        makeContext(),
-      ),
-    ).rejects.toThrow(/Prisma version conflict/i);
+    await databaseGenerator.run(
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
+      makeContext(),
+    );
 
-    expect(installCalls()).toHaveLength(0);
+    // @prisma/client is satisfied, so it's dropped from install batch
+    const installs = installCalls();
+    const allSpecs = installs.flatMap((call: [string, string[]]) => {
+      const args: string[] = call[1] ?? [];
+      return args.filter((a) => !["install", "add", "-D"].includes(a));
+    });
+    expect(allSpecs).not.toContain("@prisma/client@^7.10.1");
+    // But prisma (devDep) is not declared, so it should be installed
+    expect(allSpecs).toContain("prisma@^7.10.1");
+    // generate runs
+    const prismaCalls = prismaCommandCalls();
+    const generateCalls = prismaCalls.filter(([, args]) => args[1] === "generate");
+    expect(generateCalls).toHaveLength(1);
   });
 
   test("declared prisma 8.0.0-rc.13 (prerelease) → conflict", async () => {
@@ -627,21 +651,31 @@ describe("idempotence gates (fail-early, before any installation)", () => {
     expect(installCalls()).toHaveLength(0);
   });
 
-  test("declared prisma 7.0.0 (silent --no-skills bug) → conflict", async () => {
+  test("declared prisma 7.0.0 → satisfied (bare 7.x version), init runs, generate runs", async () => {
     await seedProject({
       ...MY_APP_PACKAGE_JSON,
       devDependencies: { prisma: "7.0.0" },
       dependencies: { ...MY_APP_PACKAGE_JSON.dependencies },
     });
 
-    await expect(
-      databaseGenerator.run(
-        { provider: "sqlite", installPrismaSkills: false },
-        makeContext(),
-      ),
-    ).rejects.toThrow(/Prisma version conflict/i);
+    await databaseGenerator.run(
+      { provider: "sqlite", installPrismaSkills: false, databaseUrl: "file:./dev.db" },
+      makeContext(),
+    );
 
-    expect(installCalls()).toHaveLength(0);
+    // prisma 7.0.0 is satisfied, so it's dropped from install batch
+    const installs = installCalls();
+    const allSpecs = installs.flatMap((call: [string, string[]]) => {
+      const args: string[] = call[1] ?? [];
+      return args.filter((a) => !["install", "add", "-D"].includes(a));
+    });
+    expect(allSpecs).not.toContain("prisma@^7.10.1");
+    // But @prisma/client is not declared, so it should be installed
+    expect(allSpecs).toContain("@prisma/client@^7.10.1");
+    // generate runs
+    const prismaCalls = prismaCommandCalls();
+    const generateCalls = prismaCalls.filter(([, args]) => args[1] === "generate");
+    expect(generateCalls).toHaveLength(1);
   });
 });
 
@@ -665,8 +699,8 @@ describe("idempotence reconciliation (satisfied state)", () => {
       const args: string[] = call[1] ?? [];
       return args.filter((a) => !["install", "add", "-D"].includes(a));
     });
-    expect(allSpecs).not.toContain("prisma@7.10.0");
-    expect(allSpecs).not.toContain("@prisma/client@7.10.0");
+    expect(allSpecs).not.toContain("prisma@^7.10.1");
+    expect(allSpecs).not.toContain("@prisma/client@^7.10.1");
     expect(allSpecs.some((s) => s.startsWith("better-sqlite3"))).toBe(true);
 
     // Fresh-shaped (no schema, no config): init still executes.
@@ -706,8 +740,8 @@ describe("idempotence reconciliation (satisfied state)", () => {
       const args: string[] = call[1] ?? [];
       return args.filter((a) => !["install", "add", "-D"].includes(a));
     });
-    expect(allSpecs).not.toContain("prisma@7.10.0");
-    expect(allSpecs).not.toContain("@prisma/client@7.10.0");
+    expect(allSpecs).not.toContain("prisma@^7.10.1");
+    expect(allSpecs).not.toContain("@prisma/client@^7.10.1");
 
     // init never executes; generate DOES (always-generate).
     const initCalls = prismaCommandCalls().filter(
@@ -816,8 +850,8 @@ describe("idempotence reconciliation (satisfied state)", () => {
       const args: string[] = call[1] ?? [];
       return args.filter((a) => !["install", "add", "-D"].includes(a));
     });
-    expect(allSpecs).not.toContain("prisma@7.10.0");
-    expect(allSpecs).not.toContain("@prisma/client@7.10.0");
+    expect(allSpecs).not.toContain("prisma@7");
+    expect(allSpecs).not.toContain("@prisma/client@7");
   });
 
   test("fully-declared project rerun installs NOTHING (lockfile byte-stable)", async () => {
@@ -864,7 +898,7 @@ describe("idempotence reconciliation (satisfied state)", () => {
       },
       dependencies: {
         ...SATISFIED_PACKAGE_JSON.dependencies,
-        "@prisma/adapter-better-sqlite3": "^7.10.0",
+        "@prisma/adapter-better-sqlite3": "^7.10.1",
         "better-sqlite3": "^12.6.0",
         dotenv: "^18.0.7",
       },

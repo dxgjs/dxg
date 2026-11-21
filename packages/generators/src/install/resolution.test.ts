@@ -158,7 +158,7 @@ describe("install batch resolution (real @antfu/ni, all agents)", () => {
   test("dev batch: '-D first' resolves to the agent's dev-install with verbatim specs", async () => {
     for (const scenario of agentScenarios) {
       const resolved = await resolveInstall(
-        ["-D", "prisma@7.10.0", "tsx"],
+        ["-D", "prisma@^7.10.1", "tsx"],
         scenario.files,
       );
       expect(resolved.command, `${scenario.name}: executable`).toBe(
@@ -171,14 +171,14 @@ describe("install batch resolution (real @antfu/ni, all agents)", () => {
       ).toEqual(scenario.expectedDevPrefix);
       // Specs verbatim after the dev flag.
       const specs = resolved.args.slice(scenario.expectedDevPrefix.length);
-      expect(specs).toEqual(["prisma@7.10.0", "tsx"]);
+      expect(specs).toEqual(["prisma@^7.10.1", "tsx"]);
     }
   }, RESOLVE_TIMEOUT);
 
   test("regular batch: plain specs resolve to the agent's install with verbatim specs", async () => {
     for (const scenario of agentScenarios) {
       const resolved = await resolveInstall(
-        ["@prisma/client@7.10.0", "better-sqlite3@^12.6.0", "dotenv"],
+        ["@prisma/client@^7.10.1", "better-sqlite3@^12.6.0", "dotenv"],
         scenario.files,
       );
       expect(resolved.command, `${scenario.name}: executable`).toBe(
@@ -190,7 +190,7 @@ describe("install batch resolution (real @antfu/ni, all agents)", () => {
       ).toEqual(scenario.expectedRegularPrefix);
       const specs = resolved.args.slice(scenario.expectedRegularPrefix.length);
       expect(specs).toEqual([
-        "@prisma/client@7.10.0",
+        "@prisma/client@^7.10.1",
         "better-sqlite3@^12.6.0",
         "dotenv",
       ]);
@@ -202,9 +202,9 @@ describe("install batch resolution (real @antfu/ni, all agents)", () => {
     // resolution — the transitive @prisma/engines is never a CLI arg.
     // Pinned as the plan shape's contract: the batch args the installer
     // builds for the database plan never contain it.
-    const devBatchArgs = ["-D", "prisma@7.10.0", "@types/node"];
+    const devBatchArgs = ["-D", "prisma@^7.10.1", "@types/node"];
     const regularBatchArgs = [
-      "@prisma/client@7.10.0",
+      "@prisma/client@^7.10.1",
       "@prisma/adapter-better-sqlite3",
       "better-sqlite3@^12.6.0",
       "dotenv",

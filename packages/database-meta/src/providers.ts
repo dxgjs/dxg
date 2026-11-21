@@ -1,6 +1,7 @@
 import { fileURLToPath } from "url";
 import { dirname, join, sep } from "path";
 import type { ProviderData } from "./types";
+import { PRISMA_PACKAGE_VERSION } from "./version";
 export type { ProviderData } from "./types";
 
 // Get the directory where this module is located
@@ -31,13 +32,13 @@ export const providerData: Record<string, ProviderData> = {
     adapterImport: "PrismaBetterSqlite3",
     adapterClass: "PrismaBetterSqlite3",
     driverPackage: "better-sqlite3",
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/better-sqlite3"],
-    // better-sqlite3 is PINNED to ^12.6.0: @prisma/adapter-better-sqlite3@7.10.0
+    devDependencies: [`prisma@${PRISMA_PACKAGE_VERSION}`, "@types/node", "@types/better-sqlite3"],
+    // better-sqlite3 is PINNED to ^12.6.0: @prisma/adapter-better-sqlite3 uses same Prisma version
     // requires ^12.6.0, and latest (13.x) changed distribution models (no
     // install script at all). Unpinned, the two constraints could diverge
     // into a double-copy hazard.
     dependencies: [
-      "@prisma/client@7.10.0",
+      `@prisma/client@${PRISMA_PACKAGE_VERSION}`,
       "@prisma/adapter-better-sqlite3",
       "better-sqlite3@^12.6.0",
       "dotenv",
@@ -58,9 +59,9 @@ export const providerData: Record<string, ProviderData> = {
     adapterImport: "PrismaPg",
     adapterClass: "PrismaPg",
     driverPackage: "pg",
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/pg"],
+    devDependencies: [`prisma@${PRISMA_PACKAGE_VERSION}`, "@types/node", "@types/pg"],
     dependencies: [
-      "@prisma/client@7.10.0",
+      `@prisma/client@${PRISMA_PACKAGE_VERSION}`,
       "@prisma/adapter-pg",
       "pg",
       "dotenv",
@@ -81,9 +82,9 @@ export const providerData: Record<string, ProviderData> = {
     adapterImport: "PrismaMariaDb",
     adapterClass: "PrismaMariaDb",
     driverPackage: "", // MariaDB adapter uses individual params, not a driver package
-    devDependencies: ["prisma@7.10.0", "@types/node"],
+    devDependencies: [`prisma@${PRISMA_PACKAGE_VERSION}`, "@types/node"],
     dependencies: [
-      "@prisma/client@7.10.0",
+      `@prisma/client@${PRISMA_PACKAGE_VERSION}`,
       "@prisma/adapter-mariadb",
       "dotenv",
     ],
@@ -103,8 +104,8 @@ export const providerData: Record<string, ProviderData> = {
     adapterImport: "PrismaMssql",
     adapterClass: "PrismaMssql",
     driverPackage: "", // MSSQL adapter uses individual params
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/mssql"],
-    dependencies: ["@prisma/client@7.10.0", "@prisma/adapter-mssql", "dotenv"],
+    devDependencies: [`prisma@${PRISMA_PACKAGE_VERSION}`, "@types/node", "@types/mssql"],
+    dependencies: [`@prisma/client@${PRISMA_PACKAGE_VERSION}`, "@prisma/adapter-mssql", "dotenv"],
     templatePath: join(templateBasePath, "prisma-client-lib-sqlserver.tmpl"),
     templateOutputPath: "lib/prisma.ts",
     instantiationPattern: "individualParams", // Uses individual connection parameters
@@ -121,9 +122,9 @@ export const providerData: Record<string, ProviderData> = {
     adapterImport: "PrismaPg",
     adapterClass: "PrismaPg",
     driverPackage: "pg",
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/pg"],
+    devDependencies: [`prisma@${PRISMA_PACKAGE_VERSION}`, "@types/node", "@types/pg"],
     dependencies: [
-      "@prisma/client@7.10.0",
+      `@prisma/client@${PRISMA_PACKAGE_VERSION}`,
       "@prisma/adapter-pg",
       "pg",
       "dotenv",
@@ -144,9 +145,9 @@ export const providerData: Record<string, ProviderData> = {
     adapterImport: "PrismaPlanetScale",
     adapterClass: "PrismaPlanetScale",
     driverPackage: "undici", // Required for fetch polyfill
-    devDependencies: ["prisma@7.10.0", "@types/node"],
+    devDependencies: [`prisma@${PRISMA_PACKAGE_VERSION}`, "@types/node"],
     dependencies: [
-      "@prisma/client@7.10.0",
+      `@prisma/client@${PRISMA_PACKAGE_VERSION}`,
       "@prisma/adapter-planetscale",
       "undici",
       "dotenv",
@@ -170,9 +171,9 @@ export const providerData: Record<string, ProviderData> = {
     adapterImport: "PrismaPg",
     adapterClass: "PrismaPg",
     driverPackage: "pg",
-    devDependencies: ["prisma@7.10.0", "@types/node", "@types/pg"],
+    devDependencies: [`prisma@${PRISMA_PACKAGE_VERSION}`, "@types/node", "@types/pg"],
     dependencies: [
-      "@prisma/client@7.10.0",
+      `@prisma/client@${PRISMA_PACKAGE_VERSION}`,
       "@prisma/adapter-pg",
       "pg",
       "dotenv",

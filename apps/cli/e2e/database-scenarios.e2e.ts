@@ -80,9 +80,9 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
       // A complete, user-customized Prisma project (declared at the
       // verified pin, real install).
       await bootstrapProject(dir, "pnpm", {
-        devDependencies: { prisma: "7.10.0", "@types/pg": "^8" },
+        devDependencies: { prisma: "^7.10.1", "@types/pg": "^8" },
         dependencies: {
-          "@prisma/client": "7.10.0",
+          "@prisma/client": "^7.10.1",
           pg: "^8",
           dotenv: "^16",
         },
@@ -158,8 +158,8 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
       // Reconciled manifest: pins untouched, adapter self-healed in,
       // recommended scripts added.
       const pkg = readJson(dir, "package.json");
-      expect(depSection(pkg, "devDependencies").prisma).toBe("7.10.0");
-      expect(depSection(pkg, "dependencies")["@prisma/client"]).toBe("7.10.0");
+      expect(depSection(pkg, "devDependencies").prisma).toBe("^7.10.1");
+      expect(depSection(pkg, "dependencies")["@prisma/client"]).toBe("^7.10.1");
       expect(
         depSection(pkg, "dependencies")["@prisma/adapter-pg"],
       ).toBeDefined();
@@ -421,7 +421,7 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
       expect(scriptSection(pkg)["db:seed"]).toBe("prisma db seed");
       expect(scriptSection(pkg)["db:push"]).toBe("prisma db push");
       expect(depSection(pkg, "devDependencies").tsx).toBeDefined();
-      expect(depSection(pkg, "devDependencies").prisma).toBe("7.10.0");
+      expect(depSection(pkg, "devDependencies").prisma).toBe("^7.10.1");
       expect(depSection(pkg, "dependencies")["better-sqlite3"]).toBe(
         "^12.6.0",
       );
@@ -501,7 +501,7 @@ describe("E2E: dxg add database — state, conflict & native scenarios", () => {
       expect(depSection(pkg, "dependencies")["better-sqlite3"]).toBe(
         "^12.6.0",
       );
-      expect(depSection(pkg, "devDependencies").prisma).toBe("7.10.0");
+      expect(depSection(pkg, "devDependencies").prisma).toBe("^7.10.1");
 
       // Lockfile agrees: the importers entry carries the SAME specifier
       // — the exact spot the drift sat before the fix.

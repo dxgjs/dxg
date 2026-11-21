@@ -1,4 +1,3 @@
-import { PRISMA_PINNED_VERSION } from "./version";
 export type { PrismaVersionClass } from "./types";
 
 /**
@@ -22,21 +21,21 @@ export function parseVersion(raw: string): {
   };
 }
 
-/** True when a bare version (no range operators) is exactly the pinned 7.10.0. */
-function isExactPin(raw: string): boolean {
-  return raw.trim() === PRISMA_PINNED_VERSION;
+/**
+ * True when a bare version (no range operators) is a valid 7.x version.
+ * Accepts any 7.x.y version (not 6.x, not 8.x, not prerelease).
+ */
+function isValid7xVersion(raw: string): boolean {
+  const parsed = parseVersion(raw.trim());
+  return parsed.major === 7 && parsed.prerelease === "";
 }
 
 /**
- * True when a semver range expression's FLOOR is exactly the pinned 7.10.0
- * or higher-within-7 (i.e. ^7.10.0 / ~7.10.0 / >=7.10 <8). A range whose
- * floor is lower (^7.0.0, >7.9.0) can resolve to an unverified 7.x and is
- * therefore incompatible — the exact-match policy from the decision
- * document. Handles caret, tilde, >=/</> and space-separated AND
- * comparators. Prerelease-including ranges are rejected outright (an RC
- * range is not a verified contract).
+ * True when a semver range expression's FLOOR is within the 7.x branch
+ * and the range does not admit 8.x or prerelease versions.
+ * Accepts ranges like ^7.10.1, ~7.10.1, >=7.10.1 <8, etc.
  */
-function rangeAcceptsOnlyPinnedMajor(range: string): boolean {
+function rangeAcceptsValid7x(range: string): boolean {
   const parts = range.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return false;
   if (parts.some((p) => /-\w/.test(p))) return false; // prerelease/RC
@@ -56,35 +55,32 @@ function rangeAcceptsOnlyPinnedMajor(range: string): boolean {
     if (gt) {
       const [, M, m, p] = gt;
       if (Number(M) !== 7) return false;
-      // >7.9.0 still admits 7.9.1 — only a floor that lands exactly on
-      // 7.10.0 keeps the range verified: >7.9.x < 7.10 is unverified.
+      // >7.9.0 admits 7.9.1+ — any >7.x within 7.x branch is valid
       const minor = Number(m) + (Number(p) > 0 ? 0 : 1);
-      if (minor !== 10) return false;
+      if (minor < 0) return false;
       floorMinor = floorMinor === -1 ? minor : Math.max(floorMinor, minor);
       continue;
     }
     const lt = /^<(?!=)(\d+)(?:\.(\d+))?(?:\.\d+)?$/.exec(part);
     if (lt) {
-      // Only an upper bound that keeps the whole 7 major is verified.
+      // Only an upper bound that keeps the whole 7 major is valid.
       if (Number(lt[1]) !== 8) return false;
       continue;
     }
     // Exact bare version inside an AND expression
     if (/^\d+\.\d+\.\d+$/.test(part)) {
-      return isExactPin(part);
+      return isValid7xVersion(part);
     }
     return false; // wildcards, ||, hyphen ranges: unverified — incompatible
   }
-  // Exact-match policy: the range must floor EXACTLY at 7.10.0 — a lower
-  // floor (^7.0.0) admits unverified 7.x, a higher one (^7.11.0) excludes
-  // the pinned version. floorMinor === -1 means no floor comparator at all
-  // (a lone <8): unverified.
-  return floorMinor === 10;
+  // The range must have a floor within 7.x (not just <8 alone)
+  // floorMinor === -1 means no floor comparator at all (a lone <8): incompatible.
+  return floorMinor !== -1;
 }
 
 /**
  * Classifies a declared prisma / @prisma/client version string against the
- * exact-match policy. Exported for tests.
+ * 7.x verification policy. Exported for tests.
  */
 export function classifyPrismaVersion(
   declared: string | undefined,
@@ -92,8 +88,8 @@ export function classifyPrismaVersion(
   if (declared === undefined) return "missing";
   const raw = declared.trim();
   if (raw === "" || raw === "*" || raw === "latest") return "missing"; // no usable pin — treat as absent
-  if (isExactPin(raw)) return "satisfied";
-  if (rangeAcceptsOnlyPinnedMajor(raw)) return "satisfied";
+  if (isValid7xVersion(raw)) return "satisfied";
+  if (rangeAcceptsValid7x(raw)) return "satisfied";
   return "incompatible";
 }
 
@@ -113,10 +109,10 @@ export function declaredVersion(
 }
 
 /**
- * Extracts the package NAME from an npm spec like "prisma@7.10.0" or
- * "@prisma/client@7.10.0". Exported for planDatabase's state-aware batch
- * filtering (name-based, never literal-spec — a declared "7.10.0" must
- * match a batch "prisma@7.10.0").
+ * Extracts the package NAME from an npm spec like "prisma@7" or
+ * "@prisma/client@^7.10.1". Exported for planDatabase's state-aware batch
+ * filtering (name-based, never literal-spec — a declared "7" must
+ * match a batch "prisma@7").
  */
 export function specName(spec: string): string {
   const at = spec.indexOf("@", 1);

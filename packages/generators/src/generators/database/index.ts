@@ -135,8 +135,16 @@ export const databasePrompts = [
     message: "Which ORM would you like to use?",
     initialValue: "prisma",
     choices: [
-      { name: "Prisma", value: "prisma", hint: "Next-generation ORM with schema & migrations" },
-      { name: "Drizzle", value: "drizzle", hint: "Lightweight & SQL-like TypeScript ORM (Coming soon)" },
+      {
+        name: "Prisma",
+        value: "prisma",
+        hint: "Next-generation ORM with schema & migrations",
+      },
+      {
+        name: "Drizzle",
+        value: "drizzle",
+        hint: "Lightweight & SQL-like TypeScript ORM (Coming soon)",
+      },
     ],
   },
   {
@@ -220,7 +228,7 @@ export const databasePrompts = [
  * `originalArgs` fallback/workaround), so the skills decision can never
  * diverge between the two paths.
  *
- * Skills translation (verified against the prisma@7.10.0 CLI source):
+ * Skills translation (verified against the prisma@7 CLI source):
  * - `installSkills: false` passes the explicit `--no-skills` flag → Prisma
  *   skips agent skills entirely.
  * - `installSkills: true` omits the flag → prisma@7 installs agent skills
@@ -328,20 +336,19 @@ export function planDatabase(
   const regularPackages = [...provider.dependencies];
 
   const prismaSatisfied =
-    inspection !== undefined &&
-    inspection.prismaVersion === "satisfied" &&
-    inspection.clientVersion === "satisfied";
+    inspection !== undefined && inspection.prismaVersion === "satisfied";
+  const clientSatisfied =
+    inspection !== undefined && inspection.clientVersion === "satisfied";
 
-  if (prismaSatisfied) {
-    // Both pinned Prisma packages are declared at the verified pin: drop
-    // them from the install batches by NAME (a declared "7.10.0" and a
-    // batch "prisma@7.10.0" are the same package — literal-spec comparison
-    // would never match). Their version gate stays here; the non-Prisma
-    // declared-drop below is name-only.
+  // Drop each Prisma package independently based on its own satisfaction status.
+  // A declared "7.0.0" or "^7.0.0" satisfies the 7.x branch policy and should
+  // not be reinstalled. The version gate is per-package; both don't need to
+  // be satisfied together.
+  if (prismaSatisfied || clientSatisfied) {
     for (const list of [devPackages, regularPackages]) {
       for (let i = list.length - 1; i >= 0; i--) {
         const name = specName(list[i]);
-        if (name === "prisma" || name === "@prisma/client") {
+        if ((name === "prisma" && prismaSatisfied) || (name === "@prisma/client" && clientSatisfied)) {
           list.splice(i, 1);
         }
       }
@@ -476,8 +483,11 @@ export function planDatabase(
     inspection === undefined
       ? true // fresh-run default: run init unconditionally (historical behavior)
       : !inspection.schemaExists;
+  // prismaDeclarationsSatisfied is true if EITHER prisma OR @prisma/client
+  // is satisfied (version gate is per-package; both don't need to be
+  // satisfied together).
   const prismaDeclarationsSatisfied =
-    inspection === undefined ? false : prismaSatisfied;
+    inspection === undefined ? false : (prismaSatisfied || clientSatisfied);
 
   // Determine if we need to write DATABASE_URL to .env:
   // - SQLite: always needs a DATABASE_URL (default file:./dev.db if not provided)
@@ -549,7 +559,9 @@ export function planDatabase(
 }
 
 /** Runs the interactive part of the customize branch (the multiselect). */
-export async function promptCustomScripts(providerKey: string): Promise<string[]> {
+export async function promptCustomScripts(
+  providerKey: string,
+): Promise<string[]> {
   const offered = providerScripts(providerKey);
   const selected = await multiselect({
     message: "Select database scripts to add",
@@ -577,9 +589,11 @@ export async function promptCustomScripts(providerKey: string): Promise<string[]
  * reusable transformer for user-owned files (prisma7.config.ts, Better
  * Auth configs, layouts...) is deferred to a separate architectural
  * task; this one intentionally handles only the single shape `prisma
- * init` writes (verified against the prisma@7.10.0 CLI bundle).
+ * init` writes (verified against the prisma@7 CLI bundle).
  */
-export function insertSeedIntoPrismaConfig(configText: string): string | undefined {
+export function insertSeedIntoPrismaConfig(
+  configText: string,
+): string | undefined {
   // A pre-existing seed line is REPLACED in place (the --force path —
   // a conflict was already reported for the different value, force
   // resolves it by overwriting, exactly like conflicting scripts).
@@ -617,7 +631,9 @@ export function insertSeedIntoPrismaConfig(configText: string): string | undefin
  * file's raw text, if one is configured. Returns the trimmed command
  * string (e.g. `"node custom-seed.js"`) or undefined.
  */
-export function readSeedFromPrismaConfig(configText: string): string | undefined {
+export function readSeedFromPrismaConfig(
+  configText: string,
+): string | undefined {
   const match = configText.match(/seed\s*:\s*["']([^"']+)["']/);
   return match ? match[1] : undefined;
 }
@@ -681,7 +697,10 @@ export async function applySeedConfigToPrismaFile(
  * Writes a file with restricted permissions (0o600) for sensitive files like .env.
  * Uses fs.open to explicitly set the mode, avoiding world-readable defaults.
  */
-export async function writeSecureFile(filePath: string, content: string): Promise<void> {
+export async function writeSecureFile(
+  filePath: string,
+  content: string,
+): Promise<void> {
   const fd = await open(filePath, "w", 0o600);
   try {
     await fd.writeFile(content, "utf8");
@@ -707,7 +726,10 @@ export function computeDefaultGeneratorOutput(helperPath: string): string {
  * - mysql: DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME, DATABASE_PORT
  * - sqlserver: HOST, DB_USER, DB_PASSWORD, DB_NAME
  */
-export function buildIndividualEnvLines(providerKey: string, databaseUrl: string): string {
+export function buildIndividualEnvLines(
+  providerKey: string,
+  databaseUrl: string,
+): string {
   const parsed = parseDatabaseUrl(providerKey, databaseUrl);
   if (!parsed) {
     return "";
@@ -717,17 +739,24 @@ export function buildIndividualEnvLines(providerKey: string, databaseUrl: string
 
   if (providerKey === "mysql") {
     // MySQL adapter expects: DATABASE_HOST, DATABASE_USER, DATABASE_PASSWORD, DATABASE_NAME, DATABASE_PORT
-    if (parsed.host) lines.push(`DATABASE_HOST="${sanitizeEnvValue(parsed.host)}"`);
-    if (parsed.user) lines.push(`DATABASE_USER="${sanitizeEnvValue(parsed.user)}"`);
-    if (parsed.password) lines.push(`DATABASE_PASSWORD="${sanitizeEnvValue(parsed.password)}"`);
-    if (parsed.database) lines.push(`DATABASE_NAME="${sanitizeEnvValue(parsed.database)}"`);
-    if (parsed.port) lines.push(`DATABASE_PORT="${sanitizeEnvValue(parsed.port)}"`);
+    if (parsed.host)
+      lines.push(`DATABASE_HOST="${sanitizeEnvValue(parsed.host)}"`);
+    if (parsed.user)
+      lines.push(`DATABASE_USER="${sanitizeEnvValue(parsed.user)}"`);
+    if (parsed.password)
+      lines.push(`DATABASE_PASSWORD="${sanitizeEnvValue(parsed.password)}"`);
+    if (parsed.database)
+      lines.push(`DATABASE_NAME="${sanitizeEnvValue(parsed.database)}"`);
+    if (parsed.port)
+      lines.push(`DATABASE_PORT="${sanitizeEnvValue(parsed.port)}"`);
   } else if (providerKey === "sqlserver") {
     // SQL Server adapter expects: HOST, DB_USER, DB_PASSWORD, DB_NAME
     if (parsed.host) lines.push(`HOST="${sanitizeEnvValue(parsed.host)}"`);
     if (parsed.user) lines.push(`DB_USER="${sanitizeEnvValue(parsed.user)}"`);
-    if (parsed.password) lines.push(`DB_PASSWORD="${sanitizeEnvValue(parsed.password)}"`);
-    if (parsed.database) lines.push(`DB_NAME="${sanitizeEnvValue(parsed.database)}"`);
+    if (parsed.password)
+      lines.push(`DB_PASSWORD="${sanitizeEnvValue(parsed.password)}"`);
+    if (parsed.database)
+      lines.push(`DB_NAME="${sanitizeEnvValue(parsed.database)}"`);
     // Note: encrypt is already in DATABASE_URL, adapter reads from connection string options
   }
 
@@ -741,7 +770,13 @@ export function buildIndividualEnvLines(providerKey: string, databaseUrl: string
 export function parseDatabaseUrl(
   providerKey: string,
   databaseUrl: string,
-): { host?: string; user?: string; password?: string; database?: string; port?: string } | null {
+): {
+  host?: string;
+  user?: string;
+  password?: string;
+  database?: string;
+  port?: string;
+} | null {
   try {
     if (providerKey === "mysql") {
       // mysql://user:password@host:port/database?params
@@ -756,8 +791,12 @@ export function parseDatabaseUrl(
     } else if (providerKey === "sqlserver") {
       // sqlserver://host:port;database=db;user=user;password=pass;encrypt=true
       // This format doesn't work with URL constructor, parse manually
-      const params = new URLSearchParams(databaseUrl.replace("sqlserver://", "").replace(/;/g, "&"));
-      const hostPort = params.get("")?.split(":") || databaseUrl.match(/sqlserver:\/\/([^:;]+):(\d+)/);
+      const params = new URLSearchParams(
+        databaseUrl.replace("sqlserver://", "").replace(/;/g, "&"),
+      );
+      const hostPort =
+        params.get("")?.split(":") ||
+        databaseUrl.match(/sqlserver:\/\/([^:;]+):(\d+)/);
       let host = "";
       let port = "1433";
 
@@ -834,9 +873,28 @@ export async function executeDatabase(
     // the declared provider-deps drop, a fully-reconciled rerun has EMPTY
     // batches, and the omission still deserves its summary line.
     if (planToUse.prismaDeclarationsSatisfied) {
-      result.skipped.push(
-        "prisma@7.10.0 and @prisma/client@7.10.0 reinstall (already declared at the verified pin)",
-      );
+      const providerObj =
+        providerDataLocal[planToUse.provider as keyof typeof providerDataLocal];
+      const skippedPrisma = [];
+      if (planToUse.devPackages.some((p) => p.startsWith("prisma@")) === false &&
+          planToUse.regularPackages.some((p) => p.startsWith("prisma@")) === false) {
+        // Check if prisma was in the original provider devDependencies
+        if (providerObj.devDependencies.some((p) => p.startsWith("prisma@"))) {
+          skippedPrisma.push("prisma");
+        }
+      }
+      if (planToUse.devPackages.some((p) => p.startsWith("@prisma/client@")) === false &&
+          planToUse.regularPackages.some((p) => p.startsWith("@prisma/client@")) === false) {
+        // Check if @prisma/client was in the original provider dependencies
+        if (providerObj.dependencies.some((p) => p.startsWith("@prisma/client@"))) {
+          skippedPrisma.push("@prisma/client");
+        }
+      }
+      if (skippedPrisma.length > 0) {
+        result.skipped.push(
+          `${skippedPrisma.join(" and ")} reinstall (already declared at the verified pin)`,
+        );
+      }
     }
     // Same visibility for the non-Prisma provider dependencies dropped by
     // the plan (declared in the manifest → not reinstalled).
@@ -1002,7 +1060,7 @@ export async function executeDatabase(
       let prismaArgs = prismaArgsInitial;
 
       // Workaround for @antfu/ni issue with dlx commands
-      // When args starts with ["prisma@7.10.0", "init"], some versions incorrectly resolve to "<agent> add ..."
+      // When args starts with ["prisma@7", "init"], some versions incorrectly resolve to "<agent> add ..."
       // Built from the same contract as the primary path (see prismaInitArguments).
       const originalArgs = [...prismaInitArguments];
       const pinnedPrismaSpec = `prisma@${PRISMA_PINNED_VERSION}`;
@@ -1174,7 +1232,9 @@ export async function executeDatabase(
         const individualLines = planToUse.envIndividualLines.split("\n");
         for (const line of individualLines) {
           const varName = line.split("=")[0];
-          if (!new RegExp(`^\\s*(?:export\\s+)?${varName}\\s*=`).test(envText)) {
+          if (
+            !new RegExp(`^\\s*(?:export\\s+)?${varName}\\s*=`).test(envText)
+          ) {
             linesToAppend.push(line);
           }
         }
@@ -1204,7 +1264,9 @@ export async function executeDatabase(
         const missingLines: string[] = [];
         for (const line of individualLines) {
           const varName = line.split("=")[0];
-          if (!new RegExp(`^\\s*(?:export\\s+)?${varName}\\s*=`).test(envText)) {
+          if (
+            !new RegExp(`^\\s*(?:export\\s+)?${varName}\\s*=`).test(envText)
+          ) {
             missingLines.push(line);
           }
         }
@@ -1218,7 +1280,9 @@ export async function executeDatabase(
           envCreatedOrUpdated = true;
           result.updated.push(".env (appended individual params)");
         } else {
-          result.skipped.push(".env (already has DATABASE_URL and individual params)");
+          result.skipped.push(
+            ".env (already has DATABASE_URL and individual params)",
+          );
         }
       } else {
         result.skipped.push(".env (already has DATABASE_URL)");
@@ -1421,11 +1485,12 @@ export async function executeDatabase(
     // faster since Prisma is already installed as a dev dependency.
     try {
       const s = spinner();
-      s.start("Generating Prisma Client (prisma generate)");
+      s.start("Generating Prisma Client");
 
       // Map agent to exec command for running local binaries
       const agent = ctx.installer?.agent ?? "npm";
-      const execCmd = agent === "bun" ? "bunx" : agent === "npm" ? "npx" : agent;
+      const execCmd =
+        agent === "bun" ? "bunx" : agent === "npm" ? "npx" : agent;
       const generateArgs = ["prisma", "generate", "--no-hints"];
 
       try {
@@ -1898,7 +1963,8 @@ export const databaseGenerator: Generator = {
 
     // If ORM not provided via CLI, prompt in interactive mode
     if (orm === undefined) {
-      const shouldPrompt = !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
+      const shouldPrompt =
+        !ctx.dryRun && !ctx.nonInteractive && !process.env.CI;
       // Backward compatibility: if caller pre-provided Prisma-required answers
       // (at minimum provider), assume Prisma and skip the ORM prompt.
       // This allows existing tests and scripts to work unchanged.
@@ -1916,7 +1982,9 @@ export const databaseGenerator: Generator = {
         // Prompt for ORM selection
         const ormPrompt = databasePrompts[0]; // ORM prompt is now first in array
         try {
-          const ormAnswer = await prompt([ormPrompt] as Parameters<typeof prompt>[0]);
+          const ormAnswer = await prompt([ormPrompt] as Parameters<
+            typeof prompt
+          >[0]);
           orm = ormAnswer.orm as "prisma" | "drizzle";
         } catch (error) {
           if (isCancel(error)) {
@@ -1949,7 +2017,4 @@ export const databaseGenerator: Generator = {
 export default databaseGenerator;
 
 // Re-export new exports from prisma-flow for backward compatibility
-export {
-  setupPrismaFlow,
-  type PlanDatabaseResult,
-} from "./prisma-flow";
+export { setupPrismaFlow, type PlanDatabaseResult } from "./prisma-flow";

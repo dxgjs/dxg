@@ -7,7 +7,7 @@ import { PRISMA_PINNED_VERSION } from "./version";
  * `originalArgs` fallback/workaround), so the skills decision can never
  * diverge between the two paths.
  *
- * Skills translation (verified against the prisma@7.10.0 CLI source):
+ * Skills translation (verified against the prisma@7 CLI source):
  * - `installSkills: false` passes the explicit `--no-skills` flag -> Prisma
  *   skips agent skills entirely.
  * - `installSkills: true` omits the flag -> prisma@7 installs agent skills

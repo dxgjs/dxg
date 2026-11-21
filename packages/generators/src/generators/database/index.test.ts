@@ -72,7 +72,7 @@ const defaultExecuteFake = vi.hoisted(() => {
       }
       return { all: "added packages", stdout: "", stderr: "" };
     }
-    if (command === "npx" && (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") && args[1] === "init") {
+    if (command === "npx" && args[0] === "prisma@7" && args[1] === "init") {
       // Extract the output path from the args (--output <path>)
       const outputIndex = args.indexOf("--output");
       if (outputIndex !== -1 && outputIndex + 1 < args.length) {
@@ -132,7 +132,7 @@ const defaultExecuteFake = vi.hoisted(() => {
       );
       return { all: "prisma generate ok", stdout: "", stderr: "" };
     }
-    if (command === "npx" && args[0] === "prisma@7.10.0" && args[1] === "db" && args[2] === "push") {
+    if (command === "npx" && args[0] === "prisma@7" && args[1] === "db" && args[2] === "push") {
       // prisma db push: for SQLite, this creates the dev.db file
       // In the test environment, we just need to simulate success
       // The actual database file creation is not needed for the tests
@@ -358,14 +358,14 @@ const { workaroundFlags, sharedGetCliCommandMock } = vi.hoisted(() => {
         return { command: "npm-mock", args: [] };
       }
       // For prisma init — keyed to the EXACT production argument shape
-      // (executeDatabase calls getCliCommand(parseNlx, ["prisma@7.10.0",
+      // (executeDatabase calls getCliCommand(parseNlx, ["prisma@7",
       // "init", ...])). This branch MUST be evaluated before the
       // dependency-install branches, whose "-D"/"add" heuristics would
       // otherwise swallow the prisma args. Real @antfu/ni resolves this
       // command with a verbatim args passthrough (npx / pnpm dlx /
       // yarn dlx / bun x), so the mock must never transform or drop args
       // (especially --no-skills).
-      if (args[0] === "prisma@7.10.0" && args[1] === "init") {
+      if (args[0] === "prisma@7" && args[1] === "init") {
         // If we want to trigger the workaround, simulate legacy
         // @antfu/ni versions that mis-resolved the dlx command to
         // "<agent> add ..." — the production originalArgs workaround must
@@ -381,11 +381,16 @@ const { workaroundFlags, sharedGetCliCommandMock } = vi.hoisted(() => {
         // Real ni behavior: verbatim passthrough after the executable.
         return { command: "npx", args: [...args] };
       }
-      // prisma generate — same dlx passthrough semantics as init, and
-      // equally BEFORE the install heuristics: ["prisma@7.10.0", "generate"]
-      // carries no "-D", so the plain-specs branch below would otherwise
-      // mis-resolve it into "npm-mock install prisma@7.10.0 generate".
-      if (args[0] === "prisma@7.10.0" && args[1] === "generate") {
+      // prisma generate — the generator now uses local binary via exec command:
+      // ["prisma", "generate", "--no-hints"] (no version pin).
+      if (args[0] === "prisma" && args[1] === "generate") {
+        // The generate workaround was for the old dlx-based approach.
+        // With local binary, there's no workaround needed - it directly uses
+        // the package manager's exec command (npx, pnpm, yarn, bunx).
+        return { command: "npx", args: [...args] };
+      }
+      // Legacy: handle old prisma@7 generate pattern for backward compat
+      if (args[0] === "prisma@7" && args[1] === "generate") {
         if (workaroundFlags.triggerPrismaGenerateWorkaround) {
           return {
             command: "some-agent",
@@ -399,7 +404,7 @@ const { workaroundFlags, sharedGetCliCommandMock } = vi.hoisted(() => {
       // carries no "-D", so the plain-specs branch would otherwise
       // mis-resolve it into "npm-mock install prisma@7 db push".
       if (
-        (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") &&
+        args[0] === "prisma@7" &&
         args[1] === "db" &&
         args[2] === "push"
       ) {
@@ -803,10 +808,10 @@ describe("Database Generator", () => {
       expect(plan.provider).toBe("sqlite");
       expect(plan.providerName).toBe("SQLite");
       expect(plan.prismaProvider).toBe("sqlite");
-      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("prisma@^7.10.1");
       expect(plan.devPackages).toContain("@types/node");
       expect(plan.devPackages).toContain("@types/better-sqlite3");
-      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/client@^7.10.1");
       expect(plan.regularPackages).toContain("@prisma/adapter-better-sqlite3");
       expect(plan.regularPackages).toContain("dotenv");
       expect(plan.filesToCreate.length).toBe(1);
@@ -826,10 +831,10 @@ describe("Database Generator", () => {
       expect(plan.provider).toBe("sqlite");
       expect(plan.providerName).toBe("SQLite");
       expect(plan.prismaProvider).toBe("sqlite");
-      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("prisma@^7.10.1");
       expect(plan.devPackages).toContain("@types/node");
       expect(plan.devPackages).toContain("@types/better-sqlite3");
-      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/client@^7.10.1");
       expect(plan.regularPackages).toContain("@prisma/adapter-better-sqlite3");
       expect(plan.regularPackages).toContain("dotenv");
       expect(plan.filesToCreate.length).toBe(1);
@@ -849,10 +854,10 @@ describe("Database Generator", () => {
       expect(plan.provider).toBe("postgresql");
       expect(plan.providerName).toBe("PostgreSQL");
       expect(plan.prismaProvider).toBe("postgresql");
-      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("prisma@^7.10.1");
       expect(plan.devPackages).toContain("@types/node");
       expect(plan.devPackages).toContain("@types/pg");
-      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/client@^7.10.1");
       expect(plan.regularPackages).toContain("@prisma/adapter-pg");
       expect(plan.regularPackages).toContain("pg");
       expect(plan.regularPackages).toContain("dotenv");
@@ -873,10 +878,10 @@ describe("Database Generator", () => {
       expect(plan.provider).toBe("postgresql");
       expect(plan.providerName).toBe("PostgreSQL");
       expect(plan.prismaProvider).toBe("postgresql");
-      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("prisma@^7.10.1");
       expect(plan.devPackages).toContain("@types/node");
       expect(plan.devPackages).toContain("@types/pg");
-      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/client@^7.10.1");
       expect(plan.regularPackages).toContain("@prisma/adapter-pg");
       expect(plan.regularPackages).toContain("pg");
       expect(plan.regularPackages).toContain("dotenv");
@@ -897,9 +902,9 @@ describe("Database Generator", () => {
       expect(plan.provider).toBe("mysql");
       expect(plan.providerName).toBe("MySQL");
       expect(plan.prismaProvider).toBe("mysql");
-      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("prisma@^7.10.1");
       expect(plan.devPackages).toContain("@types/node");
-      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/client@^7.10.1");
       expect(plan.regularPackages).toContain("@prisma/adapter-mariadb");
       expect(plan.regularPackages).toContain("dotenv");
       expect(plan.filesToCreate.length).toBe(1);
@@ -919,10 +924,10 @@ describe("Database Generator", () => {
       expect(plan.provider).toBe("sqlserver");
       expect(plan.providerName).toBe("SQL Server");
       expect(plan.prismaProvider).toBe("sqlserver");
-      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("prisma@^7.10.1");
       expect(plan.devPackages).toContain("@types/node");
       expect(plan.devPackages).toContain("@types/mssql");
-      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/client@^7.10.1");
       expect(plan.regularPackages).toContain("@prisma/adapter-mssql");
       expect(plan.regularPackages).toContain("dotenv");
       expect(plan.filesToCreate.length).toBe(1);
@@ -942,10 +947,10 @@ describe("Database Generator", () => {
       expect(plan.provider).toBe("cockroachdb");
       expect(plan.providerName).toBe("CockroachDB");
       expect(plan.prismaProvider).toBe("cockroachdb");
-      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("prisma@^7.10.1");
       expect(plan.devPackages).toContain("@types/node");
       expect(plan.devPackages).toContain("@types/pg");
-      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/client@^7.10.1");
       expect(plan.regularPackages).toContain("@prisma/adapter-pg");
       expect(plan.regularPackages).toContain("pg");
       expect(plan.regularPackages).toContain("dotenv");
@@ -966,9 +971,9 @@ describe("Database Generator", () => {
       expect(plan.provider).toBe("planetscale");
       expect(plan.providerName).toBe("PlanetScale (MySQL)");
       expect(plan.prismaProvider).toBe("mysql");
-      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("prisma@^7.10.1");
       expect(plan.devPackages).toContain("@types/node");
-      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/client@^7.10.1");
       expect(plan.regularPackages).toContain("@prisma/adapter-planetscale");
       expect(plan.regularPackages).toContain("undici");
       expect(plan.regularPackages).toContain("dotenv");
@@ -989,10 +994,10 @@ describe("Database Generator", () => {
       expect(plan.provider).toBe("prismapostgres");
       expect(plan.providerName).toBe("Prisma Postgres");
       expect(plan.prismaProvider).toBe("postgresql");
-      expect(plan.devPackages).toContain("prisma@7.10.0");
+      expect(plan.devPackages).toContain("prisma@^7.10.1");
       expect(plan.devPackages).toContain("@types/node");
       expect(plan.devPackages).toContain("@types/pg");
-      expect(plan.regularPackages).toContain("@prisma/client@7.10.0");
+      expect(plan.regularPackages).toContain("@prisma/client@^7.10.1");
       expect(plan.regularPackages).toContain("@prisma/adapter-pg");
       expect(plan.regularPackages).toContain("pg");
       expect(plan.regularPackages).toContain("dotenv");
@@ -1498,7 +1503,7 @@ describe("Database Generator", () => {
       const prismaInitCall = (fs.executeCommand as Mock).mock.calls[2];
       expect(prismaInitCall[0]).toBe("npx");
       expect(prismaInitCall[1]).toEqual([
-        "prisma@7.10.0",
+        "prisma@7",
         "init",
         "--datasource-provider",
         "sqlite",
@@ -1575,7 +1580,7 @@ describe("Database Generator", () => {
       const prismaInitCall = (fs.executeCommand as Mock).mock.calls[2];
       expect(prismaInitCall[0]).toBe("npx");
       expect(prismaInitCall[1]).toEqual([
-        "prisma@7.10.0",
+        "prisma@7",
         "init",
         "--datasource-provider",
         "sqlite",
@@ -1595,7 +1600,7 @@ describe("Database Generator", () => {
       // tree installs, the build scripts are skipped, exit 1.
       (fs.executeCommand as Mock).mockRejectedValueOnce({
         exitCode: 1,
-        all: "ERR_PNPM_IGNORED_BUILDS  Ignored build scripts: @prisma/engines@7.10.0, prisma@7.10.0.",
+        all: "ERR_PNPM_IGNORED_BUILDS  Ignored build scripts: @prisma/engines@^7.10.1, prisma@^7.10.1.",
         message: "Command failed with exit code 1",
       });
 
@@ -1712,14 +1717,13 @@ describe("Database Generator", () => {
       expect(verifyError.hints!.some((h) => h.includes("pnpm approve-builds"))).toBe(true);
     });
 
-    test("prisma generate mis-resolved as 'add' falls back to npx with the original args", async () => {
+    test("prisma generate uses local binary via package manager exec", async () => {
       await fs.writeFile("package.json", '{"devDependencies":{}}', {
         encoding: "utf8",
       });
-      // The generate resolution returns "<agent> add prisma@7 generate" —
-      // the production guard must rewrite it to npx + ["prisma@7",
-      // "generate"].
-      workaroundFlags.triggerPrismaGenerateWorkaround = true;
+      // The generator now uses local Prisma binary via package manager exec:
+      // npx prisma generate --no-hints (no version pin, no dlx).
+      // No workaround needed since we bypass getCliCommand for generate.
 
       const context = {
         logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
@@ -1741,21 +1745,17 @@ describe("Database Generator", () => {
         nonInteractive: true,
       };
 
-      try {
-        await databaseGenerator.run({ provider: "postgresql" }, context);
+      await databaseGenerator.run({ provider: "postgresql" }, context);
 
-        // The generate call must have been rewritten to npx + original args.
-        const calls = (fs.executeCommand as Mock).mock.calls;
-        const generateCall = calls.find(
-          (c: unknown[]) =>
-            Array.isArray(c[1]) && c[1][0] === "prisma@7.10.0" && c[1][1] === "generate",
-        );
-        expect(generateCall).toBeDefined();
-        expect(generateCall![0]).toBe("npx");
-        expect(generateCall![1]).toEqual(["prisma@7.10.0", "generate", "--no-hints"]);
-      } finally {
-        workaroundFlags.triggerPrismaGenerateWorkaround = false;
-      }
+      // The generate call uses local binary via npx.
+      const calls = (fs.executeCommand as Mock).mock.calls;
+      const generateCall = calls.find(
+        (c: unknown[]) =>
+          Array.isArray(c[1]) && c[1][0] === "prisma" && c[1][1] === "generate",
+      );
+      expect(generateCall).toBeDefined();
+      expect(generateCall![0]).toBe("npx");
+      expect(generateCall![1]).toEqual(["prisma", "generate", "--no-hints"]);
     });
 
     test("the plan's approval-only @prisma/engines entry is pre-approved but never installed", async () => {
@@ -1921,15 +1921,15 @@ describe("Database Generator", () => {
     /**
      * The prisma init call is now the third-to-last executeCommand call:
      * install (dev), install (deps), prisma init, prisma generate, prisma db push
-     * (5 calls total). Find it by looking for the "prisma@7.10.0" and "init" args.
+     * (5 calls total). Find it by looking for the "prisma@7" and "init" args.
      */
     function getPrismaInitArgs(): string[] {
       const calls = (fs.executeCommand as Mock).mock.calls;
       expect(calls.length).toBeGreaterThanOrEqual(4);
-      // Find the call that contains "prisma@7.10.0" and "init"
+      // Find the call that contains "prisma@7" and "init"
       const initCall = calls.find((call) =>
         Array.isArray(call[1]) &&
-        call[1].includes("prisma@7.10.0") &&
+        call[1].includes("prisma@7") &&
         call[1].includes("init")
       );
       expect(initCall, "prisma init call not found").toBeDefined();
@@ -1948,7 +1948,7 @@ describe("Database Generator", () => {
 
       // Exact contract: --no-skills sits between the provider and --output.
       expect(getPrismaInitArgs()).toEqual([
-        "prisma@7.10.0",
+        "prisma@7",
         "init",
         "--datasource-provider",
         "sqlite",
@@ -1968,12 +1968,12 @@ describe("Database Generator", () => {
         makeContext(),
       );
 
-      // prisma@7.10.0 installs agent skills UNCONDITIONALLY and
+      // prisma@7 installs agent skills UNCONDITIONALLY and
       // non-interactively when --no-skills is omitted (verified in the CLI
       // source: no prompt/TTY check on that path) — so Prisma can never ask
       // the question DXG already asked.
       expect(getPrismaInitArgs()).toEqual([
-        "prisma@7.10.0",
+        "prisma@7",
         "init",
         "--datasource-provider",
         "sqlite",

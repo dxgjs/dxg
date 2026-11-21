@@ -217,7 +217,7 @@ vi.mock("@dxgjs/fs", async () => {
         // one — the real CLI refuses to run in an existing Prisma project.
         if (
           command === "npx" &&
-          args[0] === "prisma@7.10.0" &&
+          args[0] === "prisma@7" &&
           args[1] === "init" &&
           !_files.has("prisma/schema.prisma")
         ) {
@@ -235,12 +235,35 @@ vi.mock("@dxgjs/fs", async () => {
         }
         // Simulate `prisma generate`: emits the generated client at the
         // generator's output path (see schema.prisma above).
-        // Generator uses "prisma@7" (via getCliCommand), mock accepts both.
-        if (
-          command === "npx" &&
-          (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") &&
-          args[1] === "generate"
-        ) {
+        // Generator uses local binary via package manager exec:
+        // - npm: npx prisma generate --no-hints
+        // - pnpm: pnpm prisma generate --no-hints
+        // - yarn: yarn prisma generate --no-hints
+        // - bun: bunx prisma generate --no-hints
+        const isPrismaGenerate =
+          (command === "npx" || command === "pnpm" || command === "yarn" || command === "bunx") &&
+          args[0] === "prisma" &&
+          args[1] === "generate";
+        if (isPrismaGenerate) {
+          _files.set(
+            "lib/generated/prisma/client.ts",
+            "// generated prisma client\n",
+          );
+          _directories.add("lib/generated/prisma");
+          return { all: "prisma generate ok", stdout: "", stderr: "" };
+        }
+        // Simulate package manager run command for `db:generate` script
+        // (e.g., `npm run db:generate`, `pnpm db:generate`, `yarn db:generate`, `bun run db:generate`).
+        // The script is "prisma generate" which runs the local prisma binary.
+        // Handle different package manager command shapes:
+        // - npm: command="npm", args=["run", "db:generate"]
+        // - pnpm: command="pnpm", args=["db:generate"] or ["run", "db:generate"]
+        // - yarn: command="yarn", args=["db:generate"]
+        // - bun: command="bun", args=["run", "db:generate"]
+        const isDbGenerateRun =
+          (args[0] === "run" && args[1] === "db:generate") || // npm run, bun run, pnpm run
+          (args[0] === "db:generate"); // pnpm, yarn (direct)
+        if (isDbGenerateRun) {
           _files.set(
             "lib/generated/prisma/client.ts",
             "// generated prisma client\n",
@@ -269,9 +292,9 @@ vi.mock("@antfu/ni", () => {
           return { command: "npm", args: [] };
         }
         // prisma init / prisma generate: verbatim dlx passthrough (never an
-        // install) — matches ni's real npm resolution (npx prisma@7.10.0 …).
-        // Generator uses "prisma@7", mock accepts both.
-        if (args[0] === "prisma@7.10.0" || args[0] === "prisma@7") {
+        // install) — matches ni's real npm resolution (npx prisma@7 …).
+        // Generator uses "prisma@7".
+        if (args[0] === "prisma@7") {
           return { command: "npx", args: [...args] };
         }
         // Dependency installation: `ni add -D <pkgs>` / `ni add <pkgs>`.
@@ -334,7 +357,7 @@ const MY_APP_PACKAGE_JSON = {
   },
 };
 
-/** Package name from a dependency spec ("@prisma/client@7.10.0" → "@prisma/client"). */
+/** Package name from a dependency spec ("@prisma/client@^7.10.1" → "@prisma/client"). */
 function specName(spec: string): string {
   const at = spec.lastIndexOf("@");
   return at > 0 ? spec.slice(0, at) : spec;
@@ -468,13 +491,13 @@ describe("package manifest invariant (dependencies survive script injection)", (
     // The Prisma dependencies recorded by the (simulated) `pnpm add` runs
     // must still be declared after the script injection write-back.
     expect(final.dependencies).toMatchObject({
-      "@prisma/client": "7.10.0",
+      "@prisma/client": "^7.10.1",
       "@prisma/adapter-pg": expect.any(String),
       pg: expect.any(String),
       dotenv: expect.any(String),
     });
     expect(final.devDependencies).toMatchObject({
-      prisma: "7.10.0",
+      prisma: "^7.10.1",
       "@types/pg": expect.any(String),
       "@types/node": expect.any(String),
     });
@@ -524,8 +547,8 @@ describe("package manifest invariant (dependencies survive script injection)", (
     // `pnpm prisma ...` resolves node_modules/.bin/prisma only while the
     // prisma package stays declared; an undeclared binary is exactly what
     // pnpm's pre-run verification pruned in the original bug report.
-    expect(final.devDependencies.prisma).toBe("7.10.0");
-    expect(final.dependencies["@prisma/client"]).toBe("7.10.0");
+    expect(final.devDependencies.prisma).toBe("^7.10.1");
+    expect(final.dependencies["@prisma/client"]).toBe("^7.10.1");
   });
 
   test("every provider installs and persists exactly its declared dependency set", async () => {
@@ -609,7 +632,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     expect(secondRunSummary.toLowerCase()).toContain("skip");
     // And the manifest still holds both dependencies and scripts.
     const final = readManifestFromDisk();
-    expect(final.devDependencies.prisma).toBe("7.10.0");
+    expect(final.devDependencies.prisma).toBe("^7.10.1");
     expect(final.scripts["db:generate"]).toBe("prisma generate");
   });
 
@@ -644,8 +667,8 @@ describe("package manifest invariant (dependencies survive script injection)", (
     expect(final.scripts["db:push"]).toBe("prisma db push");
     expect(final.scripts["db:studio"]).toBe("prisma studio");
     // ...and the installed dependencies survive the write-back.
-    expect(final.dependencies["@prisma/client"]).toBe("7.10.0");
-    expect(final.devDependencies.prisma).toBe("7.10.0");
+    expect(final.dependencies["@prisma/client"]).toBe("^7.10.1");
+    expect(final.devDependencies.prisma).toBe("^7.10.1");
   });
 
   test("force follows existing DXG semantics: overwrites conflicting scripts and keeps dependencies", async () => {
@@ -672,8 +695,8 @@ describe("package manifest invariant (dependencies survive script injection)", (
       false,
     );
     // Dependencies still survive the force write-back.
-    expect(final.dependencies["@prisma/client"]).toBe("7.10.0");
-    expect(final.devDependencies.prisma).toBe("7.10.0");
+    expect(final.dependencies["@prisma/client"]).toBe("^7.10.1");
+    expect(final.devDependencies.prisma).toBe("^7.10.1");
     // Existing project content is still untouched.
     expect(final.dependencies.next).toBe("16.2.12");
     expect(final.scripts.dev).toBe("next dev");
@@ -713,8 +736,8 @@ describe("package manifest invariant (dependencies survive script injection)", (
     expect(final.scripts["db:generate"]).toBe("prisma generate");
     expect(final.scripts["db:studio"]).toBe("prisma studio");
     expect(final.dependencies.react).toBe("19.2.4");
-    expect(final.dependencies["@prisma/client"]).toBe("7.10.0");
-    expect(final.devDependencies.prisma).toBe("7.10.0");
+    expect(final.dependencies["@prisma/client"]).toBe("^7.10.1");
+    expect(final.devDependencies.prisma).toBe("^7.10.1");
   });
 
   test("ProjectAwareness stays read-only (its snapshot is never written back)", async () => {
@@ -751,7 +774,7 @@ describe("package manifest invariant (dependencies survive script injection)", (
     expect(prismaInitCall).toBeDefined();
     expect(prismaInitCall![0]).toBe("npx");
     expect(prismaInitCall![1]).toEqual([
-      "prisma@7.10.0",
+      "prisma@7",
       "init",
       "--datasource-provider",
       "postgresql",

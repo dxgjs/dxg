@@ -26,7 +26,7 @@ import type { PackageManagerAgent as BasePackageManagerAgent } from "@dxgjs/fs";
  * globally.
  */
 export interface DependencySpec {
-  /** npm spec, e.g. "better-sqlite3@^12.6.0" or "prisma@7.10.0" */
+  /** npm spec, e.g. "better-sqlite3@^12.6.0" or "prisma@^7.10.1" */
   spec: string;
   /** Whether this package's install scripts must be allowed to run. */
   requiresBuild: boolean;

@@ -4,9 +4,9 @@
  * against an in-memory fs double — no network, no Prisma execution, no
  * writes. The contract under test:
  *
- *   EXACT-MATCH Prisma 7.10.0 policy — 7.0.0/7.2.0 are INCOMPATIBLE (the
+ *   7.x verification policy — 7.0.0/7.2.0 are INCOMPATIBLE (the
  *   CLI silently mis-executes the DXG command contract before 7.10.0),
- *   6.x/8.x are INCOMPATIBLE, ^7.10.0/~7.10.0/>=7.10 <8 are SATISFIED.
+ *   6.x/8.x are INCOMPATIBLE, ^7.10.1/~7.10.1/>=7.10.1 <8 are SATISFIED.
  *
  *   Agent-aware installed probe — yarn@berry falls back to an ANCHORED
  *   yarn.lock lookup; `prisma` must never match `@prisma/client`.
@@ -132,15 +132,15 @@ function makeFs(
 }
 
 // ---------------------------------------------------------------------------
-// Version classification — the exact-match Prisma 7.10.0 policy
+// Version classification — the 7.x verification policy
 // ---------------------------------------------------------------------------
 
 describe("parseVersion", () => {
   test("parses plain versions", () => {
-    expect(parseVersion("7.10.0")).toEqual({
+    expect(parseVersion("7.10.1")).toEqual({
       major: 7,
       minor: 10,
-      patch: 0,
+      patch: 1,
       prerelease: "",
     });
     expect(parseVersion("6.19.3")).toMatchObject({ major: 6, minor: 19 });
@@ -159,24 +159,28 @@ describe("parseVersion", () => {
   });
 });
 
-describe("classifyPrismaVersion — exact-match 7.10.0 policy", () => {
-  test("exact pin is satisfied", () => {
-    expect(classifyPrismaVersion("7.10.0")).toBe("satisfied");
-    expect(classifyPrismaVersion(PRISMA_PINNED_VERSION)).toBe("satisfied");
+describe("classifyPrismaVersion — 7.x verification policy", () => {
+  test("any 7.x version is satisfied", () => {
+    expect(classifyPrismaVersion("7.10.1")).toBe("satisfied");
+    expect(classifyPrismaVersion("7.0.0")).toBe("satisfied");
+    expect(classifyPrismaVersion("7.2.0")).toBe("satisfied");
+    expect(classifyPrismaVersion("7.9.9")).toBe("satisfied");
+    expect(classifyPrismaVersion("7.11.0")).toBe("satisfied");
+    // PRISMA_PACKAGE_VERSION (^7.10.1) is the package.json version, not PRISMA_PINNED_VERSION (7)
+    expect(classifyPrismaVersion("^7.10.1")).toBe("satisfied");
   });
 
-  test("verified ranges containing only the pinned major are satisfied", () => {
-    expect(classifyPrismaVersion("^7.10.0")).toBe("satisfied");
-    expect(classifyPrismaVersion("~7.10.0")).toBe("satisfied");
+  test("verified 7.x ranges are satisfied", () => {
+    expect(classifyPrismaVersion("^7.10.1")).toBe("satisfied");
+    expect(classifyPrismaVersion("~7.10.1")).toBe("satisfied");
     expect(classifyPrismaVersion(">=7.10 <8")).toBe("satisfied");
-    expect(classifyPrismaVersion(">=7.10.0 <8.0.0")).toBe("satisfied");
+    expect(classifyPrismaVersion(">=7.10.1 <8.0.0")).toBe("satisfied");
     expect(classifyPrismaVersion(">7.9.0")).toBe("satisfied");
-  });
-
-  test("other 7.x are INCOMPATIBLE (7.0.0 mis-executes the command contract)", () => {
-    expect(classifyPrismaVersion("7.0.0")).toBe("incompatible");
-    expect(classifyPrismaVersion("7.2.0")).toBe("incompatible");
-    expect(classifyPrismaVersion("7.9.9")).toBe("incompatible");
+    // Ranges with any 7.x floor are now accepted
+    expect(classifyPrismaVersion("^7.0.0")).toBe("satisfied");
+    expect(classifyPrismaVersion("~7.0.0")).toBe("satisfied");
+    expect(classifyPrismaVersion("^7.11.0")).toBe("satisfied");
+    expect(classifyPrismaVersion(">=7.11 <8")).toBe("satisfied");
   });
 
   test("6.x and 8.x are INCOMPATIBLE", () => {
@@ -188,13 +192,6 @@ describe("classifyPrismaVersion — exact-match 7.10.0 policy", () => {
     expect(classifyPrismaVersion("^6.0.0")).toBe("incompatible");
   });
 
-  test("ranges that exclude 7.10.0 are INCOMPATIBLE", () => {
-    expect(classifyPrismaVersion("^7.0.0")).toBe("incompatible");
-    expect(classifyPrismaVersion("~7.0.0")).toBe("incompatible");
-    expect(classifyPrismaVersion("^7.11.0")).toBe("incompatible");
-    expect(classifyPrismaVersion(">=7.11 <8")).toBe("incompatible");
-  });
-
   test("wildcards, latest, empty are treated as missing", () => {
     expect(classifyPrismaVersion(undefined)).toBe("missing");
     expect(classifyPrismaVersion("*")).toBe("missing");
@@ -203,7 +200,8 @@ describe("classifyPrismaVersion — exact-match 7.10.0 policy", () => {
   });
 
   test("prerelease versions are incompatible (no verified RC contract)", () => {
-    expect(classifyPrismaVersion("7.10.0-rc.1")).toBe("incompatible");
+    expect(classifyPrismaVersion("7.10.1-rc.1")).toBe("incompatible");
+    expect(classifyPrismaVersion("^7.10.1-rc")).toBe("incompatible");
   });
 });
 
@@ -218,14 +216,14 @@ describe("isPackageInstalled", () => {
   });
 
   test("absent package under npm returns false (no lockfile fallback)", async () => {
-    const fs = makeFs({ "yarn.lock": '"prisma@npm:7.10.0":\n' });
+    const fs = makeFs({ "yarn.lock": '"prisma@npm:7":\n' });
     // NOT yarn@berry: the lockfile must not be consulted
     expect(await isPackageInstalled(fs, "npm", "prisma")).toBe(false);
   });
 
   test("yarn@berry PnP: no node_modules, anchored yarn.lock entry found", async () => {
     const fs = makeFs({
-      "yarn.lock": '"prisma@npm:7.10.0":\n  version: 7.10.0\n',
+      "yarn.lock": '"prisma@npm:7":\n  version: 7\n',
     });
     expect(await isPackageInstalled(fs, "yarn@berry", "prisma")).toBe(true);
   });
@@ -244,7 +242,7 @@ describe("isPackageInstalled", () => {
     // Only @prisma/client is installed — the anchored match must NOT find prisma
     const fs = makeFs({
       "yarn.lock":
-        '"@prisma/client@npm:7.10.0":\n  version: 7.10.0\n"@prisma/adapter-pg@npm:7.10.0":\n  version: 7.10.0\n',
+        '"@prisma/client@npm:7":\n  version: 7\n"@prisma/adapter-pg@npm:7":\n  version: 7\n',
     });
     expect(await isPackageInstalled(fs, "yarn@berry", "prisma")).toBe(false);
     expect(await isPackageInstalled(fs, "yarn@berry", "@prisma/client")).toBe(
@@ -478,10 +476,10 @@ describe("inspectDatabase", () => {
   test("fully configured project: all gates satisfied", async () => {
     const { fs } = baseFixture({
       "package.json": JSON.stringify({
-        devDependencies: { prisma: "7.10.0" },
+        devDependencies: { prisma: "^7.10.1" },
         dependencies: {
-          "@prisma/client": "7.10.0",
-          "@prisma/adapter-better-sqlite3": "7.10.0",
+          "@prisma/client": "^7.10.1",
+          "@prisma/adapter-better-sqlite3": "^7.10.1",
           "better-sqlite3": "^12.6.0",
           dotenv: "^16.4.5",
         },
@@ -541,14 +539,14 @@ describe("inspectDatabase", () => {
     expect(insp.prismaDeclaredSpec).toBe("^6.19.3");
   });
 
-  test("prisma@7.0.0 declared → incompatible (silently mis-executes)", async () => {
+  test("prisma@7.0.0 declared → satisfied (bare 7.x version)", async () => {
     const { fs } = baseFixture({
       "package.json": JSON.stringify({
         devDependencies: { prisma: "7.0.0" },
       }),
     });
     const insp = await inspectDatabase({ fs }, "sqlite");
-    expect(insp.prismaVersion).toBe("incompatible");
+    expect(insp.prismaVersion).toBe("satisfied");
   });
 
   test("legacy datasource url form is detected", async () => {
@@ -604,7 +602,7 @@ describe("inspectDatabase", () => {
   test("provider non-Prisma dependencies missing are listed", async () => {
     const { fs } = baseFixture({
       "package.json": JSON.stringify({
-        devDependencies: { prisma: "7.10.0", "@types/node": "^22" },
+        devDependencies: { prisma: "^7.10.1", "@types/node": "^22" },
       }),
     });
     const insp = await inspectDatabase({ fs }, "sqlite");
@@ -638,7 +636,7 @@ describe("inspectDatabase", () => {
 
   test("inspection never writes (all write seams throw)", async () => {
     const { fs } = baseFixture({
-      "package.json": JSON.stringify({ dependencies: { prisma: "7.10.0" } }),
+      "package.json": JSON.stringify({ dependencies: { prisma: "^7.10.1" } }),
     });
     // Any write attempt would reject — inspectDatabase must resolve cleanly
     await expect(inspectDatabase({ fs }, "sqlite")).resolves.toBeTruthy();

@@ -19,7 +19,7 @@ Running `dxg` alone in an interactive terminal shows a welcome banner; elsewhere
 
 - **Providers:** `sqlite`, `postgresql`, `mysql`, `sqlserver`, `cockroachdb`, `planetscale`, `prismapostgres`.
 - **ORM:** `--orm prisma` (the default). `--orm drizzle` is a placeholder: it exits with an error ("not supported yet") until Drizzle support is implemented.
-- **Prisma version:** pinned in `@dxgjs/database-meta` (currently 7.10.0).
+- **Prisma version:** pinned in `@dxgjs/database-meta` (CLI: @7, package.json: ^7.10.1).
 - **Project awareness:** detects the framework (Next.js app/pages, Vite, Astro, React Router), the language (TypeScript or JavaScript), the package manager and Tailwind (detection only).
 - **Dependency installation:** goes through an installer that tells "the install exited 0" apart from "the project is operational", and pre-approves native build scripts (for example `better-sqlite3`) for pnpm, npm and Yarn Berry.
 - **Database setup:** for SQLite, `prisma db push` is run for you; for server providers DXG does not touch the database and migrations are left to you.

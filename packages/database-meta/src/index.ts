@@ -15,7 +15,7 @@
  */
 
 // Version
-export { PRISMA_PINNED_VERSION } from "./version";
+export { PRISMA_PINNED_VERSION, PRISMA_CLI_VERSION, PRISMA_PACKAGE_VERSION } from "./version";
 
 // Paths
 export {

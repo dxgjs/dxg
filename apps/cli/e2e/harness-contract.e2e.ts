@@ -133,7 +133,7 @@ describe("e2e harness output-assertion contract", () => {
   const wrappedSummary = [
     "┌  \u001b[46m\u001b[30m DXG Database Setup \u001b[39m\u001b[49m",
     "│  Skipped:",
-    "│    • prisma@7.10.0 and @prisma/client@7.10.0 reinstall (already declared at  │",
+    "│    • prisma@^7.10.1 and @prisma/client@^7.10.1 reinstall (already declared at  │",
     "│   the verified pin)                                                          │",
     "│    • Prisma initialization (schema.prisma or prisma7.config.ts already       │",
     "│  exists)                                                                     │",
@@ -171,7 +171,7 @@ describe("e2e harness output-assertion contract", () => {
     "|    • package.json scripts (db:pull)                                           |",
     "|                                                                               |",
     "|  Skipped:                                                                     |",
-    "|    • prisma@7.10.0 and @prisma/client@7.10.0 reinstall (already declared at  |",
+    "|    • prisma@^7.10.1 and @prisma/client@^7.10.1 reinstall (already declared at  |",
     "|  the verified pin)                                                            |",
     "|    • Prisma initialization (schema.prisma or prisma7.config.ts already       |",
     "|  exists)                                                                      |",

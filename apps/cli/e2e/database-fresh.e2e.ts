@@ -89,16 +89,16 @@ async function freshScenario(pm: E2EPm, dir: string): Promise<FreshTimings> {
 
   // 5. Manifest pins + recommended scripts (no dup).
   const pkg1 = readJson(dir, "package.json");
-  expect(depSection(pkg1, "devDependencies").prisma).toBe("7.10.0");
-  expect(depSection(pkg1, "dependencies")["@prisma/client"]).toBe("7.10.0");
+  expect(depSection(pkg1, "devDependencies").prisma).toBe("^7.10.1");
+  expect(depSection(pkg1, "dependencies")["@prisma/client"]).toBe("^7.10.1");
   expect(scriptSection(pkg1)).toMatchObject(RECOMMENDED_SCRIPTS);
   expect(
     Object.keys(scriptSection(pkg1)).filter((s) => s.startsWith("db:")),
   ).toHaveLength(4);
 
   // 6. The versions REALLY installed (node_modules / yarn.lock for PnP).
-  expect(installedVersion(dir, "prisma", pm)).toBe("7.10.0");
-  expect(installedVersion(dir, "@prisma/client", pm)).toBe("7.10.0");
+  expect(installedVersion(dir, "prisma", pm)).toBe("7.10.1");
+  expect(installedVersion(dir, "@prisma/client", pm)).toBe("7.10.1");
 
   // 7. Script wiring proof: run db:generate through the package manager
   // for real — the generated script must actually work.
@@ -156,11 +156,11 @@ async function freshScenario(pm: E2EPm, dir: string): Promise<FreshTimings> {
   }
   if (pm === "npm") {
     // npm's drift sits on the PINS: package-lock.json's root specifiers
-    // must carry the commanded 7.10.0, not npm's caret rewrite —
+    // must carry the commanded ^7.10.1, not npm's caret rewrite —
     // `npm ci` compares exactly these against the manifest.
     const lock = readJson(dir, "package-lock.json");
-    expect(lock.packages[""].devDependencies.prisma).toBe("7.10.0");
-    expect(lock.packages[""].dependencies["@prisma/client"]).toBe("7.10.0");
+    expect(lock.packages[""].devDependencies.prisma).toBe("^7.10.1");
+    expect(lock.packages[""].dependencies["@prisma/client"]).toBe("^7.10.1");
   }
 
   // 8. Idempotence (§13): the second REAL run must reconcile, not redo —

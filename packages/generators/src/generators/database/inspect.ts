@@ -59,7 +59,7 @@ export {
  * - yarn@berry: node_modules first (covers nodeLinker: node-modules, which
  *   behaves like npm — verified empirically), then an ANCHORED yarn.lock
  *   lookup (PnP mode has no node_modules at all; the lockfile entry looks
- *   like `"prisma@npm:7.10.0"`).
+ *   like `"prisma@npm:7"`).
  *
  * The lockfile match is anchored on the quote so `prisma` can never match
  * `@prisma/client` (the latter's entry starts with `"@prisma/client@`).

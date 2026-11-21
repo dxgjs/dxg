@@ -26,7 +26,7 @@ describe("@dxgjs/database-meta exports", () => {
   });
 
   it("exports Prisma version and args", () => {
-    expect(meta.PRISMA_PINNED_VERSION).toBe("7.10.0");
+    expect(meta.PRISMA_PINNED_VERSION).toBe("7");
     expect(meta.buildPrismaInitArgs).toBeDefined();
   });
 

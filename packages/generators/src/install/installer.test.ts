@@ -89,11 +89,11 @@ describe("createDependencyInstaller", () => {
     fsStore = makeFsStore();
     defaultPlan = {
       devDependencies: [
-        { spec: "prisma@7.10.0", requiresBuild: true },
+        { spec: "prisma@^7.10.1", requiresBuild: true },
         { spec: "tsx", requiresBuild: false },
       ],
       dependencies: [
-        { spec: "@prisma/client@7.10.0", requiresBuild: false },
+        { spec: "@prisma/client@^7.10.1", requiresBuild: false },
         { spec: "better-sqlite3@^12.6.0", requiresBuild: true },
         {
           spec: "@prisma/engines",
@@ -120,11 +120,11 @@ describe("createDependencyInstaller", () => {
     expect(calls).toHaveLength(2);
     // Batch 1: dev dependencies carry -D FIRST (ni's add -D convention).
     expect(calls[0][0]).toBe("npm-mock");
-    expect(calls[0][1]).toEqual(["install", "-D", "prisma@7.10.0", "tsx"]);
+    expect(calls[0][1]).toEqual(["install", "-D", "prisma@^7.10.1", "tsx"]);
     // Batch 2: regular dependencies, no -D.
     expect(calls[1][1]).toEqual([
       "install",
-      "@prisma/client@7.10.0",
+      "@prisma/client@^7.10.1",
       "better-sqlite3@^12.6.0",
       // approvalOnly entries are NEVER installed by name — they arrive
       // transitively (@prisma/engines rides prisma's dependency tree).
@@ -541,8 +541,8 @@ describe("createDependencyInstaller", () => {
       expect(result.success).toBe(true);
       const pkg = JSON.parse(fsStore.read("/proj/package.json"));
       // Pins restored exactly — the manifest states the contract.
-      expect(pkg.devDependencies.prisma).toBe("7.10.0");
-      expect(pkg.dependencies["@prisma/client"]).toBe("7.10.0");
+      expect(pkg.devDependencies.prisma).toBe("^7.10.1");
+      expect(pkg.dependencies["@prisma/client"]).toBe("^7.10.1");
       // Commanded ranges restored verbatim (npm had bumped them to the
       // latest match).
       expect(pkg.dependencies["better-sqlite3"]).toBe("^12.6.0");
@@ -641,6 +641,9 @@ describe("createDependencyInstaller", () => {
       // same way — and CI's `pnpm install --frozen-lockfile` dies with
       // ERR_PNPM_OUTDATED_LOCKFILE (live-proven on the audit reference
       // project: better-sqlite3 lockfile ^12.11.1 vs manifest ^12.6.0).
+      // Both dev and deps batches contain ranges (prisma@^7.10.1,
+      // @prisma/client@^7.10.1, better-sqlite3@^12.6.0) that get bumped
+      // to ^12.11.1, so both batches rewrite and both resync.
       mockPnpmRangeRewrite();
       const installer = createDependencyInstaller({ agent: "pnpm", fs: fsStore });
 
@@ -654,10 +657,9 @@ describe("createDependencyInstaller", () => {
           args[0] === "install" &&
           args.includes("--lockfile-only"),
       );
-      // Only the deps batch rewrote (pins are saved verbatim by pnpm):
-      // exactly one resync, with the flag pnpm's own error message
-      // recommends.
-      expect(resyncs).toHaveLength(1);
+      // Both batches rewrite (both contain ranges that pnpm bumps to
+      // latest match) → both resync.
+      expect(resyncs).toHaveLength(2);
     });
 
     test("yarn@berry resynchronizes with --mode=update-lockfile", async () => {
@@ -770,7 +772,7 @@ describe("createDependencyInstaller", () => {
 
       expect(result.success).toBe(true);
       const pkg = JSON.parse(fsStore.read("/proj/package.json"));
-      expect(pkg.devDependencies.prisma).toBe("7.10.0");
+      expect(pkg.devDependencies.prisma).toBe("^7.10.1");
       expect(pkg.dependencies["better-sqlite3"]).toBe("^12.6.0");
       const pkgWrites = fsStore.writeLog.filter((p) =>
         p.endsWith("package.json"),

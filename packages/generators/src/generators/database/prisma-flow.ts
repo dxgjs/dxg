@@ -5,7 +5,10 @@
 import type { GeneratorContext } from "../../types";
 import { outro, isCancel, cancel, prompt, note } from "@dxgjs/prompts";
 import pc from "picocolors";
-import { resolvePackageManagerCommands, type PackageManagerAgent } from "@dxgjs/fs";
+import {
+  resolvePackageManagerCommands,
+  type PackageManagerAgent,
+} from "@dxgjs/fs";
 
 // Import from database-meta (single source of truth for Prisma version, providers, scripts, paths)
 import {
@@ -13,6 +16,7 @@ import {
   databaseScriptCatalog,
   recommendedScripts,
   validateDatabase,
+  PRISMA_PACKAGE_VERSION,
 } from "@dxgjs/database-meta";
 
 // Import from local modules
@@ -20,7 +24,6 @@ import { detectPrismaState } from "./detect-prisma-state";
 import { inspectDatabase } from "./inspect";
 import {
   databasePrompts,
-  PRISMA_PINNED_VERSION,
   DEFAULT_HELPER_PATH,
   normalizePrismaProvider,
   providersMatch,
@@ -100,10 +103,7 @@ export async function setupPrismaFlow(
     normalizedProvider !== undefined &&
     !providerData[normalizedProvider as keyof typeof providerData]
   ) {
-    throw new ProviderUnsupportedError(
-      normalizedProvider,
-      supportedProviders,
-    );
+    throw new ProviderUnsupportedError(normalizedProvider, supportedProviders);
   }
 
   // ============================================================
@@ -153,7 +153,7 @@ export async function setupPrismaFlow(
   // GATE 2 (fail early, before ANY installation): an incompatible Prisma
   // declaration (6.x, 8.x, another 7.x, a prerelease range) is a user
   // decision DXG must not overturn silently — npm flips a declared
-  // 6.20.0 to ^7.10.0 without any warning (verified empirically). The
+  // 6.20.0 to ^7.10.1 without any warning (verified empirically). The
   // user resolves the version conflict explicitly; nothing is touched.
   // ============================================================
   if (
@@ -173,10 +173,10 @@ export async function setupPrismaFlow(
     throw new PrismaVersionConflictError(
       [
         `Prisma version conflict: this project declares ${declared},`,
-        `but DXG verifies against prisma@${PRISMA_PINNED_VERSION} (exact pin).`,
+        `but DXG verifies against prisma@${PRISMA_PACKAGE_VERSION} (exact pin).`,
         "DXG will not silently upgrade or downgrade an existing Prisma",
-        "declaration. Align the declared version to 7.10.0 (or a range that",
-        "contains exactly it, e.g. ^7.10.0) and run dxg add database again.",
+        `declaration. Align the declared version to ${PRISMA_PACKAGE_VERSION} (or a range that`,
+        `contains exactly it, e.g. ${PRISMA_PACKAGE_VERSION}) and run dxg add database again.`,
       ].join("\n"),
     );
   }
@@ -256,8 +256,7 @@ export async function setupPrismaFlow(
   // This matches the test expectations: configureDatabaseUrl is always prompted separately
   if (shouldPrompt && needsDatabaseUrl) {
     const { providerPlaceholders } = await import("@dxgjs/database-meta");
-    const placeholder =
-      providerPlaceholders[answers.provider as string] ?? "";
+    const placeholder = providerPlaceholders[answers.provider as string] ?? "";
     const configureUrlPrompt = {
       type: "confirm" as const,
       name: "configureDatabaseUrl",
@@ -430,11 +429,7 @@ export async function setupPrismaFlow(
         }
         throw error;
       }
-    } else if (
-      needsHelperPathNow &&
-      !shouldPrompt &&
-      validHelperCount === 0
-    ) {
+    } else if (needsHelperPathNow && !shouldPrompt && validHelperCount === 0) {
       // Non-interactive mode with no valid helpers: use default
       answers.helperPath = DEFAULT_HELPER_PATH;
     }
@@ -460,8 +455,7 @@ export async function setupPrismaFlow(
 
     // Next steps — provider-specific, package-manager-aware guided next steps
     const { providerPlaceholders } = await import("@dxgjs/database-meta");
-    const placeholder =
-      providerPlaceholders[answers.provider as string] ?? "";
+    const placeholder = providerPlaceholders[answers.provider as string] ?? "";
     const isSqlite = answers.provider === "sqlite";
     const pm = ctx.awareness.packageManager;
 
@@ -556,7 +550,7 @@ export async function setupPrismaFlow(
         lines.push(
           "",
           pc.dim(
-            "Tip: For Neon/Supabase: use pooled URL (port 6543) for CLI, direct URL (port 5432) for runtime via DIRECT_URL.",
+            "Tip: For Neon/Supabase: use pooled URL (port 6543) for runtime via DATABASE_URL, direct URL (port 5432) for CLI via DIRECT_URL",
           ),
         );
       } else if (answers.provider === "planetscale") {
@@ -625,4 +619,6 @@ export async function setupPrismaFlow(
 }
 
 // Type for the plan returned by planDatabase
-export type PlanDatabaseResult = ReturnType<typeof import("./index").planDatabase>;
+export type PlanDatabaseResult = ReturnType<
+  typeof import("./index").planDatabase
+>;

@@ -49,10 +49,10 @@ describe("packageNameFromSpec", () => {
     );
   });
   test("pinned unscoped spec", () => {
-    expect(packageNameFromSpec("prisma@7.10.0")).toBe("prisma");
+    expect(packageNameFromSpec("prisma@7")).toBe("prisma");
   });
   test("scoped spec: the last @ separates name from version", () => {
-    expect(packageNameFromSpec("@prisma/engines@7.10.0")).toBe(
+    expect(packageNameFromSpec("@prisma/engines@7")).toBe(
       "@prisma/engines",
     );
   });
