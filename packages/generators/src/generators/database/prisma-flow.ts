@@ -490,20 +490,66 @@ export async function setupPrismaFlow(
         `     ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
       );
     } else {
-      lines.push(
-        "  1. Configure your connection string",
-        `     Edit ${pc.cyan(".env")} and replace the placeholder:`,
-        `     ${pc.cyan(`DATABASE_URL="${placeholder}"`)}`,
-        "",
-        "  2. Push schema to database:",
-        `     ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
-        "",
-        "  3. Generate Prisma Client:",
-        `     ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
-        "",
-        "  4. Open Prisma Studio:",
-        `     ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
-      );
+      // Provider-specific configuration steps
+      if (answers.provider === "mysql") {
+        // MySQL uses individual params pattern: writes DATABASE_URL + individual vars
+        lines.push(
+          "  1. Configure your connection",
+          `     ${pc.cyan(".env")} was updated with individual parameters:`,
+          `     ${pc.cyan(`DATABASE_HOST="..."`)}`,
+          `     ${pc.cyan(`DATABASE_USER="..."`)}`,
+          `     ${pc.cyan(`DATABASE_PASSWORD="..."`)}`,
+          `     ${pc.cyan(`DATABASE_NAME="..."`)}`,
+          `     ${pc.cyan(`DATABASE_PORT="3306"`)}`,
+          `     ${pc.cyan(`DATABASE_URL="mysql://user:pass@host:3306/db"`)} (also set for Prisma CLI)`,
+          "",
+          "  2. Push schema to database:",
+          `     ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
+          "",
+          "  3. Generate Prisma Client:",
+          `     ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
+          "",
+          "  4. Open Prisma Studio:",
+          `     ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
+        );
+      } else if (answers.provider === "sqlserver") {
+        // SQL Server uses individual params pattern: writes DATABASE_URL + individual vars
+        lines.push(
+          "  1. Configure your connection",
+          `     ${pc.cyan(".env")} was updated with individual parameters:`,
+          `     ${pc.cyan(`HOST="..."`)}`,
+          `     ${pc.cyan(`DB_USER="..."`)}`,
+          `     ${pc.cyan(`DB_PASSWORD="..."`)}`,
+          `     ${pc.cyan(`DB_NAME="..."`)}`,
+          `     ${pc.cyan(`DATABASE_URL="sqlserver://host:1433;database=db;user=user;password=pass;encrypt=true"`)} (also set for Prisma CLI)`,
+          "",
+          "  2. Push schema to database:",
+          `     ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
+          "",
+          "  3. Generate Prisma Client:",
+          `     ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
+          "",
+          "  4. Open Prisma Studio:",
+          `     ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
+        );
+      } else {
+        // Other server providers (postgresql, planetscale, cockroachdb, prismapostgres)
+        // use DATABASE_URL only
+        lines.push(
+          "  1. Configure your connection string",
+          `     Edit ${pc.cyan(".env")} and replace the placeholder:`,
+          `     ${pc.cyan(`DATABASE_URL="${placeholder}"`)}`,
+          "",
+          "  2. Push schema to database:",
+          `     ${pc.cyan(`${cmds.run} db:push`)}  ${pc.dim(`# or: ${cmds.exec} prisma db push`)}`,
+          "",
+          "  3. Generate Prisma Client:",
+          `     ${pc.cyan(`${cmds.run} db:generate`)}  ${pc.dim(`# or: ${cmds.exec} prisma generate --no-hints`)}`,
+          "",
+          "  4. Open Prisma Studio:",
+          `     ${pc.cyan(`${cmds.run} db:studio`)}  ${pc.dim(`# or: ${cmds.exec} prisma studio`)}`,
+        );
+      }
 
       // Provider-specific tips
       if (answers.provider === "postgresql") {
