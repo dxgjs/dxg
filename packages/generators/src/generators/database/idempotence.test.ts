@@ -505,8 +505,12 @@ function prismaCommandCalls(): [string, string[]][] {
         args[1] === "generate";
       // Match init command (still uses prisma@7 via getCliCommand)
       const isInit = cmd === "npx" && args[0] === "prisma@7" && args[1] === "init";
-      // Match db push command (still uses prisma@7 via getCliCommand)
-      const isDbPush = cmd === "npx" && args[0] === "prisma@7" && args[1] === "db" && args[2] === "push";
+      // Match db push command (now uses local binary via package manager exec)
+      const isDbPush =
+        (cmd === "npx" || cmd === "pnpm" || cmd === "yarn" || cmd === "bunx") &&
+        args[0] === "prisma" &&
+        args[1] === "db" &&
+        args[2] === "push";
       return isGenerate || isInit || isDbPush;
     });
 }

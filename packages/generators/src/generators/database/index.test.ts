@@ -132,7 +132,12 @@ const defaultExecuteFake = vi.hoisted(() => {
       );
       return { all: "prisma generate ok", stdout: "", stderr: "" };
     }
-    if (command === "npx" && args[0] === "prisma@7" && args[1] === "db" && args[2] === "push") {
+    if (
+      (command === "npx" || command === "pnpm" || command === "yarn" || command === "bunx") &&
+      args[0] === "prisma" &&
+      args[1] === "db" &&
+      args[2] === "push"
+    ) {
       // prisma db push: for SQLite, this creates the dev.db file
       // In the test environment, we just need to simulate success
       // The actual database file creation is not needed for the tests
@@ -399,17 +404,9 @@ const { workaroundFlags, sharedGetCliCommandMock } = vi.hoisted(() => {
         }
         return { command: "npx", args: [...args] };
       }
-      // prisma db push — same dlx passthrough semantics as init/generate,
-      // must be checked BEFORE the install heuristics: ["prisma@7", "db", "push"]
-      // carries no "-D", so the plain-specs branch would otherwise
-      // mis-resolve it into "npm-mock install prisma@7 db push".
-      if (
-        args[0] === "prisma@7" &&
-        args[1] === "db" &&
-        args[2] === "push"
-      ) {
-        return { command: "npx", args: [...args] };
-      }
+      // prisma db push — now uses local binary via package manager exec (npx/pnpm/yarn/bunx)
+      // with args ["prisma", "db", "push"] — no longer goes through getCliCommand/parseNlx.
+      // This is handled by the executeCommand mock above.
       // For dependency installation commands
       if (args.includes("-D") && !args.includes("add")) {
         return {

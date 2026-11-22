@@ -1381,49 +1381,20 @@ export async function executeDatabase(
       const s = spinner();
       s.start("Pushing schema to database (prisma db push)");
 
-      const pushResolved = await getCliCommand(
-        parseNlx,
-        ["prisma@7", "db", "push"],
-        {
-          cwd: process.cwd(),
-          programmatic: true,
-        },
-      );
-      if (!pushResolved) {
-        throw new SpawnError(
-          "prisma",
-          ["db", "push"],
-          "Failed to resolve prisma db push command",
-        );
-      }
-
-      const {
-        command: pushCmdInitial,
-        args: pushArgsInitial,
-        cwd: pushResolvedCwd,
-      } = pushResolved;
-
-      let pushCmd = pushCmdInitial;
-      let pushArgs = pushArgsInitial;
-
-      // Same @antfu/ni "dlx resolved as add" mis-resolution guard as init/generate.
-      if (pushArgs.includes("add")) {
-        pushCmd = "npx";
-        pushArgs = [`prisma@${PRISMA_PINNED_VERSION}`, "db", "push"];
-      }
-
-      // Same pnpm dlx build approval as init/generate.
-      pushArgs = withDlxBuildApprovals(
-        pushCmd,
-        pushArgs,
-        planToUse.dependencyPlan,
-      );
+      // Use the locally installed Prisma binary via the package manager's
+      // exec command (pnpm prisma, npx prisma, yarn prisma, bunx prisma)
+      // instead of dlx (which downloads Prisma fresh each time). This is
+      // faster since Prisma is already installed as a dev dependency.
+      const agent = ctx.installer?.agent ?? "npm";
+      const execCmd =
+        agent === "bun" ? "bunx" : agent === "npm" ? "npx" : agent;
+      const pushArgs = ["prisma", "db", "push"];
 
       try {
         // Use stdio: "pipe" to capture output and prevent leakage into the terminal.
         // Output is only surfaced on failure for diagnostics.
-        const result = await executeCommand(pushCmd, pushArgs, {
-          cwd: pushResolvedCwd ?? process.cwd(),
+        const result = await executeCommand(execCmd, pushArgs, {
+          cwd: process.cwd(),
           stdio: "pipe",
         });
         s.stop("Schema pushed to database (prisma db push)");
@@ -1446,7 +1417,7 @@ export async function executeDatabase(
         const fullMessage = errorOutput
           ? `${errorMessage}\n\nCaptured output:\n${errorOutput}`
           : errorMessage;
-        throw new SpawnError(pushCmd, pushArgs, fullMessage, {
+        throw new SpawnError(execCmd, pushArgs, fullMessage, {
           cause: executeError instanceof Error ? executeError : undefined,
         });
       }
