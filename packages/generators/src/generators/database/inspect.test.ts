@@ -19,7 +19,6 @@
 
 import { describe, expect, test } from "vitest";
 import {
-  PRISMA_PINNED_VERSION,
   DEFAULT_GENERATOR_OUTPUT,
   classifyPrismaVersion,
   parseVersion,

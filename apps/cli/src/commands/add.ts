@@ -122,7 +122,7 @@ export function registerAddCommand(program: Command): void {
           note(sections.join("\n\n"), "Error");
 
           // Outro: clear final message (red for error)
-          outro(pc.red(`Failed to setup database for ${requestedProvider})`));
+          outro(pc.red(`Failed to setup database for ${requestedProvider}`));
 
           process.exitCode = 1;
           return;
