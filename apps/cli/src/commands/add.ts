@@ -119,7 +119,7 @@ export function registerAddCommand(program: Command): void {
             `Info:\n  • Docs: ${err.docsUrl}\n  • Recovery: ${err.recoveryAction}`,
           ];
 
-          note(sections.join("\n\n"), "Error");
+          note(sections.join("\n\n"), pc.red("Error"));
 
           // Outro: clear final message (red for error)
           outro(pc.red(`Failed to setup database for ${requestedProvider}`));
