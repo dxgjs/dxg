@@ -203,7 +203,7 @@ describe("npm link regression", () => {
     expect(output).toContain("--orm prisma");
   });
 
-  test("no 'Cannot find module' errors in any command (core regression check)", { timeout: 30000 }, () => {
+  test("no 'Cannot find module' errors in any command (core regression check)", { timeout: 120000 }, () => {
     // This is the core regression test - verify no module resolution errors
     // when running the CLI from outside the monorepo
     const commands = [

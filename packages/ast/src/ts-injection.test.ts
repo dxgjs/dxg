@@ -16,6 +16,7 @@ function parse(code: string) {
   return parseModule(code, { sourceFileName: "test.ts" });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function stringify(ast: any): string {
   return ast.generate().code;
 }

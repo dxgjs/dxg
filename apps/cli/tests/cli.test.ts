@@ -3,7 +3,8 @@ import type { Command } from "commander";
 
 /** Strip ANSI escape codes from a string. */
 function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*m/g, "");
+  // eslint-disable-next-line no-control-regex
+  return str.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
 // Generator implementations are mocked: these tests exercise Commander

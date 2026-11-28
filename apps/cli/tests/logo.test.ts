@@ -7,7 +7,7 @@ import {
 } from "../src/logo";
 
 // eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;]*m/;
+const ANSI = /\u001b\[[0-9;]*m/;
 
 describe("logo", () => {
   test("has six lines of the same width, made of block characters only", () => {
@@ -24,6 +24,7 @@ describe("logo", () => {
     expect(lines).toHaveLength(LOGO_LINES.length);
     for (const line of lines) expect(line).toMatch(ANSI);
     // a gradient: no two consecutive lines share the same color code
+    // eslint-disable-next-line no-control-regex
     const colors = lines.map((line) => line.match(/\x1b\[38;5;(\d+)m/)?.[1]);
     expect(new Set(colors).size).toBe(lines.length);
   });

@@ -144,7 +144,7 @@ export async function runCategoryChecks(
   ctx: DoctorContext
 ): Promise<DoctorCheckResult[]> {
   // Import check modules dynamically to register their checks
-  await import(`./checks/${category}`);
+  await import(`./checks/${category}.js`);
 
   const checks = getDefaultChecks([category]);
   const results: DoctorCheckResult[] = [];

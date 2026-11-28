@@ -50,6 +50,7 @@ export function createMemoryFS(files: Record<string, string> = {}): MemoryFS {
   }
 
   return {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async readFile(filePath: string, _encoding?: string): Promise<string> {
       const normalized = normalizePath(filePath);
       const content = fs.get(normalized);
@@ -62,6 +63,7 @@ export function createMemoryFS(files: Record<string, string> = {}): MemoryFS {
       return content; // Always return string, encoding ignored for memory fs
     },
 
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     async writeFile(filePath: string, content: string, _encoding?: string): Promise<void> {
       const normalized = normalizePath(filePath);
       await ensureDir(dirname(normalized));

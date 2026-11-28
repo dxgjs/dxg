@@ -107,11 +107,17 @@ const FILE_PATH = Symbol("file-path");
  * Magicast wraps JSON content in an `exports` property (like ES modules).
  * Uses JSON5 for parsing (supports comments, trailing commas).
  */
+// Proxy handlers require `any` for dynamic property access — this is a legitimate
+// use case for dynamic proxies where property names are not known at compile time.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createJsonProxy(obj: any, filePath: string): any {
   // Magicast structure: { exports: <json-content> }
   const exportsObj = obj;
 
+  // Proxy handlers require `any` for dynamic property access — legitimate for proxies.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handler: ProxyHandler<any> = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     get(_target: any, prop: string | symbol): any {
       if (prop === JSON_CONTENT) return exportsObj;
       if (prop === FILE_PATH) return filePath;
@@ -129,6 +135,7 @@ function createJsonProxy(obj: any, filePath: string): any {
       }
       return value;
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     set(_target: any, prop: string | symbol, value: any): boolean {
       if (prop === JSON_CONTENT || prop === FILE_PATH) return false;
       if (prop === "exports") {
@@ -139,13 +146,16 @@ function createJsonProxy(obj: any, filePath: string): any {
       exportsObj[prop] = value;
       return true;
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     deleteProperty(_target: any, prop: string | symbol): boolean {
       if (prop === JSON_CONTENT || prop === FILE_PATH) return false;
       return delete exportsObj[prop];
     },
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
     ownKeys(_target: any): ArrayLike<string | symbol> {
       return [...Reflect.ownKeys(exportsObj), "exports"];
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     getOwnPropertyDescriptor(_target: any, prop: string | symbol): PropertyDescriptor | undefined {
       if (prop === JSON_CONTENT || prop === FILE_PATH) return undefined;
       if (prop === "exports") {
@@ -165,8 +175,12 @@ function createJsonProxy(obj: any, filePath: string): any {
 }
 
 /** Create proxy for the exports object (the actual JSON content) */
+// Proxy handlers require `any` for dynamic property access — legitimate for proxies.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function createExportsProxy(exportsObj: any, filePath: string): any {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handler: ProxyHandler<any> = {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     get(_target: any, prop: string | symbol): any {
       if (prop === JSON_CONTENT) return exportsObj;
       if (prop === FILE_PATH) return filePath;
@@ -179,18 +193,22 @@ function createExportsProxy(exportsObj: any, filePath: string): any {
       }
       return value;
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     set(_target: any, prop: string | symbol, value: any): boolean {
       if (prop === JSON_CONTENT || prop === FILE_PATH) return false;
       exportsObj[prop] = value;
       return true;
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     deleteProperty(_target: any, prop: string | symbol): boolean {
       if (prop === JSON_CONTENT || prop === FILE_PATH) return false;
       return delete exportsObj[prop];
     },
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
     ownKeys(_target: any): ArrayLike<string | symbol> {
       return Reflect.ownKeys(exportsObj).filter((k) => k !== JSON_CONTENT && k !== FILE_PATH);
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     getOwnPropertyDescriptor(_target: any, prop: string | symbol): PropertyDescriptor | undefined {
       if (prop === JSON_CONTENT || prop === FILE_PATH) return undefined;
       return Reflect.getOwnPropertyDescriptor(exportsObj, prop);
@@ -204,6 +222,8 @@ function createExportsProxy(exportsObj: any, filePath: string): any {
  * Uses JSON.stringify (not JSON5) to produce valid JSON with double quotes.
  * Note: This loses comments and trailing commas, but produces valid JSON.
  */
+// Proxy handler requires `any` for dynamic property access via symbol.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function stringifyJson(proxy: any): string {
   // Get the actual JSON content via the symbol (bypasses proxy traps)
   const obj = proxy[JSON_CONTENT];
@@ -213,10 +233,11 @@ function stringifyJson(proxy: any): string {
 
 export interface AstFile {
   /** The proxied module - mutate directly */
-  readonly ast: ProxifiedModule | any;
+  readonly ast: ProxifiedModule | Record<string, unknown>;
   /** Write the modified AST back to disk */
   write(): Promise<void>;
   /** Modify the AST with a callback function */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   modify(fn: (ast: any) => void | Promise<void>): Promise<void>;
 }
 
@@ -228,7 +249,7 @@ async function createAstHandleInternal(
 ): Promise<AstFile> {
   const resolvedPath = resolvePath(fs, filePath, cwd);
 
-  let ast: ProxifiedModule | any;
+  let ast: ProxifiedModule | Record<string, unknown>;
   if (fs === defaultFs) {
     // Real filesystem - use Magicast's loadFile which handles JSON/JS/TS appropriately
     ast = await loadFile(resolvedPath);
@@ -242,7 +263,7 @@ async function createAstHandleInternal(
       ast = createJsonProxy(parsed, resolvedPath);
     } else {
       // Parse as JS/TS using Magicast
-      ast = parseModule(content, { sourceFileName: resolvedPath }) as any;
+      ast = parseModule(content, { sourceFileName: resolvedPath }) as ProxifiedModule;
     }
   }
 
@@ -253,19 +274,23 @@ async function createAstHandleInternal(
     async write() {
       if (fs === defaultFs) {
         // Real filesystem - use Magicast's writeFile
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await writeFile(ast as any, resolvedPath);
       } else {
         // In-memory filesystem - serialize appropriately
         let code: string;
-        if (isJsonFile(filePath) && ast[JSON_CONTENT]) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        if (isJsonFile(filePath) && (ast as any)[JSON_CONTENT]) {
           code = stringifyJson(ast);
         } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const generated = (ast as any).generate?.();
           code = generated?.code ?? "";
         }
         await fs.writeFile(resolvedPath, code, "utf-8");
       }
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async modify(fn: (ast: any) => void | Promise<void>) {
       await fn(ast);
       await handle.write();
@@ -323,11 +348,13 @@ export async function addNpmScript(
   const handle = await createAstHandleInternal("package.json", fs, cwd);
 
   // Mutate the proxied AST directly - Magicast uses exports.scripts for package.json
-  handle.ast.exports.scripts = handle.ast.exports.scripts || {};
-  const hadScript = name in handle.ast.exports.scripts;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ast = handle.ast as any;
+  ast.exports.scripts = ast.exports.scripts || {};
+  const hadScript = name in ast.exports.scripts;
 
   if (!hadScript) {
-    handle.ast.exports.scripts[name] = command;
+    ast.exports.scripts[name] = command;
     await handle.write();
   }
 
@@ -362,10 +389,12 @@ export async function addNpmScripts(
 
   const added: string[] = [];
 
-  handle.ast.exports.scripts = handle.ast.exports.scripts || {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ast = handle.ast as any;
+  ast.exports.scripts = ast.exports.scripts || {};
   for (const [name, cmd] of Object.entries(scripts)) {
-    if (!(name in handle.ast.exports.scripts)) {
-      handle.ast.exports.scripts[name] = cmd;
+    if (!(name in ast.exports.scripts)) {
+      ast.exports.scripts[name] = cmd;
       added.push(name);
     }
   }

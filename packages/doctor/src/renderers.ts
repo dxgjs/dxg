@@ -33,6 +33,7 @@ const CATEGORY_LABELS: Record<DoctorCategory, string> = {
  * Strip ANSI escape codes from a string to get visual length.
  */
 function stripAnsi(str: string): string {
+  // eslint-disable-next-line no-control-regex
   return str.replace(/\u001b\[[0-9;]*m/g, "");
 }
 

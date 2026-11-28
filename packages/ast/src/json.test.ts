@@ -23,8 +23,11 @@ describe("@dxgjs/ast JSON handling", () => {
       });
 
       const handle = await createAstHandle(fs, "package.json");
-      expect(handle.ast.name).toBe("my-app");
-      expect(handle.ast.scripts.dev).toBe("next dev");
+      // Cast to any for dynamic property access on the proxy
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ast = handle.ast as any;
+      expect(ast.name).toBe("my-app");
+      expect(ast.scripts.dev).toBe("next dev");
     });
 
     it("preserves key order when adding new script", async () => {
@@ -38,7 +41,9 @@ describe("@dxgjs/ast JSON handling", () => {
       });
 
       const handle = await createAstHandle(fs, "package.json");
-      handle.ast.scripts.test = "vitest run";
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ast = handle.ast as any;
+      ast.scripts.test = "vitest run";
       await handle.write();
 
       const result = await fs.readFile("package.json", "utf-8");
