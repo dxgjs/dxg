@@ -71,6 +71,7 @@ export function ensureImport(
   ast: ProxifiedModule,
   specifier: string,
   from: string,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _kind: ImportKind = "value"
 ): boolean {
   const importsMap = getImportsMap(ast);
@@ -185,8 +186,6 @@ function getBody(ast: ProxifiedModule): any[] {
 }
 
 /** Ensure a named export exists (local or re-export) */
-// AST node callbacks use `any` for Babel node types — legitimate for AST manipulation.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function ensureExport(
   ast: ProxifiedModule,
   specifier: string,
@@ -197,11 +196,13 @@ export function ensureExport(
   if (from) {
     // Re-export: export { specifier } from "from"
     const existingReExport = body.find(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (n: any) => n.type === "ExportNamedDeclaration" && n.source?.value === from
     );
 
     if (existingReExport) {
       const hasSpecifier = existingReExport.specifiers.some(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         (s: any) => s.local?.name === specifier || s.exported?.name === specifier
       );
       if (!hasSpecifier) {
@@ -232,10 +233,12 @@ export function ensureExport(
 
   // Local export - check if already exported
   const hasLocalExport = body.some(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (n: any) =>
       n.type === "ExportNamedDeclaration" &&
       (n.declaration &&
         (n.declaration.id?.name === specifier ||
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           n.declaration.declarations?.some((d: any) => d.id?.name === specifier)))
   );
 
@@ -243,11 +246,13 @@ export function ensureExport(
 
   // Find the declaration to export
   const declarationIdx = body.findIndex(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (n: any) =>
       (n.type === "FunctionDeclaration" ||
         n.type === "ClassDeclaration" ||
         n.type === "VariableDeclaration") &&
       (n.id?.name === specifier ||
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         n.declarations?.some((d: any) => d.id?.name === specifier))
   );
 
@@ -267,9 +272,11 @@ export function ensureExport(
 }
 
 /** Ensure a default export exists */
-// AST node callbacks use `any` for Babel node types — legitimate for AST manipulation.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function ensureDefaultExport(ast: ProxifiedModule, declaration: any): boolean {
+export function ensureDefaultExport(
+  ast: ProxifiedModule,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  declaration: any
+): boolean {
   const body = getBody(ast);
   const existingDefault = body.find(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -290,12 +297,11 @@ export function ensureDefaultExport(ast: ProxifiedModule, declaration: any): boo
 }
 
 /** Add a property to an object expression in the AST (e.g., config object) */
-// AST node callbacks use `any` for Babel node types — legitimate for AST manipulation.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function addPropertyToObject(
   ast: ProxifiedModule,
   objectPath: string[],
   key: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   value: any
 ): boolean {
   // Navigate to the object through the AST
@@ -309,19 +315,23 @@ export function addPropertyToObject(
   for (const segment of objectPath) {
     if (Array.isArray(obj)) {
       // If it's an array (like body), find the element
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const found = obj.find((n: any) => {
-        if (n.type === "VariableDeclaration") {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return n.declarations.some((d: any) => d.id?.name === segment);
+      const found = obj.find(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (n: any) => {
+          if (n.type === "VariableDeclaration") {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            return n.declarations.some((d: any) => d.id?.name === segment);
+          }
+          return n.id?.name === segment || n.name === segment;
         }
-        return n.id?.name === segment || n.name === segment;
-      });
+      );
       if (!found) return false;
       // Get the initializer for VariableDeclaration
       if (found.type === "VariableDeclaration") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const declarator = found.declarations.find((d: any) => d.id?.name === segment);
+        const declarator = found.declarations.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (d: any) => d.id?.name === segment
+        );
         obj = declarator?.init;
       } else {
         obj = found;
@@ -333,8 +343,8 @@ export function addPropertyToObject(
   }
 
   if (obj && obj.properties) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const exists = obj.properties.some(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (p: any) => p.key?.name === key || p.key?.value === key
     );
     if (exists) return false;
@@ -352,8 +362,6 @@ export function addPropertyToObject(
 }
 
 /** Remove a property from an object expression in the AST */
-// AST node callbacks use `any` for Babel node types — legitimate for AST manipulation.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function removePropertyFromObject(
   ast: ProxifiedModule,
   objectPath: string[],
@@ -365,18 +373,22 @@ export function removePropertyFromObject(
   // First, find the target node in the body
   for (const segment of objectPath) {
     if (Array.isArray(obj)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const found = obj.find((n: any) => {
-        if (n.type === "VariableDeclaration") {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          return n.declarations.some((d: any) => d.id?.name === segment);
+      const found = obj.find(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (n: any) => {
+          if (n.type === "VariableDeclaration") {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            return n.declarations.some((d: any) => d.id?.name === segment);
+          }
+          return n.id?.name === segment || n.name === segment;
         }
-        return n.id?.name === segment || n.name === segment;
-      });
+      );
       if (!found) return false;
       if (found.type === "VariableDeclaration") {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const declarator = found.declarations.find((d: any) => d.id?.name === segment);
+        const declarator = found.declarations.find(
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (d: any) => d.id?.name === segment
+        );
         obj = declarator?.init;
       } else {
         obj = found;
@@ -388,8 +400,8 @@ export function removePropertyFromObject(
   }
 
   if (obj && obj.properties) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const idx = obj.properties.findIndex(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (p: any) => p.key?.name === key || p.key?.value === key
     );
     if (idx >= 0) {
@@ -402,37 +414,49 @@ export function removePropertyFromObject(
 }
 
 /** Find a node by type in the module body */
-// AST node callbacks use `any` for Babel node types — legitimate for AST manipulation.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function findNode(
   ast: ProxifiedModule,
   type: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   predicate?: (node: any) => boolean
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): any | null {
   const body = getBody(ast);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const nodes = body.filter((n: any) => n.type === type);
+  const nodes = body.filter(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (n: any) => n.type === type
+  );
   return nodes.find(predicate ?? (() => true)) ?? null;
 }
 
 /** Find all nodes by type in the module body */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function findNodes(ast: ProxifiedModule, type: string): any[] {
-  const body = getBody(ast);
+export function findNodes(ast: ProxifiedModule, type: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return body.filter((n: any) => n.type === type);
+): any[] {
+  const body = getBody(ast);
+  return body.filter(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (n: any) => n.type === type
+  );
 }
 
 /** Insert a statement at a specific position in the module body */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function insertStatement(ast: ProxifiedModule, statement: any, index: number): void {
+export function insertStatement(
+  ast: ProxifiedModule,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  statement: any,
+  index: number
+): void {
   const body = getBody(ast);
   body.splice(index, 0, statement);
 }
 
 /** Append a statement to the end of the module body */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function appendStatement(ast: ProxifiedModule, statement: any): void {
+export function appendStatement(
+  ast: ProxifiedModule,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  statement: any
+): void {
   const body = getBody(ast);
   body.push(statement);
 }
@@ -448,22 +472,24 @@ export function getImports(ast: ProxifiedModule): Array<{ from: string; specifie
 }
 
 /** Get all export statements */
-// AST node callbacks use `any` for Babel node types — legitimate for AST manipulation.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getExports(ast: ProxifiedModule): Array<{ name: string; isDefault: boolean; isReExport: boolean }> {
   const body = getBody(ast);
   return body
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((n: any) => n.type === "ExportNamedDeclaration" || n.type === "ExportDefaultDeclaration")
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .map((n: any) => {
-      if (n.type === "ExportDefaultDeclaration") {
-        return { name: n.declaration?.id?.name ?? "default", isDefault: true, isReExport: false };
+    .filter(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (n: any) => n.type === "ExportNamedDeclaration" || n.type === "ExportDefaultDeclaration"
+    )
+    .map(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (n: any) => {
+        if (n.type === "ExportDefaultDeclaration") {
+          return { name: n.declaration?.id?.name ?? "default", isDefault: true, isReExport: false };
+        }
+        return {
+          name: n.declaration?.id?.name ?? n.specifiers?.[0]?.local?.name,
+          isDefault: false,
+          isReExport: !!n.source,
+        };
       }
-      return {
-        name: n.declaration?.id?.name ?? n.specifiers?.[0]?.local?.name,
-        isDefault: false,
-        isReExport: !!n.source,
-      };
-    });
+    );
 }
