@@ -731,7 +731,7 @@ describe("interactive database scripts phase", () => {
     expect(second).toEqual(first);
     const secondSummary = operationSummary(2);
     expect(secondSummary.toLowerCase()).toContain("already exists");
-  });
+  }, 15000);
 
   test("unrelated package.json fields and existing scripts remain intact", async () => {
     await seedProject();

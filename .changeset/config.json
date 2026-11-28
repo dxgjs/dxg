@@ -16,5 +16,8 @@
     "version": true,
     "tag": false
   },
-  "ignore": []
+  "ignore": [
+    "@dxgjs/eslint-config",
+    "@dxgjs/typescript-config"
+  ]
 }

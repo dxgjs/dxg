@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency: release-${{ github.ref }}
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release
+    if: github.repository == 'dxgjs/dxg'
+    runs-on: ubuntu-latest
+    # Optionnel : crée un Environment "release" avec reviewers obligatoires
+    # dans Settings > Environments, puis décommente la ligne suivante.
+    # environment: release
+    permissions:
+      contents: write # tags, GitHub Releases, branche "Version Packages"
+      pull-requests: write # PR "Version Packages"
+      id-token: write # npm trusted publishing (OIDC) + provenance
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+        with:
+          version: 11.18.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # Node 24 embarque npm >= 11.5.1, requis pour le trusted publishing.
+          node-version: 24
+          cache: pnpm
+
+      - name: Check npm version
+        run: npm -v
+
+      # Pas de "registry npmmirror" ici : on publie avec le registre officiel.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Check (lint + typecheck + tests)
+        run: pnpm check
+
+      - name: Version PR or publish
+        uses: changesets/action@66d7d1ddafddf1ef45f98ee51a7496f9cdadb2f4 # v2.1.2
+        with:
+          version-script: pnpm changeset version
+          publish-script: pnpm changeset publish
+          pr-title: "chore: version packages"
+          commit-message: "chore: version packages"
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
